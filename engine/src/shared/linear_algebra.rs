@@ -18,7 +18,8 @@ use faer::{Mat, Side};
 pub enum RankDeficient {
     /// 列ピボットQRが、行列がフルカラムランクでないと判定した。
     Columns,
-    /// Gram行列`X'X`のCholesky分解が失敗した。
+    /// Gram行列`X'X`のCholesky分解が失敗した。または、`OrthonormalDesign::new_checked`が、列を
+    /// 単位ノルムに揃えた設計行列の条件数が上限を超えると判定した（同じ受け入れ範囲を保つため）。
     GramMatrix,
 }
 

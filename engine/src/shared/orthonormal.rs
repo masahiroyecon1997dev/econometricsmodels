@@ -19,10 +19,23 @@
 //! 先に行うか（[`OrthonormalDesign::new`]。ここでは対角が厳密に0または非有限のときだけ防御的に
 //! 弾く）、`R`（k×k）の列ピボットQRで行う（[`OrthonormalDesign::new_checked`]。`X = QR`の
 //! `R`は`X`と同じ特異値を持つので、n×kの列ピボットQRを別に走らせずに済む）。
+//!
+//! **条件数のガード**: [`OrthonormalDesign::new_checked`]は、ランク判定のあとに、列を単位ノルム
+//! に揃えた`R`の条件数が[`MAX_EQUILIBRATED_CONDITION`]を超えると[`RankDeficient::GramMatrix`]で
+//! 弾く。QRなら`cond(X)`が`1e8`を超える設計も推定できてしまうが、`X'X`のCholeskyで止めていた
+//! 従来の受け入れ範囲（列のスケールによらず、列を揃えた`cond(X)`で約`5e7`）を、手法によらず
+//! 保つため。生の`R`の条件数ではなく列を揃えたものを使うのは、列の単位で境界が動かないように
+//! するため（Choleskyの成否は列の一様な拡大縮小に依らない）。
 
 use faer::{Mat, MatRef};
 
 use super::linear_algebra::{RankDeficient, checked_col_piv_qr};
+
+/// 列を単位ノルムに揃えた設計行列の条件数の上限。これを超える設計は[`RankDeficient::GramMatrix`]
+/// で弾く（`OrthonormalDesign::new_checked`）。`X'X`のCholeskyが成功と失敗に分かれていた境界
+/// （凍結した準共線データで、2.8e7までは成功・9.2e7から失敗）の間に置いた暫定値。この値を
+/// 緩めるのは、受け入れる設計が増えるだけで破壊的でない（厳しくするのは破壊的）。
+pub(crate) const MAX_EQUILIBRATED_CONDITION: f64 = 5.0e7;
 
 /// 全体Wald検定に使う直交座標の組。推定量が保持し、末尾`q`列の検定にも使う。
 #[derive(Debug, Clone)]
@@ -51,11 +64,13 @@ impl OrthonormalDesign {
         Self::decompose(x, false)
     }
 
-    /// [`Self::new`]に加えて、`R`（k×k）の列ピボットQRでランク落ちを判定する
-    /// （`checked_col_piv_qr`と同じ閾値）。`Q`を作る前に判定するので、ランク落ちでは`Q`を作らない。
+    /// [`Self::new`]に加えて、`R`（k×k）の列ピボットQRでランク落ちを判定し（`checked_col_piv_qr`と
+    /// 同じ閾値）、列を揃えた条件数が[`MAX_EQUILIBRATED_CONDITION`]以内であることを確かめる。
+    /// `Q`を作る前に判定するので、弾く入力では`Q`を作らない。
     ///
     /// # Errors
-    /// `x`がフルカラムランクでないとき[`RankDeficient::Columns`]。
+    /// `x`がフルカラムランクでないとき[`RankDeficient::Columns`]。フルランクでも、列を揃えた
+    /// 条件数が上限を超える（または特異値分解が収束しない）とき[`RankDeficient::GramMatrix`]。
     pub(crate) fn new_checked(x: &Mat<f64>) -> Result<Self, RankDeficient> {
         Self::decompose(x, true)
     }
@@ -81,6 +96,10 @@ impl OrthonormalDesign {
         }
         if check_rank {
             checked_col_piv_qr(&r)?;
+            let condition = equilibrated_condition(&r);
+            if condition.is_nan() || condition > MAX_EQUILIBRATED_CONDITION {
+                return Err(RankDeficient::GramMatrix);
+            }
         }
         Ok(Self {
             q: qr.compute_thin_Q(),
@@ -121,6 +140,28 @@ impl OrthonormalDesign {
         Mat::from_fn(v.nrows(), v.ncols(), |i, j| {
             0.5 * (*v.get(i, j) + *v.get(j, i))
         })
+    }
+}
+
+/// `r`（k×k、`X = QR`の`R`）の列を単位ノルムに揃えた行列の条件数（最大特異値/最小特異値）。
+/// `R`の列ノルムは`X`の列ノルムと等しいので、`X`の列を揃えた条件数と同じ値になる。特異値分解が
+/// 失敗したとき、または最小特異値が0のときは`f64::INFINITY`（呼び出し側が弾く）。
+fn equilibrated_condition(r: &Mat<f64>) -> f64 {
+    let k = r.ncols();
+    let norms: Vec<f64> = (0..k)
+        .map(|j| (0..=j).map(|i| r.get(i, j).powi(2)).sum::<f64>().sqrt())
+        .collect();
+    let equilibrated = Mat::from_fn(k, k, |i, j| *r.get(i, j) / norms[j]);
+    let Ok(svd) = equilibrated.svd() else {
+        return f64::INFINITY;
+    };
+    let singular_values = svd.S().column_vector();
+    let largest = *singular_values.get(0);
+    let smallest = *singular_values.get(k - 1);
+    if smallest > 0.0 {
+        largest / smallest
+    } else {
+        f64::INFINITY
     }
 }
 
@@ -324,5 +365,125 @@ mod tests {
         let design = OrthonormalDesign::new(&Mat::<f64>::zeros(5, 0)).unwrap();
         assert_eq!(design.q().ncols(), 0);
         assert_eq!(design.identity().nrows(), 0);
+    }
+    /// 切片・`x1`・`x2 = x1 + eps·ノイズ`の設計（`near_collinear`と同じ列）で、傾きの2列だけを
+    /// `scale`倍する。
+    fn near_collinear_design(eps: f64, scale: f64) -> Mat<f64> {
+        let (x, _, _) = near_collinear(eps);
+        Mat::from_fn(x.nrows(), 3, |i, j| {
+            if j == 0 {
+                *x.get(i, j)
+            } else {
+                scale * *x.get(i, j)
+            }
+        })
+    }
+
+    #[test]
+    fn equilibrated_condition_is_the_condition_number_of_the_unit_norm_columns() {
+        // 列が単位ベクトル(1, 0)と(0.8, 0.6)なら、特異値は√(1±0.8)で条件数は√(1.8/0.2) = 3。
+        let r = Mat::from_fn(2, 2, |i, j| [[1.0, 0.8], [0.0, 0.6]][i][j]);
+        assert_relative(equilibrated_condition(&r), 3.0, 1e-12);
+        // 列の一様な拡大縮小では変わらない。
+        let scaled = Mat::from_fn(2, 2, |i, j| *r.get(i, j) * if j == 0 { 1e6 } else { 1e-6 });
+        assert_relative(equilibrated_condition(&scaled), 3.0, 1e-12);
+        // 直交する列は、列のスケールが違っても条件数1。
+        let orthogonal = Mat::from_fn(2, 2, |i, j| if i == j { [1e6, 1e-6][j] } else { 0.0 });
+        assert_relative(equilibrated_condition(&orthogonal), 1.0, 1e-12);
+    }
+
+    #[test]
+    fn new_checked_boundary_does_not_move_with_the_column_scale() {
+        // 列を揃えた条件数は、eps=1e-7で約2.8e7（上限5e7の内側）、eps=3e-8で約9.2e7（外側）。
+        // 傾きの列の単位（1e-6〜1e6）が変わっても、合否は変わらない。
+        for scale in [1.0, 1e6, 1e-6] {
+            assert!(
+                OrthonormalDesign::new_checked(&near_collinear_design(1e-7, scale)).is_ok(),
+                "scale={scale}: cond below the limit must be accepted"
+            );
+            assert_eq!(
+                OrthonormalDesign::new_checked(&near_collinear_design(3e-8, scale)).unwrap_err(),
+                RankDeficient::GramMatrix,
+                "scale={scale}: cond above the limit must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn new_does_not_apply_the_condition_guard() {
+        // 同じ設計を、ガードなしの`new`は受理する（呼び出し側が先にランクを保証する前提）。
+        let x = near_collinear_design(3e-8, 1.0);
+        assert!(OrthonormalDesign::new(&x).is_ok());
+        assert!(OrthonormalDesign::new_checked(&x).is_err());
+    }
+
+    #[test]
+    fn new_checked_accepts_a_well_conditioned_design_with_the_same_q_as_new() {
+        let (x, y, _) = near_collinear(1.0);
+        let checked = OrthonormalDesign::new_checked(&x).unwrap();
+        let unchecked = OrthonormalDesign::new(&x).unwrap();
+        let (b_checked, b_unchecked) = (checked.coordinates(&y), unchecked.coordinates(&y));
+        for i in 0..x.ncols() {
+            assert_eq!(*b_checked.get(i, 0), *b_unchecked.get(i, 0));
+        }
+    }
+
+    #[test]
+    fn new_checked_rejects_rank_deficient_designs_like_checked_col_piv_qr() {
+        let n = 12;
+        let x1 = |i: usize| ((i * 7) % 5) as f64 - 2.0;
+        let designs: Vec<(&str, Mat<f64>)> = vec![
+            (
+                "duplicate column",
+                Mat::from_fn(n, 3, |i, j| if j == 0 { 1.0 } else { x1(i) }),
+            ),
+            (
+                "scaled duplicate",
+                Mat::from_fn(n, 3, |i, j| match j {
+                    0 => 1.0,
+                    1 => x1(i),
+                    _ => 3.0 * x1(i),
+                }),
+            ),
+            (
+                "dummy variable trap",
+                Mat::from_fn(n, 3, |i, j| match j {
+                    0 => 1.0,
+                    1 => f64::from(u8::from(i % 2 == 0)),
+                    _ => f64::from(u8::from(i % 2 == 1)),
+                }),
+            ),
+            (
+                "all-zero column",
+                Mat::from_fn(n, 3, |i, j| match j {
+                    0 => 1.0,
+                    1 => x1(i),
+                    _ => 0.0,
+                }),
+            ),
+            (
+                "NaN column",
+                Mat::from_fn(n, 3, |i, j| match j {
+                    0 => 1.0,
+                    1 => x1(i),
+                    _ => f64::NAN,
+                }),
+            ),
+            ("more columns than rows", Mat::<f64>::zeros(2, 3)),
+        ];
+        for (name, x) in designs {
+            assert!(checked_col_piv_qr(&x).is_err(), "{name}: precondition");
+            assert_eq!(
+                OrthonormalDesign::new_checked(&x).unwrap_err(),
+                RankDeficient::Columns,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn new_checked_accepts_a_design_without_columns() {
+        let design = OrthonormalDesign::new_checked(&Mat::<f64>::zeros(5, 0)).unwrap();
+        assert_eq!(design.q().ncols(), 0);
     }
 }

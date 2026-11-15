@@ -89,7 +89,9 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
   1本を使い、n×kの列ピボットQRと`(X'X)⁻¹`は走らせない（時間の根拠は`engine/src/linear/CLAUDE.md`）。
   以下の特異性判定は、この`R`（k×k）の列ピボットQRに対して行う（`X`自体の列ピボットQRと同じ特異値を持ち、
   閾値も同じ。他の推定量は`X`の列ピボットQRで求める従来の形）。以下の説明のうち`X`の`col_piv_qr`とあるのは、
-  OLSでは`R`の`col_piv_qr`に読み替える。
+  OLSでは`R`の`col_piv_qr`に読み替える。さらに、列を単位ノルムに揃えた`R`の条件数が5e7を超える設計は
+  `MATRIX_NEAR_SINGULAR`（`DESIGN_GRAM`）で弾く（`X'X`のCholeskyで止めていた従来の受け入れ範囲を保つ。
+  QRのままだと`cond(X)`が1e8〜1e15の設計も通るが、そこでは係数が静かに大きくずれる）。
   `X'Xβ=X'y`をCholeskyで解く方式は
   不採用（`X'X`の明示計算で条件数が2乗になり不利な上、QRなら特異性検出と計算を同時に行える）。
 - 特異性判定は相対閾値: `col_piv_qr`の`R`対角成分のうち`threshold = k * f64::EPSILON * |R[0,0]|`

@@ -160,6 +160,39 @@ def test_iv_wald_and_wu_hausman_are_invariant_to_reparametrization(
     _check(fit, df, _reparametrize(df, "x1", "x2", eps), f"IV {cov_type}")
 
 
+@pytest.mark.parametrize("eps", EPS)
+@pytest.mark.parametrize("gmm_type", ["one_step", "two_step"])
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hac", "cluster"])
+def test_iv_gmm_wald_and_hansen_j_are_invariant_to_reparametrization(
+    cov_type, gmm_type, eps
+):
+    options = IVOptions(
+        estimator="gmm",
+        gmm_type=gmm_type,
+        gmm_weight_type="robust" if gmm_type == "two_step" else None,
+        cov_type=cov_type,
+        cluster="g" if cov_type == "cluster" else None,
+        hac_time="t" if cov_type == "hac" else None,
+    )
+
+    def fit(df: pl.DataFrame) -> dict[str, float]:
+        res = IV(
+            df,
+            "y",
+            ["x1", "x2"],
+            ["endog"],
+            ["z1", "z2", "z3"],
+            options=options,
+        ).fit()
+        return {
+            "wald": res.wald_statistic,
+            "hansen_j": res.overid_statistic,
+        }
+
+    df = _with_time(_iv_data(eps))
+    _check(fit, df, _reparametrize(df, "x1", "x2", eps), f"IV GMM {cov_type}")
+
+
 # ── FE・FE-IV（dk を含む） ────────────────────────────────────────────
 
 
@@ -206,6 +239,41 @@ def test_fe_iv_wald_and_wu_hausman_are_invariant_to_reparametrization(
 
     df = _with_time(_panel_data(eps))
     _check(fit, df, _reparametrize(df, "x1", "x3", eps), f"FE-IV {cov_type}")
+
+
+@pytest.mark.parametrize("eps", EPS)
+@pytest.mark.parametrize("gmm_type", ["one_step", "two_step"])
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster", "dk"])
+def test_fe_iv_gmm_wald_and_hansen_j_are_invariant_to_reparametrization(
+    cov_type, gmm_type, eps
+):
+    options = FEIVOptions(
+        estimator="gmm",
+        gmm_type=gmm_type,
+        gmm_weight_type="robust" if gmm_type == "two_step" else None,
+        cov_type=cov_type,
+        dk_time="period" if cov_type == "dk" else None,
+    )
+
+    def fit(df: pl.DataFrame) -> dict[str, float]:
+        res = FEIV(
+            df,
+            y="y",
+            x_exog=["x1", "x3"],
+            x_endog=["endog"],
+            instruments=["z1", "z2", "z3"],
+            effects=["entity"],
+            options=options,
+        ).fit()
+        return {
+            "wald": res.wald_statistic,
+            "hansen_j": res.overid_statistic,
+        }
+
+    df = _with_time(_panel_data(eps))
+    _check(
+        fit, df, _reparametrize(df, "x1", "x3", eps), f"FE-IV GMM {cov_type}"
+    )
 
 
 # ── RE ────────────────────────────────────────────────────────────────

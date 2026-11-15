@@ -120,6 +120,8 @@ pub(crate) fn gmm_initial_step(
     let beta = solution.beta().clone();
     let residuals = y - x * &beta;
     let sigma2_0: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
+    // 初期推定は`Z'Z`のQR分解で白色化した（重みは`Z'Z`）。Hansen Jの`S`は`σ̂²₀Z'Z`。
+    let solution = solution.with_weight_scale(sigma2_0);
     let classical_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
     Ok(GmmInitialStep {
         ztz,
@@ -222,7 +224,13 @@ pub(crate) fn gmm_iterate(
                 }
                 WeightType::Hac { .. } => WhitenedInstruments::from_weight(z, &s_next)?,
             };
-            let solution_next = gmm_solve(x, y, whitening)?;
+            let mut solution_next = gmm_solve(x, y, whitening)?;
+            if matches!(weight_type, WeightType::Classical) {
+                // 古典的な重み`σ̂²Z'Z`（`σ̂²`は直前の残差）。白色化は`Z'Z`のQR分解。
+                let sigma2: f64 =
+                    (0..n).map(|i| residuals.get(i, 0).powi(2)).sum::<f64>() / (n as f64);
+                solution_next = solution_next.with_weight_scale(sigma2);
+            }
             let beta_next = solution_next.beta().clone();
             n_iter += 1;
 

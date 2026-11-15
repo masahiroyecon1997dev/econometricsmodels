@@ -3,7 +3,7 @@
 use faer::Mat;
 
 use crate::iv::common::{IvError, IvInput};
-use crate::shared::gmm;
+use crate::shared::gmm::GmmSolution;
 
 /// [`hansen_j_test`]の戻り値。
 pub(super) struct HansenJTest {
@@ -27,9 +27,8 @@ pub(super) struct HansenJTest {
 /// ここで決めて渡す。
 pub(super) fn hansen_j_test(
     input: &IvInput,
-    z: &Mat<f64>,
+    solution: &GmmSolution,
     residuals: &Mat<f64>,
-    s_used: &Mat<f64>,
 ) -> Result<Option<HansenJTest>, IvError> {
     let q = input.k_instruments();
     let k_endog = input.k_endog();
@@ -37,7 +36,7 @@ pub(super) fn hansen_j_test(
         return Ok(None);
     }
     let df = q - k_endog;
-    let test = gmm::hansen_j_test(z, residuals, s_used, df)?;
+    let test = solution.hansen_j_test(residuals, 1.0, df)?;
     Ok(Some(HansenJTest {
         statistic: test.statistic,
         p_value: test.p_value,

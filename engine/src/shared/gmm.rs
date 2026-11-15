@@ -166,9 +166,53 @@ pub(crate) struct GmmSolution {
     coordinates: Mat<f64>,
     beta: Mat<f64>,
     z_tilde: Mat<f64>,
+    /// 点推定に使った重み`S_used`が、白色化の元の重み`S_factor`の何倍か（`S_used = c · S_factor`）。
+    /// `Z'Z`の`Z`のQR分解で白色化するとき（初期推定・古典的な重み）は`σ̂²`、それ以外は1。
+    weight_scale: f64,
 }
 
 impl GmmSolution {
+    /// 点推定に使った重みが、白色化の元の重みの`scale`倍であることを記録する（Hansen Jの尺度）。
+    /// 係数・共分散・Wald統計量は重みのスカラー倍で変わらない。
+    pub(crate) fn with_weight_scale(mut self, scale: f64) -> Self {
+        self.weight_scale = scale;
+        self
+    }
+
+    /// Hansen J統計量 `J = (Z'ê)'S_used⁻¹(Z'ê) = ‖Z̃'ê‖²/c`（`n`で割らない）。白色化した空間の
+    /// 内積なので、`S`を作って分解しない。`extra_scale`は`S_used`にさらに掛ける倍率（FEの吸収した効果の
+    /// 自由度の補正。`S`が`extra_scale`倍なら`J`は`1/extra_scale`倍）。
+    pub(crate) fn hansen_j_statistic(&self, residuals: &Mat<f64>, extra_scale: f64) -> f64 {
+        let moments = self.z_tilde.transpose() * residuals;
+        let squared: f64 = (0..moments.nrows())
+            .map(|i| moments.get(i, 0).powi(2))
+            .sum();
+        squared / (self.weight_scale * extra_scale)
+    }
+
+    /// Hansen J検定（統計量とχ²のp値）。自由度`df`は呼び出し側が決める（1以上）。
+    ///
+    /// # Errors
+    /// `df`が0のとき（呼び出し側の誤り）、`CommonError::Internal`。
+    pub(crate) fn hansen_j_test(
+        &self,
+        residuals: &Mat<f64>,
+        extra_scale: f64,
+        df: usize,
+    ) -> Result<HansenJ, CommonError> {
+        if df == 0 {
+            return Err(CommonError::internal(
+                "the Hansen J test needs at least one degree of freedom",
+            ));
+        }
+        let statistic = self.hansen_j_statistic(residuals, extra_scale);
+        let chi2 = ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
+        Ok(HansenJ {
+            statistic,
+            p_value: chi2.sf(statistic),
+        })
+    }
+
     /// 係数`β̂`（k×1）。
     pub(crate) fn beta(&self) -> &Mat<f64> {
         &self.beta
@@ -229,6 +273,7 @@ pub(crate) fn gmm_solve(
         coordinates,
         beta,
         z_tilde: whitening.z_tilde,
+        weight_scale: 1.0,
     })
 }
 
@@ -293,7 +338,9 @@ pub(crate) struct HansenJ {
     pub(crate) p_value: f64,
 }
 
-/// Hansen J統計量`J = (Z'ê)'S⁻¹(Z'ê)`(`n`で割らない。理由は[`hansen_j_test`])。自由度を持たないので、
+/// Hansen J統計量`J = (Z'ê)'S⁻¹(Z'ê)`(`n`で割らない。理由は[`hansen_j_test`])。`S`を作って分解する
+/// 形で、白色化した解を持たない呼び出し側（C統計量）が使う。解を持つ側は
+/// [`GmmSolution::hansen_j_test`]（`S`の条件数の2乗で精度を失わない）。自由度を持たないので、
 /// 丁度識別(`J = 0`)も計算できる。
 ///
 /// # Errors
@@ -317,6 +364,7 @@ pub(crate) fn hansen_j_statistic(
         .sum())
 }
 
+#[cfg(test)]
 /// Hansen J過剰識別検定: `J = (Z'ê)'S⁻¹(Z'ê)`を`χ²(df)`と比べる。
 ///
 /// **`n`で割らない**: `S`が`n`で正規化していない生の和(`S = Σᵢ êᵢ²zᵢzᵢ'`など)なら、標準形

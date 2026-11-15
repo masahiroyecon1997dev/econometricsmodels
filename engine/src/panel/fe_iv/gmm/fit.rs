@@ -4,7 +4,9 @@
 
 use super::hansen_j::fe_hansen_j;
 use super::{FeGmmEstimator, FeGmmType};
-use crate::panel::common::{PanelError, PanelMoment, PanelMomentInput, panel_moment_covariance};
+use crate::panel::common::{
+    PanelCovType, PanelError, PanelMoment, PanelMomentInput, panel_moment_covariance,
+};
 use crate::panel::fe::{
     FeAbsorption, FeCovType, FeEffects, fe_r_squared_between, fe_r_squared_overall,
 };
@@ -137,9 +139,8 @@ pub(super) fn fit_fe_gmm(
     let hansen_j = if k_endog > 0 && k_instruments > k_endog {
         let homoskedastic_weight = gmm_type.has_homoskedastic_weight();
         Some(fe_hansen_j(
-            &z,
+            &solution,
             &residuals,
-            &s_used,
             homoskedastic_weight,
             neffects,
             k_instruments - k_endog,
@@ -155,7 +156,15 @@ pub(super) fn fit_fe_gmm(
     // `Ω̂`は白色化した`Z̃ = Z L⁻ᵀ`から組み立てて、直接`Ω̃ = L⁻¹Ω̂L⁻ᵀ`を得る（`iv::gmm`と同じ。
     // HC2・HC3のレバレッジ`z_i'(Z'Z)⁻¹z_i`は`Z`の列の線形変換で変わらない）。
     let z_tilde = solution.z_tilde();
-    let ztz_tilde = z_tilde.transpose() * z_tilde;
+    // `Z̃'Z̃`は古典的な`Ω̂`と、HC2・HC3のレバレッジにだけ使う（他では作らない）。
+    let ztz_tilde = if matches!(
+        cov_type,
+        PanelCovType::Classical | PanelCovType::Hc2 | PanelCovType::Hc3
+    ) {
+        z_tilde.transpose() * z_tilde
+    } else {
+        faer::Mat::zeros(0, 0)
+    };
     let PanelMoment {
         omega: omega_tilde,
         dk_bandwidth_used,

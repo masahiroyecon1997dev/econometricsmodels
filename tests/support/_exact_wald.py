@@ -255,14 +255,21 @@ def exact_gmm_inference(
     cov_type: str = "classical",
     groups: Sequence[object] | None = None,
     n_constants: int = 1,
+    df_resid: int | None = None,
+    cluster_k: int | None = None,
+    center: bool = True,
 ) -> ExactInference:
     """GMM（1段階、または重みを`Σ ê₀² z z'`にする2段階）の係数・標準誤差・傾きのWald統計量（χ²）。
 
     1段階の重みは`W₀ = (Z'Z)⁻¹`。`cov_type`は`classical`（`σ̂²Z'Z`、`σ̂²`は中心化した残差の
     `/(n−k)`）・`hc0`・`hc1`（`n/(n−k)`）・`cluster`（`G/(G−1)·(n−1)/(n−k)`、`groups`が必要）。
     共分散は`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`B = X'ZWZ'X`）。入力のf64の値をそのまま有理数にする。
+    `df_resid`は`n − k`の代わり（classicalの`σ̂²`・hc1の補正。固定効果を吸収したパネルは
+    `n − k − 吸収した効果の数`）、`cluster_k`はclusterの`n − K`の`K`（既定は`k`）、
+    `center=False`は`σ̂²`で残差の平均を引かない（within変換した残差の平均は0）。
     """
     n, k, l = len(x), len(x[0]), len(z[0])
+    dof = n - k if df_resid is None else df_resid
     xf = [[F(v) for v in row] for row in x]
     zf = [[F(v) for v in row] for row in z]
     yf = [F(v) for v in y]
@@ -288,20 +295,21 @@ def exact_gmm_inference(
         w, beta, resid = solve_gmm(s)
 
     if cov_type == "classical":
-        mean = sum(resid) / n
-        sigma2 = sum((e - mean) ** 2 for e in resid) / (n - k)
+        mean = sum(resid) / n if center else F(0)
+        sigma2 = sum((e - mean) ** 2 for e in resid) / dof
         ztz = _mm(_t(zf), zf)
         omega = [[sigma2 * v for v in row] for row in ztz]
     elif cov_type in {"hc0", "hc1"}:
         omega = _moment_sum(zf, resid, None)
         if cov_type == "hc1":
-            omega = [[v * F(n, n - k) for v in row] for row in omega]
+            omega = [[v * F(n, dof) for v in row] for row in omega]
     elif cov_type == "cluster":
         if groups is None:
             raise ValueError("cluster needs groups")
         g = len(set(groups))
         omega = _moment_sum(zf, resid, groups)
-        correction = F(g, g - 1) * F(n - 1, n - k)
+        kk = k if cluster_k is None else cluster_k
+        correction = F(g, g - 1) * F(n - 1, n - kk)
         omega = [[v * correction for v in row] for row in omega]
     else:
         raise ValueError(f"unsupported cov_type: {cov_type}")

@@ -90,7 +90,7 @@ pub(super) fn fit_gmm(
         beta,
         solution,
         residuals,
-        s_used,
+        s_used: _,
         n_iter,
         converged,
         hac_lags_used,
@@ -115,7 +115,7 @@ pub(super) fn fit_gmm(
         .into());
     }
 
-    let hansen_j = hansen_j_test(&input, &z, &residuals, &s_used)?;
+    let hansen_j = hansen_j_test(&input, &solution, &residuals)?;
 
     // ── ここからサンドイッチ型SE計算（`gmm.rs`のモジュールdoc
     // 「標準誤差・検定統計量（cov_type対応）」参照）──

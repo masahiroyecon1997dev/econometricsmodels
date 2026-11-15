@@ -1,13 +1,13 @@
 //! 固定効果つきGMMのHansen J過剰識別検定。
 //!
-//! `J = (Z̃'ẽ)'S⁻¹(Z̃'ẽ)`（`n`で割らない。計算は`shared::gmm::hansen_j_test`）を`χ²(df)`と比べる。
+//! `J = (Z̃'ẽ)'S⁻¹(Z̃'ẽ)`（`n`で割らない。計算は`shared::gmm::GmmSolution::hansen_j_test`。白色化した空間の内積）を`χ²(df)`と比べる。
 //! `S`は点推定に使った重み行列（`weight_type`依存）で、`iv::gmm`と同じ定義。違いは`Classical`・`OneStep`の
 //! `S = σ̂²Z̃'Z̃`の`σ̂²`の分母だけで、`n − neffects`にする（FE-2SLSのSarganと同じ理由）。
 
 use faer::Mat;
 
 use crate::shared::error::CommonError;
-use crate::shared::gmm::hansen_j_test;
+use crate::shared::gmm::GmmSolution;
 
 /// [`fe_hansen_j`]の戻り値。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,24 +34,20 @@ pub(super) struct FeHansenJ {
 /// `S`が正定値でないとき`CommonError::NearSingularMatrix`。`S`は点推定で既に反転成功済み（その正の
 /// スカラー倍も正定値）なので、到達しないはずの防御的な`Result`。
 pub(super) fn fe_hansen_j(
-    z_tilde: &Mat<f64>,
+    solution: &GmmSolution,
     residuals: &Mat<f64>,
-    s_used: &Mat<f64>,
     homoskedastic_weight: bool,
     n_absorbed: usize,
     df: usize,
 ) -> Result<FeHansenJ, CommonError> {
-    debug_assert!(z_tilde.nrows() > n_absorbed);
-    let n = z_tilde.nrows();
+    let n = residuals.nrows();
+    debug_assert!(n > n_absorbed);
     let scale = if homoskedastic_weight {
         n as f64 / (n - n_absorbed) as f64
     } else {
         1.0
     };
-    let s = Mat::from_fn(s_used.nrows(), s_used.ncols(), |i, j| {
-        scale * (*s_used.get(i, j))
-    });
-    let test = hansen_j_test(z_tilde, residuals, &s, df)?;
+    let test = solution.hansen_j_test(residuals, scale, df)?;
     Ok(FeHansenJ {
         statistic: test.statistic,
         p_value: test.p_value,

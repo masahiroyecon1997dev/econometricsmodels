@@ -27,7 +27,9 @@ from econometricsmodels import (
     OLS,
     RE,
     WLS,
+    ComputationError,
     ErrorCode,
+    FEIVOptions,
     IVOptions,
 )
 
@@ -92,6 +94,21 @@ _FITTERS: dict[str, Callable[[pl.DataFrame], object]] = {
         effects=["entity"],
     ).fit(),
 }
+
+
+# 固定効果つきのIV GMMは第一段階を持たないので、操作変数の列・`Ĝ`の判定（`GMM_WEIGHT`・`GMM_BREAD`）で
+# 止まる（受け入れる境界は他の手法と同じ）。下の専用のテストで確かめる。
+def _FE_IV_GMM(df: pl.DataFrame) -> object:
+    return FEIV(
+        df,
+        y="y",
+        x_exog=["a", "b"],
+        x_endog=["d"],
+        instruments=["z1", "z2", "z3"],
+        effects=["entity"],
+        options=FEIVOptions(estimator="gmm"),
+    ).fit()
+
 
 # 列を揃えた条件数は`eps`にほぼ反比例し、`eps = 1e-7`で約2e7、`1e-8`で約2e8（上限5e7との間に
 # 2.5倍以上の余裕がある）。
@@ -365,3 +382,35 @@ def test_exact_collinearity_is_reported_with_the_columns_at_any_sample_size(
         ErrorCode.DESIGN_MATRIX_SINGULAR, columns=_EXPECTED_COLUMNS[kind]
     ):
         OLS(df, "y", x).fit()
+
+
+# ── 固定効果つきのIV GMM（第一段階が無く、`GMM_WEIGHT`・`GMM_BREAD`で止まる） ──────
+
+
+@pytest.mark.parametrize("scale", [1.0, 1e6, 1e-6, 1e12, 1e-12])
+def test_fe_iv_gmm_accepts_the_same_range_and_does_not_depend_on_the_unit(
+    scale,
+):
+    for eps in _INSIDE:
+        _FE_IV_GMM(_data(eps, scale))
+    _FE_IV_GMM(_data(_NEAR_INSIDE, scale))
+
+
+@pytest.mark.parametrize("eps", [_NEAR_OUTSIDE, *_OUTSIDE, *_FAR_BEYOND])
+@pytest.mark.parametrize("scale", [1.0, 1e6, 1e-6])
+def test_fe_iv_gmm_rejects_designs_outside_the_limit(eps, scale):
+    """第一段階が無いので、`Z`（`GMM_WEIGHT`）か`Ĝ`（`GMM_BREAD`）の条件数で止まる。条件数が約`1e12`を
+    超えると共線として列名つきの`DESIGN_MATRIX_SINGULAR`にもなりうる。"""
+    with pytest.raises(ComputationError) as info:
+        _FE_IV_GMM(_data(eps, scale))
+    err = info.value
+    assert err.code in {
+        ErrorCode.MATRIX_NEAR_SINGULAR,
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+    }
+    if err.code == ErrorCode.MATRIX_NEAR_SINGULAR:
+        assert err.params["matrix"] in {
+            "GMM_WEIGHT",
+            "GMM_BREAD",
+            "DESIGN_GRAM",
+        }

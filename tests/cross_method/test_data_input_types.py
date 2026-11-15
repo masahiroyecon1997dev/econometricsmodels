@@ -11,6 +11,8 @@ import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import (
+    NESTED_LOOKALIKE_DTYPES,
+    NESTED_UINT128_DTYPES,
     UNUSED_COLUMN_DTYPES,
     N,
     dtype_id,
@@ -346,27 +348,22 @@ def test_new_data_accepts_boolean_and_dummy_columns(
 @pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("method", list(NEW_DATA_METHODS))
 @pytest.mark.parametrize(
-    "dtype",
+    ("dtype", "label"),
     [
-        pl.Date,
-        pl.Datetime,
-        pl.Struct({"a": pl.Int64}),
-        pl.Categorical,
-        pl.UInt128,
-        pl.List(pl.UInt128),
+        (pl.Date, "Date"),
+        (pl.Datetime, "Datetime"),
+        (pl.Struct({"a": pl.Int64}), "Struct"),
+        (pl.Categorical, "Categorical"),
+        (pl.Enum(["UInt128", "b"]), "Enum"),
+        (pl.UInt128, "UInt128"),
+        *NESTED_UINT128_DTYPES,
+        *NESTED_LOOKALIKE_DTYPES,
     ],
-    ids=str,
+    ids=lambda v: str(v) if not isinstance(v, str) else None,
 )
-def test_new_data_rejects_non_numeric_dtype(frame, method, path, dtype):
+def test_new_data_rejects_non_numeric_dtype(frame, method, path, dtype, label):
     result = NEW_DATA_METHODS[method](frame)
     new = _new_data().with_columns(unused_column(dtype).head(3).alias("x1"))
-    label = {
-        "Date": "Date",
-        "Datetime": "Datetime",
-        "Categorical": "Categorical",
-        "UInt128": "UInt128",
-        "List(UInt128)": "List",
-    }.get(str(dtype), "Struct")
 
     with raises_error(
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,

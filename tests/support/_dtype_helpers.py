@@ -27,6 +27,31 @@ NUMERIC_DTYPES = [
     pl.Decimal(18, 0),
 ]
 
+# 中に`UInt128`を持つネスト型と、メッセージに出るdtype名（最外の型名）。`List`・`Array`の
+# 入れ子、複数フィールド・入れ子の`Struct`、多次元の`Array`を含め、判定の再帰をすべて通す。
+NESTED_UINT128_DTYPES = [
+    (pl.List(pl.UInt128), "List"),
+    (pl.Array(pl.UInt128, 2), "Array"),
+    (pl.Struct({"a": pl.UInt128}), "Struct"),
+    (pl.List(pl.List(pl.UInt128)), "List"),
+    (pl.Array(pl.List(pl.UInt128), 2), "Array"),
+    (pl.List(pl.Array(pl.UInt128, 2)), "List"),
+    (pl.Array(pl.UInt128, (2, 2)), "Array"),
+    (pl.Struct({"a": pl.Int64, "b": pl.UInt128}), "Struct"),
+    (pl.Struct({"a": pl.Struct({"b": pl.UInt128})}), "Struct"),
+    (pl.List(pl.Struct({"a": pl.UInt128})), "List"),
+    (pl.Struct({"a": pl.List(pl.UInt128)}), "Struct"),
+    (pl.Struct({"UInt128": pl.UInt128}), "Struct"),
+]
+
+# 中に`UInt128`という名前の`Enum`・フィールドを持つが、`UInt128`そのものは含まないネスト型。
+# 取り込めるdtypeなので、`UInt128`と取り違えてはいけない（ネスト型なのでどの役割にも使えず、
+# 呼び名は最外の型名）。
+NESTED_LOOKALIKE_DTYPES = [
+    (pl.List(pl.Enum(["UInt128", "b"])), "List"),
+    (pl.Struct({"a": pl.Enum(["UInt128", "b"])}), "Struct"),
+]
+
 # 推定に使わない列に置いても`fit()`を壊してはいけないdtype。
 UNUSED_COLUMN_DTYPES = [
     *NUMERIC_DTYPES,
@@ -35,6 +60,9 @@ UNUSED_COLUMN_DTYPES = [
     pl.String,
     pl.Categorical,
     pl.Enum(["a", "b"]),
+    # 名前が`UInt128`の`Enum`のカテゴリ・`Struct`のフィールド。ここへの追加は挙動を変えず、
+    # 判定を変えたときの退行を見る確認用（誤拒否の再発を防ぐのは、`Enum`を受け付ける
+    # `test_key_columns.py`のテスト）。
     pl.Enum(["UInt128", "b"]),
     pl.Date,
     pl.Datetime,
@@ -45,9 +73,8 @@ UNUSED_COLUMN_DTYPES = [
     pl.Array(pl.Int64, 2),
     pl.Struct({"a": pl.Int64}),
     pl.Struct({"UInt128": pl.Int64}),
-    pl.List(pl.UInt128),
-    pl.Array(pl.UInt128, 2),
-    pl.Struct({"a": pl.UInt128}),
+    *(dtype for dtype, _ in NESTED_UINT128_DTYPES),
+    *(dtype for dtype, _ in NESTED_LOOKALIKE_DTYPES),
     pl.Null,
 ]
 
@@ -67,9 +94,8 @@ NON_NUMERIC_DTYPES = [
     (pl.Array(pl.Int64, 2), "Array"),
     (pl.Struct({"a": pl.Int64}), "Struct"),
     (pl.Struct({"UInt128": pl.Int64}), "Struct"),
-    (pl.List(pl.UInt128), "List"),
-    (pl.Array(pl.UInt128, 2), "Array"),
-    (pl.Struct({"a": pl.UInt128}), "Struct"),
+    *NESTED_UINT128_DTYPES,
+    *NESTED_LOOKALIKE_DTYPES,
 ]
 
 
@@ -115,6 +141,12 @@ def unused_column(dtype: pl.DataType) -> pl.Series:
         return pl.Series("unused", [[1, 2]] * N, dtype=dtype)
     if dtype == pl.Struct({"a": pl.UInt128}):
         return pl.Series("unused", [{"a": 1}] * N, dtype=dtype)
+    if any(dtype == nested for nested, _ in NESTED_UINT128_DTYPES) or any(
+        dtype == nested for nested, _ in NESTED_LOOKALIKE_DTYPES
+    ):
+        # `UInt128`を中に持つ値は作れる形が限られるので、全行が欠損の列にする
+        # （dtypeの検査は欠損値の検査より先に行われる）。
+        return pl.Series("unused", [None] * N, dtype=dtype)
     return pl.Series("unused", np.arange(N) % 100, dtype=pl.Int64).cast(dtype)
 
 

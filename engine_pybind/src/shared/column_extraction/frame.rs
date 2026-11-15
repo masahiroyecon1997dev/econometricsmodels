@@ -54,6 +54,10 @@ const UNREADABLE_DTYPES: &[&str] = &["UInt128"];
 /// dtypeの文字列表現（`str(dtype)`）の部分一致では判定しない。`Enum`のカテゴリ名や`Struct`の
 /// フィールド名のように、利用者が決めた文字列が表現に入るdtypeがあり、`UInt128`という名前の
 /// カテゴリを持つ`Enum`を取り込めないdtypeと取り違えるため。クラス名と型の構造だけを見る。
+/// 内側の型を持つのは組み込みの`List`・`Array`・`Struct`だけで、`Extension`は辿らない。
+///
+/// Pythonのオブジェクトを受けるので、Rustの単体テストは書けない。検証は
+/// `tests/cross_method/test_key_columns.py`と`tests/cross_method/test_input_dtypes.py`にある。
 fn unreadable_label(dtype: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
     let name: String = dtype
         .call_method0("base_type")?
@@ -62,25 +66,29 @@ fn unreadable_label(dtype: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
     if UNREADABLE_DTYPES.contains(&name.as_str()) {
         return Ok(Some(name));
     }
-    let mut children: Vec<Bound<'_, PyAny>> = Vec::new();
     // `List`・`Array`は`inner`、`Struct`は`fields`（各`Field`の`dtype`）に内側の型を持つ。
-    // 他のdtypeにはどちらの属性も無い（`Enum`のカテゴリは`categories`で別）。
-    if let Some(inner) = dtype.getattr_opt("inner")?
-        && !inner.is_none()
-    {
-        children.push(inner);
-    }
-    if let Some(fields) = dtype.getattr_opt("fields")?
-        && !fields.is_none()
-    {
-        for field in fields.try_iter()? {
-            children.push(field?.getattr("dtype")?);
+    // 型名で絞るのは、他のdtypeにたまたま同名の属性があっても辿らないため。
+    match name.as_str() {
+        "List" | "Array" => {
+            if let Some(inner) = dtype.getattr_opt("inner")?
+                && !inner.is_none()
+                && unreadable_label(&inner)?.is_some()
+            {
+                return Ok(Some(name));
+            }
         }
-    }
-    for child in &children {
-        if unreadable_label(child)?.is_some() {
-            return Ok(Some(name));
+        "Struct" => {
+            if let Some(fields) = dtype.getattr_opt("fields")?
+                && !fields.is_none()
+            {
+                for field in fields.try_iter()? {
+                    if unreadable_label(&field?.getattr("dtype")?)?.is_some() {
+                        return Ok(Some(name));
+                    }
+                }
+            }
         }
+        _ => {}
     }
     Ok(None)
 }

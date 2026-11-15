@@ -12,7 +12,12 @@ import datetime as dt
 import numpy as np
 import polars as pl
 import pytest
-from _dtype_helpers import make_frame, unused_column
+from _dtype_helpers import (
+    NESTED_LOOKALIKE_DTYPES,
+    NESTED_UINT128_DTYPES,
+    make_frame,
+    unused_column,
+)
 from _errors import raises_error
 from econometricsmodels import (
     FE,
@@ -187,9 +192,8 @@ UNSUPPORTED_IDENTITY_DTYPES = [
     (pl.Array(pl.Int64, 2), "Array"),
     (pl.Struct({"a": pl.Int64}), "Struct"),
     (pl.Struct({"UInt128": pl.Int64}), "Struct"),
-    (pl.List(pl.UInt128), "List"),
-    (pl.Array(pl.UInt128, 2), "Array"),
-    (pl.Struct({"a": pl.UInt128}), "Struct"),
+    *NESTED_UINT128_DTYPES,
+    *NESTED_LOOKALIKE_DTYPES,
 ]
 UNSUPPORTED_TIME_DTYPES = [
     (pl.Boolean, "Boolean"),
@@ -695,6 +699,34 @@ def test_enum_category_named_like_an_unreadable_dtype_is_accepted(
     df = frame.with_columns(series.alias(column))
 
     _assert_same_result(fit(df), fit(frame))
+
+
+C_STAT_FITS = {
+    "IV": CLUSTER_FITS["IV"],
+    "FEIV_GMM": CLUSTER_FITS["FEIV_GMM"],
+}
+
+
+@pytest.mark.parametrize("method", list(C_STAT_FITS))
+def test_enum_category_named_like_an_unreadable_dtype_is_read_again_after_fit(
+    frame, method
+):
+    """推定後のメソッドは保持したデータからキー列を読み直すので、カテゴリ名が`UInt128`の
+    `Enum`のクラスター列でも、`fit()`のときと同じく受け付ける。
+    """
+    labels = [*(str(i) for i in range(9)), "UInt128"]
+    keyed = frame.with_columns(
+        pl.col("cluster")
+        .cast(pl.String)
+        .replace("9", "UInt128")
+        .cast(pl.Enum(labels))
+        .alias("cluster")
+    )
+
+    got = C_STAT_FITS[method](keyed).c_stat(variables=["x1"])
+
+    expected = C_STAT_FITS[method](frame).c_stat(variables=["x1"])
+    assert got.statistic == expected.statistic
 
 
 # ── 時点の順序: 桁が上がる・月や年をまたぐ時点でも、時系列順になる ───────────

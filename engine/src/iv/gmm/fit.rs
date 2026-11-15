@@ -71,6 +71,7 @@ pub(super) fn fit_gmm(
     // `OneStep`ではstep-0残差＝最終残差のため、この一箇所の計算で両方のケースをカバーできる）。
     let GmmInitialStep {
         ztz,
+        solution: solution0,
         beta: beta0,
         residuals: residuals0,
         classical_s,
@@ -87,6 +88,7 @@ pub(super) fn fit_gmm(
     // 方式（`gmm_type`）に応じた回数の再推定（詳細は`gmm_iterate`のdocコメント）。
     let GmmIteration {
         beta,
+        solution,
         residuals,
         s_used,
         n_iter,
@@ -100,6 +102,7 @@ pub(super) fn fit_gmm(
         &x,
         y,
         &ztz,
+        solution0,
         beta0,
         residuals0,
         classical_s,
@@ -123,8 +126,9 @@ pub(super) fn fit_gmm(
 
     let GmmCovariance {
         cov_params,
+        wald,
         hac_lags_used: cov_hac_lags,
-    } = sandwich_covariance(&cov_type, &z, &x, &residuals, &ztz, &s_used, df_resid)?;
+    } = sandwich_covariance(&cov_type, &x, &residuals, &solution, df_resid)?;
     // `cov_type=Hac`のラグ数は`weight_type=Hac`のラグ数より優先する。
     let hac_lags_used = cov_hac_lags.or(hac_lags_used);
 
@@ -145,7 +149,7 @@ pub(super) fn fit_gmm(
         // 2SLSと同様NaNを返す（0除算を避ける）。
         (f64::NAN, f64::NAN)
     } else {
-        wald_chi2_test(&beta, &cov_params, k_constant, df_model)?
+        wald_chi2_test(&wald.coordinates, &wald.meat, k_constant, df_model)?
     };
 
     Ok(GmmEstimator {

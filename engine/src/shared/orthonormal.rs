@@ -77,7 +77,7 @@ impl OrthonormalDesign {
     /// 行数が列数に満たない、または`R`の対角が厳密に0・非有限のとき[`RankDeficient::Columns`]。
     /// 数値的なランク落ちの判定ではない（呼び出し側が先に行う）。
     pub(crate) fn new(x: &Mat<f64>) -> Result<Self, RankDeficient> {
-        Self::decompose(x, false)
+        Self::decompose(x, false, true)
     }
 
     /// [`Self::new`]に加えて、列を単位ノルムに揃えた`R`（k×k）の列ピボットQRでランク落ちを判定し
@@ -90,10 +90,19 @@ impl OrthonormalDesign {
     /// [`MAX_EQUILIBRATED_CONDITION`]を超える（または特異値分解が収束しない）とき
     /// [`RankDeficient::GramMatrix`]。
     pub(crate) fn new_checked(x: &Mat<f64>) -> Result<Self, RankDeficient> {
-        Self::decompose(x, true)
+        Self::decompose(x, true, true)
     }
 
-    fn decompose(x: &Mat<f64>, check_rank: bool) -> Result<Self, RankDeficient> {
+    /// [`Self::new_checked`]と同じ判定で、`R`（k×k）だけを返す（`Q`を作らない。`Q`が要らない
+    /// 呼び出し側が、`Q`の分のメモリと計算を省く）。
+    ///
+    /// # Errors
+    /// [`Self::new_checked`]と同じ。
+    pub(crate) fn checked_r_factor(x: &Mat<f64>) -> Result<Mat<f64>, RankDeficient> {
+        Ok(Self::decompose(x, true, false)?.r)
+    }
+
+    fn decompose(x: &Mat<f64>, check_rank: bool, with_q: bool) -> Result<Self, RankDeficient> {
         let (n, k) = (x.nrows(), x.ncols());
         if n < k {
             return Err(RankDeficient::Columns);
@@ -124,15 +133,22 @@ impl OrthonormalDesign {
                 return Err(RankDeficient::GramMatrix);
             }
         }
-        Ok(Self {
-            q: qr.compute_thin_Q(),
-            r,
-        })
+        let q = if with_q {
+            qr.compute_thin_Q()
+        } else {
+            Mat::zeros(0, k)
+        };
+        Ok(Self { q, r })
     }
 
     /// 直交化した設計行列`Q`（n×k）。meat構築部品に`x`として渡す。
     pub(crate) fn q(&self) -> &Mat<f64> {
         &self.q
+    }
+
+    /// `Q`と`R`に分解して取り出す（`Q`をコピーせず別の構造体へ移すとき）。
+    pub(crate) fn into_parts(self) -> (Mat<f64>, Mat<f64>) {
+        (self.q, self.r)
     }
 
     /// k×kの単位行列。meat構築部品に`xtx_inv`として渡す（`Q'Q = I`）。

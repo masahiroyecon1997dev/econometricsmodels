@@ -121,6 +121,35 @@ pub(crate) fn hac_moment_covariance(
     })
 }
 
+/// `S = A'A`となる行列`A`（`m×l`）を返す。ロバスト重みは行`êᵢzᵢ`（`m = n`）、クラスター重みは
+/// クラスターごとのスコア`Σ_{i∈g} êᵢzᵢ`（`m = G`）。`S`を作って分解せず、`A`のQR分解から白色化する
+/// ため（`WhitenedInstruments::from_factor_rows`）。`Classical`・`Hac`は`A`の形に書けない
+/// （`Classical`は`σ̂²Z'Z`で`Z`のQRを使う）ので`None`。
+pub(crate) fn moment_factor_rows(
+    weight_type: &WeightType,
+    cluster: Option<&GroupCodes>,
+    z: &Mat<f64>,
+    residuals: &Mat<f64>,
+) -> Option<Mat<f64>> {
+    let (n, l) = (z.nrows(), z.ncols());
+    match weight_type {
+        WeightType::Robust => Some(Mat::from_fn(n, l, |i, a| {
+            *residuals.get(i, 0) * *z.get(i, a)
+        })),
+        WeightType::Cluster { .. } => {
+            let groups = cluster?;
+            let mut scores = Mat::<f64>::zeros(groups.n_groups(), l);
+            for (i, &code) in groups.codes().iter().enumerate() {
+                for a in 0..l {
+                    *scores.get_mut(code, a) += *residuals.get(i, 0) * *z.get(i, a);
+                }
+            }
+            Some(scores)
+        }
+        WeightType::Classical | WeightType::Hac { .. } => None,
+    }
+}
+
 /// 残差から重み行列の元になる`S`（モーメント条件の分散共分散行列、`n`で割らない生の和）を作る。
 ///
 /// `weight_type`が`Cluster`なら`cluster`（検証済みのコード）、`Hac`なら`hac`（解決済みのラグ数と

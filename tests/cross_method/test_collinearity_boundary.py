@@ -28,6 +28,7 @@ from econometricsmodels import (
     RE,
     WLS,
     ErrorCode,
+    IVOptions,
 )
 
 if TYPE_CHECKING:
@@ -72,6 +73,14 @@ _FITTERS: dict[str, Callable[[pl.DataFrame], object]] = {
     "ols": lambda df: OLS(df, "y", ["a", "b", "d"]).fit(),
     "wls": lambda df: WLS(df, "y", ["a", "b", "d"], "w").fit(),
     "iv": lambda df: IV(df, "y", ["a", "b"], ["d"], ["z1", "z2", "z3"]).fit(),
+    "iv_gmm": lambda df: IV(
+        df,
+        "y",
+        ["a", "b"],
+        ["d"],
+        ["z1", "z2", "z3"],
+        options=IVOptions(estimator="gmm"),
+    ).fit(),
     "fe": lambda df: FE(df, "y", ["a", "b", "d"], effects=["entity"]).fit(),
     "re": lambda df: RE(df, "y", ["a", "b", "d"], effects=["entity"]).fit(),
     "fe_iv": lambda df: FEIV(
@@ -172,6 +181,8 @@ def _overall_statistic(res: object) -> float:
     """全体のF統計量（OLS・WLS・FE・RE）か、Wald統計量（IV・FE-IV）。"""
     if hasattr(res, "f_statistic"):
         return res.f_statistic
+    if res.wald_dist == "chi2":
+        return res.wald_statistic
     return res.wald_statistic * res.wald_df_num
 
 

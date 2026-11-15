@@ -201,3 +201,121 @@ def exact_slope_wald(
 ) -> float:
     """`exact_inference`のWald統計量だけ（引数は同じ）。"""
     return exact_inference(x, y, **kwargs).wald  # type: ignore[arg-type]
+
+
+def _mm(a: list[list[F]], b: list[list[F]]) -> list[list[F]]:
+    return [
+        [
+            sum(a[i][t] * b[t][j] for t in range(len(b)))
+            for j in range(len(b[0]))
+        ]
+        for i in range(len(a))
+    ]
+
+
+def _t(a: list[list[F]]) -> list[list[F]]:
+    return [list(row) for row in zip(*a, strict=True)]
+
+
+def _eye(d: int) -> list[list[F]]:
+    return [[F(int(i == j)) for j in range(d)] for i in range(d)]
+
+
+def _moment_sum(
+    z: list[list[F]], e: list[F], groups: Sequence[object] | None
+) -> list[list[F]]:
+    """`Σ ê² z z'`（`groups`があれば`Σ_g (Σ_i ê z)(Σ_i ê z)'`）。"""
+    n, l = len(z), len(z[0])
+    if groups is None:
+        return [
+            [
+                sum(e[i] * e[i] * z[i][a] * z[i][b] for i in range(n))
+                for b in range(l)
+            ]
+            for a in range(l)
+        ]
+    out = [[F(0)] * l for _ in range(l)]
+    for g in sorted(set(groups), key=str):
+        score = [
+            sum(e[i] * z[i][a] for i in range(n) if groups[i] == g)
+            for a in range(l)
+        ]
+        for a in range(l):
+            for b in range(l):
+                out[a][b] += score[a] * score[b]
+    return out
+
+
+def exact_gmm_inference(
+    x: Sequence[Sequence[float]],
+    z: Sequence[Sequence[float]],
+    y: Sequence[float],
+    *,
+    two_step: bool = False,
+    cov_type: str = "classical",
+    groups: Sequence[object] | None = None,
+    n_constants: int = 1,
+) -> ExactInference:
+    """GMM（1段階、または重みを`Σ ê₀² z z'`にする2段階）の係数・標準誤差・傾きのWald統計量（χ²）。
+
+    1段階の重みは`W₀ = (Z'Z)⁻¹`。`cov_type`は`classical`（`σ̂²Z'Z`、`σ̂²`は中心化した残差の
+    `/(n−k)`）・`hc0`・`hc1`（`n/(n−k)`）・`cluster`（`G/(G−1)·(n−1)/(n−k)`、`groups`が必要）。
+    共分散は`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`B = X'ZWZ'X`）。入力のf64の値をそのまま有理数にする。
+    """
+    n, k, l = len(x), len(x[0]), len(z[0])
+    xf = [[F(v) for v in row] for row in x]
+    zf = [[F(v) for v in row] for row in z]
+    yf = [F(v) for v in y]
+    ztx = _mm(_t(zf), xf)
+    zty = _mm(_t(zf), [[v] for v in yf])
+
+    def solve_gmm(
+        s: list[list[F]],
+    ) -> tuple[list[list[F]], list[list[F]], list[F]]:
+        w = _solve(s, _eye(l))
+        b = _mm(_mm(_t(ztx), w), ztx)
+        beta = _solve(b, _mm(_mm(_t(ztx), w), zty))
+        resid = [
+            yf[i] - sum(xf[i][j] * beta[j][0] for j in range(k))
+            for i in range(n)
+        ]
+        return w, beta, resid
+
+    s = _mm(_t(zf), zf)
+    w, beta, resid = solve_gmm(s)
+    if two_step:
+        s = _moment_sum(zf, resid, None)
+        w, beta, resid = solve_gmm(s)
+
+    if cov_type == "classical":
+        mean = sum(resid) / n
+        sigma2 = sum((e - mean) ** 2 for e in resid) / (n - k)
+        ztz = _mm(_t(zf), zf)
+        omega = [[sigma2 * v for v in row] for row in ztz]
+    elif cov_type in {"hc0", "hc1"}:
+        omega = _moment_sum(zf, resid, None)
+        if cov_type == "hc1":
+            omega = [[v * F(n, n - k) for v in row] for row in omega]
+    elif cov_type == "cluster":
+        if groups is None:
+            raise ValueError("cluster needs groups")
+        g = len(set(groups))
+        omega = _moment_sum(zf, resid, groups)
+        correction = F(g, g - 1) * F(n - 1, n - k)
+        omega = [[v * correction for v in row] for row in omega]
+    else:
+        raise ValueError(f"unsupported cov_type: {cov_type}")
+
+    b = _mm(_mm(_t(ztx), w), ztx)
+    b_inv = _solve(b, _eye(k))
+    meat = _mm(_mm(_mm(_mm(_t(ztx), w), omega), w), ztx)
+    cov = _mm(_mm(b_inv, meat), b_inv)
+    slopes = range(n_constants, k)
+    v_slopes = [[cov[a][c] for c in slopes] for a in slopes]
+    b_slopes = [[beta[a][0]] for a in slopes]
+    solved = _solve(v_slopes, b_slopes)
+    wald = float(
+        sum(b[0] * s_[0] for b, s_ in zip(b_slopes, solved, strict=True))
+    )
+    se = [float(cov[a][a]) ** 0.5 for a in range(k)]
+    return ExactInference(beta=[float(b[0]) for b in beta], se=se, wald=wald)

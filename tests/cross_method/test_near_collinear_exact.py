@@ -21,6 +21,7 @@ import pytest
 from _assertions import assert_close
 from _exact_wald import (
     ExactInference,
+    exact_gmm_inference,
     exact_inference,
     exact_projected_design,
 )
@@ -51,6 +52,9 @@ assert_se_close = partial(
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "cluster"]
 # FE・FE-IVは`hc0`を持たない。
 PANEL_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
+# IVのGMMはHC2・HC3に外部の参照実装が無く、厳密値の組み立ても定義が別（`Z`のレバレッジ）なので、
+# classical・hc0・hc1・clusterを確かめる。
+GMM_COV_TYPES = ["classical", "hc0", "hc1", "cluster"]
 EPS = [1e-5, 1e-6, 1e-7]
 # REの内部の補助回帰が別名の列を落とす窓（約`3e-7`以下）の中も含める。最終回帰は全列を使う。
 RE_EPS = [1e-5, 1e-6, 1e-7, 6e-8]
@@ -253,6 +257,46 @@ def _iv_case(cov_type: str, eps: float) -> _Case:
     return _Case(res, res.wald_statistic * res.wald_df_num, exact)
 
 
+def _iv_gmm_case(gmm_type: str, cov_type: str, eps: float) -> _Case:
+    """IVのGMM（1段階、または重みを`Σ ê₀² z z'`にする2段階）。Waldはχ²統計量（自由度で割らない）。"""
+    df = _iv_data(eps)
+    res = IV(
+        df,
+        "y",
+        ["x1", "x2"],
+        ["endog"],
+        ["z1", "z2", "z3"],
+        options=IVOptions(
+            estimator="gmm",
+            gmm_type=gmm_type,
+            gmm_weight_type="robust" if gmm_type == "two_step" else None,
+            cov_type=cov_type,
+            cluster="g" if cov_type == "cluster" else None,
+        ),
+    ).fit()
+    x = [[1.0, *row] for row in df.select("x1", "x2", "endog").rows()]
+    z = [[1.0, *row] for row in df.select("x1", "x2", "z1", "z2", "z3").rows()]
+    exact = exact_gmm_inference(
+        x,
+        z,
+        df["y"].to_list(),
+        two_step=gmm_type == "two_step",
+        cov_type=cov_type,
+        groups=_cluster_label(cov_type, df, "g"),
+    )
+    return _Case(res, res.wald_statistic, exact)
+
+
+@cache
+def _iv_gmm_one_step_case(cov_type: str, eps: float) -> _Case:
+    return _iv_gmm_case("one_step", cov_type, eps)
+
+
+@cache
+def _iv_gmm_two_step_case(cov_type: str, eps: float) -> _Case:
+    return _iv_gmm_case("two_step", cov_type, eps)
+
+
 @cache
 def _fe_iv_case(cov_type: str, eps: float) -> _Case:
     df = _panel_data(eps)
@@ -328,6 +372,8 @@ _CASES = {
     "IV": (_iv_case, COV_TYPES, EPS),
     "FE": (_fe_case, PANEL_COV_TYPES, EPS),
     "FE-IV": (_fe_iv_case, PANEL_COV_TYPES, EPS),
+    "IV-GMM-one-step": (_iv_gmm_one_step_case, GMM_COV_TYPES, EPS),
+    "IV-GMM-two-step": (_iv_gmm_two_step_case, GMM_COV_TYPES, EPS),
     "RE": (_re_case, PANEL_COV_TYPES, RE_EPS),
 }
 

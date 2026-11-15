@@ -5,12 +5,12 @@
 //!
 //! 推定量を通すテストは`iv/gmm/fit/tests/`にある（`IvInput`・`GmmEstimator`が要るため）。
 
-use faer::prelude::Solve;
-use faer::{Mat, Side};
+use faer::Mat;
 
-use super::gmm_weight::{WeightType, moment_covariance};
+use super::gmm::{GmmSolution, WhitenedInstruments, gmm_solve};
+use super::gmm_weight::{WeightType, moment_covariance, moment_factor_rows};
 use crate::shared::covariance::{resolve_hac_lags, time_ordering};
-use crate::shared::error::{CommonError, MatrixKind};
+use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
 
@@ -69,9 +69,16 @@ impl GmmType {
 /// 「許容誤差は相対誤差1e-8を基本」）。
 const GMM_CONVERGENCE_ATOL: f64 = 1e-8;
 
+/// 重み`S`（対角を1に揃えた`D S D`）の条件数がこれ以下なら、`S`のCholesky分解で白色化する。
+/// 丸め誤差は条件数に比例して広がり、`1e6`で約`1e-10`（倍精度）と、係数・共分散・Wald統計量の
+/// 目標精度（相対`1e-8`）に十分収まる。これを超えると、`S`を作らず`A`のQR分解から白色化する。
+const WEIGHT_CHOLESKY_MAX_CONDITION: f64 = 1.0e6;
+
 /// [`gmm_iterate`]の戻り値。
 pub(crate) struct GmmIteration {
     pub(crate) beta: Mat<f64>,
+    /// 最終推定の直交座標つきの解（共分散・全体Wald検定が使う）。
+    pub(crate) solution: GmmSolution,
     /// 最終推定の残差 `ê = y - Xβ̂`。
     pub(crate) residuals: Mat<f64>,
     /// 最終推定`beta`に実際に使った重み行列`S`（l×l）。ループが1度も回らない場合は
@@ -87,6 +94,8 @@ pub(crate) struct GmmIteration {
 pub(crate) struct GmmInitialStep {
     /// `Z'Z`（l×l）。
     pub(crate) ztz: Mat<f64>,
+    /// 初期推定の直交座標つきの解（`Z = Q_ZR_Z`で白色化した`Ĝ = Q_Z'X`のQR）。
+    pub(crate) solution: GmmSolution,
     /// 初期推定 `β̂₀ = β̂(W₀)`（`W₀ = (Z'Z)⁻¹`。2SLSと同じ点推定）。
     pub(crate) beta: Mat<f64>,
     /// 初期推定の残差 `ê₀ = y - Xβ̂₀`。
@@ -107,12 +116,14 @@ pub(crate) fn gmm_initial_step(
 ) -> Result<GmmInitialStep, CommonError> {
     let (n, l) = (z.nrows(), z.ncols());
     let ztz = z.transpose() * z;
-    let beta = gmm_point_estimate(z, x, y, &ztz)?;
+    let solution = gmm_solve(x, y, WhitenedInstruments::from_instruments(z)?)?;
+    let beta = solution.beta().clone();
     let residuals = y - x * &beta;
     let sigma2_0: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
     let classical_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
     Ok(GmmInitialStep {
         ztz,
+        solution,
         beta,
         residuals,
         classical_s,
@@ -133,11 +144,13 @@ pub(crate) fn gmm_iterate(
     x: &Mat<f64>,
     y: &Mat<f64>,
     ztz: &Mat<f64>,
+    solution0: GmmSolution,
     beta0: Mat<f64>,
     residuals0: Mat<f64>,
     classical_s: Mat<f64>,
 ) -> Result<GmmIteration, CommonError> {
     let n = z.nrows();
+    let mut solution = solution0;
     let mut beta = beta0;
     let mut residuals = residuals0;
     let mut s_used = classical_s;
@@ -181,7 +194,36 @@ pub(crate) fn gmm_iterate(
                 &residuals,
                 ztz,
             )?;
-            let beta_next = gmm_point_estimate(z, x, y, &s_next)?;
+            // 白色化: 古典的な重み`σ̂²Z'Z`は`Z`のQR分解、ロバスト・クラスターは`S`（対角を揃えた`D S D`）の
+            // 条件数が小さければ`S`のCholesky分解、大きければ`S = A'A`の`A`のQR分解（`S`を作らない。
+            // `A`の条件数の2乗で精度を失わない）。HACは`S`のCholesky分解。
+            let whitening = match weight_type {
+                WeightType::Classical => WhitenedInstruments::from_instruments(z)?,
+                WeightType::Robust | WeightType::Cluster { .. } => {
+                    match WhitenedInstruments::from_weight_if_well_conditioned(
+                        z,
+                        &s_next,
+                        WEIGHT_CHOLESKY_MAX_CONDITION,
+                    )? {
+                        Some(whitening) => whitening,
+                        None => {
+                            let rows = moment_factor_rows(
+                                weight_type,
+                                weight_cluster_codes,
+                                z,
+                                &residuals,
+                            )
+                            .ok_or_else(|| {
+                                CommonError::internal("the moment rows of the weight are missing")
+                            })?;
+                            WhitenedInstruments::from_factor_rows(z, &rows)?
+                        }
+                    }
+                }
+                WeightType::Hac { .. } => WhitenedInstruments::from_weight(z, &s_next)?,
+            };
+            let solution_next = gmm_solve(x, y, whitening)?;
+            let beta_next = solution_next.beta().clone();
             n_iter += 1;
 
             let just_converged = match tol {
@@ -190,6 +232,7 @@ pub(crate) fn gmm_iterate(
             };
 
             beta = beta_next;
+            solution = solution_next;
             residuals = y - x * &beta;
             s_used = s_next;
 
@@ -202,6 +245,7 @@ pub(crate) fn gmm_iterate(
 
     Ok(GmmIteration {
         beta,
+        solution,
         residuals,
         s_used,
         n_iter,
@@ -227,36 +271,16 @@ fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bo
 
 /// 重み行列`W=S⁻¹`によるGMMの点推定 `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y` を求める。
 ///
-/// `W`を明示的に逆行列として構築せず、`S`に対する連立方程式を`llt().solve(...)`で
-/// 解くことで数値的に安定させる（`two_sls/cov.rs`の`xtx_inverse`と同様、明示的な逆行列は
-/// 必要な箇所のみ`Mat::identity`を渡して求める設計だが、ここでは逆行列自体を後で
-/// 再利用しないため`solve`のみで完結させる）。
+/// `S = L L'`で白色化した操作変数の最小二乗として解く（[`gmm_solve`]。`X'ZWZ'X`は作らない）。
+/// 係数だけが要る呼び出し側（C統計量）の入口で、共分散・Wald検定の直交座標は返さない。
 pub(crate) fn gmm_point_estimate(
     z: &Mat<f64>,
     x: &Mat<f64>,
     y: &Mat<f64>,
     s: &Mat<f64>,
 ) -> Result<Mat<f64>, CommonError> {
-    let zx = z.transpose() * x; // (l, k)
-    let zy = z.transpose() * y; // (l, 1)
-
-    let llt_s = s
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::GmmWeight,
-        })?;
-    let s_inv_zx = llt_s.solve(&zx); // (l, k) = S⁻¹Z'X
-    let s_inv_zy = llt_s.solve(&zy); // (l, 1) = S⁻¹Z'y
-
-    let bread = zx.transpose() * &s_inv_zx; // (k, k) = X'ZS⁻¹Z'X
-    let meat = zx.transpose() * &s_inv_zy; // (k, 1) = X'ZS⁻¹Z'y
-
-    let llt_bread = bread
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::GmmBread,
-        })?;
-    Ok(llt_bread.solve(&meat))
+    let solution = gmm_solve(x, y, WhitenedInstruments::from_weight(z, s)?)?;
+    Ok(solution.beta().clone())
 }
 
 #[cfg(test)]

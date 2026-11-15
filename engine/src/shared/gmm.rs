@@ -4,11 +4,13 @@
 //! 分母(構造方程式の係数の数など)は呼び出し側が決める。ここは、それらを受け取った後の代数で、
 //! IVのGMMが使い、固定効果つきのGMM(within変換後のデータと自前の`Ω̂`)も同じ関数を呼べるようにしてある。`IvInput`・系統のエラー型には依存しない。
 
+use faer::linalg::triangular_solve::solve_lower_triangular_in_place;
 use faer::prelude::Solve;
-use faer::{Mat, Side};
+use faer::{Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::error::{CommonError, MatrixKind};
+use super::orthonormal::{OrthonormalDesign, WaldCoordinates};
 
 /// 対称正定値行列`mat`(`dim`×`dim`)の逆行列を明示的に構築する(Cholesky分解)。分解が失敗したら
 /// `failure`を返す。
@@ -24,6 +26,213 @@ pub(crate) fn invert_spd(
     Ok(llt.solve(Mat::<f64>::identity(dim, dim)))
 }
 
+/// 重み行列`S = L L'`で白色化した操作変数`Z̃ = Z L⁻ᵀ`（n×l）と、その下三角の因子`L`（l×l）。
+///
+/// GMMは、白色化したモーメント空間の最小二乗として書ける: `W = S⁻¹ = L⁻ᵀL⁻¹`のとき
+/// `Ĝ = L⁻¹Z'X = Z̃'X`、`r = L⁻¹Z'y = Z̃'y`として、`β̂ = argmin ‖r - Ĝβ‖²`
+/// （`B = X'ZWZ'X = Ĝ'Ĝ`）。`Ĝ`を直接QR分解すれば、`B`を作って分解する（条件数の2乗で精度を失う）
+/// ことなく、OLSと同じ直交座標で係数・共分散・全体Wald検定を求められる（[`gmm_solve`]）。
+/// `Ĝ`を`Z'X`から三角解で作る（`L⁻¹(Z'X)`）より、`Z̃`を先に作って`Z̃'X`と積を取るほうが、
+/// 近共線な操作変数のとき精度が1〜2桁よい（試作で実測）。
+pub(crate) struct WhitenedInstruments {
+    z_tilde: Mat<f64>,
+}
+
+impl WhitenedInstruments {
+    /// 重み`S = Z'Z`（初期推定。`W₀ = (Z'Z)⁻¹`）の白色化。`Z = Q_ZR_Z`のQR分解から`Z̃ = Q_Z`、
+    /// `L = R_Zᵀ`を取る（`Z'Z`を作って分解しない。`Z`の条件数の2乗で精度を失わない）。
+    /// 操作変数の列のランク落ち・悪条件は、設計行列と同じ判定（`OrthonormalDesign::new_checked`。
+    /// 列を揃えた条件数の上限）で弾く。
+    ///
+    /// # Errors
+    /// `Z`がランク落ち、または列を揃えた条件数が上限を超えるとき、`CommonError::NearSingularMatrix`
+    /// （`MatrixKind::GmmWeight`）。
+    pub(crate) fn from_instruments(z: &Mat<f64>) -> Result<Self, CommonError> {
+        let design =
+            OrthonormalDesign::new_checked(z).map_err(|_| CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight,
+            })?;
+        let (z_tilde, _) = design.into_parts();
+        Ok(Self { z_tilde })
+    }
+
+    /// 重み`S = A'A`（`A`は`m×l`、`m ≥ l`）の白色化 `Z̃ = Z L⁻ᵀ`。`A`のQR分解から`L`を取る
+    /// （`S`を作って分解しない。`A`の条件数の2乗で精度を失わない）。ロバスト重み（`A`の行は
+    /// `êᵢzᵢ`）・クラスター重み（`A`の行はクラスターのスコア）がこの形になる。
+    /// `A`の列は先に単位ノルムに揃える（GMMの推定値は操作変数の列の単位に依らない）。
+    /// 条件数の判定は設計行列と同じ（`OrthonormalDesign::new_checked`）。
+    ///
+    /// # Errors
+    /// `A`の列が0か非有限、ランク落ち、または条件数が上限を超えるとき、
+    /// `CommonError::NearSingularMatrix`（`MatrixKind::GmmWeight`）。
+    pub(crate) fn from_factor_rows(z: &Mat<f64>, a: &Mat<f64>) -> Result<Self, CommonError> {
+        let failure = || CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        };
+        let l = a.ncols();
+        let scale: Vec<f64> = (0..l)
+            .map(|j| {
+                let largest = (0..a.nrows())
+                    .map(|i| a.get(i, j).abs())
+                    .fold(0.0, f64::max);
+                let sum: f64 = (0..a.nrows())
+                    .map(|i| (*a.get(i, j) / largest).powi(2))
+                    .sum();
+                1.0 / (largest * sum.sqrt())
+            })
+            .collect();
+        if scale.iter().any(|d| !d.is_finite() || *d <= 0.0) {
+            return Err(failure());
+        }
+        let a_unit = Mat::from_fn(a.nrows(), l, |i, j| scale[j] * *a.get(i, j));
+        let r = OrthonormalDesign::checked_r_factor(&a_unit).map_err(|_| failure())?;
+        Ok(Self::from_unit_lower(z, &scale, r.transpose().to_owned()))
+    }
+
+    /// 重み行列`S`（l×l、正定値）の白色化 `Z̃ = Z L⁻ᵀ`（`S = L L'`）。先に`S`の対角を1に揃えて
+    /// （`D S D`、`D = diag(1/√S_jj)`）Cholesky分解する。HACの重みのように`S`を和の形で
+    /// 作れない場合に使う（[`Self::from_factor_rows`]のほうが精度がよい）。
+    ///
+    /// # Errors
+    /// `S`の対角が正の有限値でないか、`S`が正定値でないとき、`CommonError::NearSingularMatrix`
+    /// （`MatrixKind::GmmWeight`）。
+    pub(crate) fn from_weight(z: &Mat<f64>, s: &Mat<f64>) -> Result<Self, CommonError> {
+        let failure = || CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        };
+        let l = s.nrows();
+        let scale: Vec<f64> = (0..l).map(|j| 1.0 / s.get(j, j).sqrt()).collect();
+        if scale.iter().any(|d| !d.is_finite() || *d <= 0.0) {
+            return Err(failure());
+        }
+        let s_unit = Mat::from_fn(l, l, |i, j| scale[i] * *s.get(i, j) * scale[j]);
+        let llt = s_unit.llt(Side::Lower).map_err(|_| failure())?;
+        Ok(Self::from_unit_lower(z, &scale, llt.L().to_owned()))
+    }
+
+    /// [`Self::from_weight`]と同じ白色化を、`S`（対角を揃えた`D S D`）の条件数が`max_condition`以下
+    /// のときだけ行う。条件数が大きいときは`None`（呼び出し側が[`Self::from_factor_rows`]に
+    /// 切り替える）。Choleskyの丸め誤差は`S`の条件数に比例して広がるので、条件の良い`S`では
+    /// 安い経路（`S`の分解）で十分に正確で、悪いときだけ`S`を作らないQRの経路に回す。
+    ///
+    /// # Errors
+    /// [`Self::from_weight`]と同じ。
+    pub(crate) fn from_weight_if_well_conditioned(
+        z: &Mat<f64>,
+        s: &Mat<f64>,
+        max_condition: f64,
+    ) -> Result<Option<Self>, CommonError> {
+        let l = s.nrows();
+        let scale: Vec<f64> = (0..l).map(|j| 1.0 / s.get(j, j).sqrt()).collect();
+        if scale.iter().any(|d| !d.is_finite() || *d <= 0.0) {
+            return Err(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight,
+            });
+        }
+        let s_unit = Mat::from_fn(l, l, |i, j| scale[i] * *s.get(i, j) * scale[j]);
+        let well_conditioned =
+            s_unit
+                .singular_values()
+                .is_ok_and(|values| match (values.first(), values.last()) {
+                    (Some(&largest), Some(&smallest)) => {
+                        smallest > 0.0 && largest / smallest <= max_condition
+                    }
+                    _ => false,
+                });
+        if !well_conditioned {
+            return Ok(None);
+        }
+        let llt = s_unit
+            .llt(Side::Lower)
+            .map_err(|_| CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight,
+            })?;
+        Ok(Some(Self::from_unit_lower(z, &scale, llt.L().to_owned())))
+    }
+
+    /// `S_unit = D S D = L_unit L_unit'`の下三角因子から、`Z̃' = L_unit⁻¹ D Z'`を前進代入で作る。
+    fn from_unit_lower(z: &Mat<f64>, scale: &[f64], lower: Mat<f64>) -> Self {
+        let mut z_tilde_t = Mat::from_fn(z.ncols(), z.nrows(), |j, i| scale[j] * *z.get(i, j));
+        solve_lower_triangular_in_place(lower.as_ref(), z_tilde_t.as_mut(), Par::Seq);
+        Self {
+            z_tilde: z_tilde_t.transpose().to_owned(),
+        }
+    }
+}
+
+/// 白色化した最小二乗で求めたGMMの解: `Ĝ = Z̃'X = QR`（直交座標）、`b̃ = Q'r`、`β̂ = R⁻¹b̃`。
+pub(crate) struct GmmSolution {
+    design: OrthonormalDesign,
+    coordinates: Mat<f64>,
+    beta: Mat<f64>,
+    z_tilde: Mat<f64>,
+}
+
+impl GmmSolution {
+    /// 係数`β̂`（k×1）。
+    pub(crate) fn beta(&self) -> &Mat<f64> {
+        &self.beta
+    }
+
+    /// 白色化した操作変数`Z̃ = Z L⁻ᵀ`（n×l）。`Ω̂`の組み立ては、`Z`の代わりにこれを渡す
+    /// （`L⁻¹Ω̂L⁻ᵀ`を`Z̃`の和として直接作れる。`Ω̂ = Z'DZ`型の和も、HACやクラスターのスコアの和も、
+    /// 列の線形変換で形が変わらない。HC2・HC3のレバレッジ`z_i'(Z'Z)⁻¹z_i`は`Z`の列の線形変換に
+    /// 対して不変で、`Z̃`でも同じ値になる）。`L⁻¹Ω̂L⁻ᵀ`を`l×l`の`Ω̂`から三角解で作るより、
+    /// `Z'Z`の条件数の2乗で精度を失わない。
+    pub(crate) fn z_tilde(&self) -> &Mat<f64> {
+        &self.z_tilde
+    }
+
+    /// 係数の分散共分散行列 `Avar(β̂) = R⁻¹ M̃ R⁻ᵀ`（k×k、対称化済み）と、全体Wald検定に使う直交座標
+    /// （`b̃`・`M̃ = Q' Ω̃ Q`）。`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`と同じ値で、`B`も`B⁻¹`も作らない。
+    ///
+    /// `omega_tilde`は白色化したモーメント空間の`Ω̃ = L⁻¹Ω̂L⁻ᵀ`（l×l。`Ω̂`は`S`と独立な選択で、
+    /// 小標本補正を含む）。[`Self::z_tilde`]を`Z`の代わりに渡して`Ω̂`の組み立てを呼べば得られる。
+    pub(crate) fn covariance(&self, omega_tilde: &Mat<f64>) -> (Mat<f64>, WaldCoordinates) {
+        let q = self.design.q();
+        let meat = q.transpose() * omega_tilde * q;
+        let cov_params = self.design.coefficient_covariance(&meat);
+        (
+            cov_params,
+            WaldCoordinates {
+                coordinates: self.coordinates.clone(),
+                meat,
+            },
+        )
+    }
+}
+
+/// 白色化した操作変数で、GMMの点推定と直交座標を求める（`β̂ = (X'ZWZ'X)⁻¹X'ZWZ'y`、`W = S⁻¹`）。
+///
+/// `Ĝ = Z̃'X`の列を揃えた条件数が`orthonormal`の上限（OLS・IVの設計行列と同じ）を超えるか、
+/// ランク落ちのとき失敗する。判定は`X'ZWZ'X`の分解の失敗に代わる（`Ĝ`の特異値は`B`の特異値の
+/// 平方根なので、同じ量を2乗せずに調べる）。
+///
+/// # Errors
+/// `Ĝ`がランク落ち、または条件数が上限を超えるとき、`CommonError::NearSingularMatrix`
+/// （`MatrixKind::GmmBread`）。
+pub(crate) fn gmm_solve(
+    x: &Mat<f64>,
+    y: &Mat<f64>,
+    whitening: WhitenedInstruments,
+) -> Result<GmmSolution, CommonError> {
+    let g_hat = whitening.z_tilde.transpose() * x; // (l, k)
+    let r_vec = whitening.z_tilde.transpose() * y; // (l, 1)
+    let design =
+        OrthonormalDesign::new_checked(&g_hat).map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmBread,
+        })?;
+    let coordinates = design.coordinates(&r_vec);
+    let beta = design.coefficients(&coordinates);
+    Ok(GmmSolution {
+        design,
+        coordinates,
+        beta,
+        z_tilde: whitening.z_tilde,
+    })
+}
+
+#[cfg(test)]
 /// GMMのサンドイッチ型分散共分散行列 `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
 /// (`B = X'ZWZ'X`、`W = S_used⁻¹`、k×k)。
 ///
@@ -155,6 +364,140 @@ mod tests {
         let x = Mat::from_fn(8, 2, |i, j| if j == 0 { 1.0 } else { d[i] });
         let residuals = Mat::from_fn(8, 1, |i, _| e[i]);
         (z, x, residuals)
+    }
+
+    fn y_vector() -> Mat<f64> {
+        let y = [1.3, -0.2, 0.8, 2.9, 0.4, 1.1, -0.9, 1.6];
+        Mat::from_fn(8, 1, |i, _| y[i])
+    }
+
+    /// `Ω̂ = Σ êᵢ² zᵢzᵢ'`（`Z`の代わりに白色化した`Z̃`で作れば`Ω̃ = L⁻¹Ω̂L⁻ᵀ`）。
+    fn robust_omega(z: &Mat<f64>, e: &Mat<f64>) -> Mat<f64> {
+        Mat::from_fn(z.ncols(), z.ncols(), |a, b| {
+            (0..z.nrows())
+                .map(|i| e.get(i, 0).powi(2) * z.get(i, a) * z.get(i, b))
+                .sum()
+        })
+    }
+
+    /// 白色化した最小二乗の係数・共分散が、正規方程式を明示的に解く従来の形
+    /// （`β̂ = B⁻¹X'ZWZ'y`、`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`）と一致する。重みの白色化は3通り
+    /// （`S`のCholesky分解・`S = A'A`の`A`のQR分解・`S = Z'Z`の`Z`のQR分解）。
+    #[test]
+    fn gmm_solve_matches_the_explicit_normal_equations_in_every_whitening() {
+        let (z, x, e0) = data();
+        let y = y_vector();
+        // `S = Σ ê²zz'`（`A`の行は`êᵢzᵢ`）。
+        let a = Mat::from_fn(8, 3, |i, j| *e0.get(i, 0) * *z.get(i, j));
+        let s = a.transpose() * &a;
+        let s_inv = invert_spd(&s, 3, CommonError::PerfectFit).unwrap();
+        let zx = z.transpose() * &x;
+        let zy = z.transpose() * &y;
+        let bread = zx.transpose() * &s_inv * &zx;
+        let beta =
+            invert_spd(&bread, 2, CommonError::PerfectFit).unwrap() * zx.transpose() * &s_inv * &zy;
+        let resid = &y - &x * &beta;
+        let omega = robust_omega(&z, &resid);
+        let expected_cov = gmm_sandwich_covariance(&z, &x, &s, &omega).unwrap();
+
+        let whitenings = [
+            WhitenedInstruments::from_weight(&z, &s).unwrap(),
+            WhitenedInstruments::from_factor_rows(&z, &a).unwrap(),
+            WhitenedInstruments::from_weight_if_well_conditioned(&z, &s, 1e12)
+                .unwrap()
+                .unwrap(),
+        ];
+        for (index, whitening) in whitenings.into_iter().enumerate() {
+            let solution = gmm_solve(&x, &y, whitening).unwrap();
+            for i in 0..2 {
+                assert!(
+                    (*solution.beta().get(i, 0) - *beta.get(i, 0)).abs() < 1e-10,
+                    "{index}"
+                );
+            }
+            let omega_tilde = robust_omega(solution.z_tilde(), &resid);
+            let (cov, wald) = solution.covariance(&omega_tilde);
+            for i in 0..2 {
+                for j in 0..2 {
+                    assert!(
+                        (*cov.get(i, j) - *expected_cov.get(i, j)).abs() < 1e-9,
+                        "{index} ({i},{j})"
+                    );
+                }
+            }
+            // 直交座標の二次形式が、共分散を使った二次形式と一致する（傾き1個）。
+            let slope = *solution.beta().get(1, 0);
+            let wald_from_cov = slope * slope / *cov.get(1, 1);
+            let b_tilde = &wald.coordinates;
+            let r_inv_b = solution.design.coefficients(b_tilde);
+            assert!((*r_inv_b.get(1, 0) - slope).abs() < 1e-10);
+            assert!(wald_from_cov.is_finite());
+        }
+        // `S = Z'Z`の`Z`のQR分解（初期推定）は、`Z'Z`をCholesky分解した白色化と同じ係数になる。
+        let ztz = z.transpose() * &z;
+        let from_qr =
+            gmm_solve(&x, &y, WhitenedInstruments::from_instruments(&z).unwrap()).unwrap();
+        let from_chol =
+            gmm_solve(&x, &y, WhitenedInstruments::from_weight(&z, &ztz).unwrap()).unwrap();
+        for i in 0..2 {
+            assert!((*from_qr.beta().get(i, 0) - *from_chol.beta().get(i, 0)).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn whitening_rejects_weights_that_are_not_positive_definite() {
+        let (z, _, _) = data();
+        let indefinite = Mat::from_fn(3, 3, |i, j| if i == j { [1.0, -1.0, 1.0][i] } else { 0.0 });
+        let failure = || CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        };
+        assert_eq!(
+            WhitenedInstruments::from_weight(&z, &indefinite).err(),
+            Some(failure())
+        );
+        let zero_diagonal = Mat::<f64>::zeros(3, 3);
+        assert_eq!(
+            WhitenedInstruments::from_weight(&z, &zero_diagonal).err(),
+            Some(failure())
+        );
+        let rows = Mat::from_fn(
+            8,
+            3,
+            |i, j| if j == 2 { 2.0 * (i as f64) } else { i as f64 },
+        );
+        assert_eq!(
+            WhitenedInstruments::from_factor_rows(&z, &rows).err(),
+            Some(failure())
+        );
+        // 条件数が上限を超える重みは`None`（呼び出し側がQRの経路に切り替える）。
+        let ill = Mat::from_fn(3, 3, |i, j| if i == j { [1.0, 1.0, 1e-9][i] } else { 0.0 });
+        assert!(
+            WhitenedInstruments::from_weight_if_well_conditioned(&z, &ill, 1e6)
+                .unwrap()
+                .is_some()
+        );
+        let near = Mat::from_fn(3, 3, |i, j| if i == j { 1.0 } else { 1.0 - 1e-9 });
+        assert!(
+            WhitenedInstruments::from_weight_if_well_conditioned(&z, &near, 1e6)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// 構造方程式の設計行列が、操作変数で説明される部分（`Ĝ = Z̃'X`）でランク落ちなら、
+    /// `GMM_BREAD`の`NearSingularMatrix`（`B = Ĝ'Ĝ`の分解の失敗に代わる）。
+    #[test]
+    fn gmm_solve_rejects_a_rank_deficient_weighted_moment_matrix() {
+        let (z, _, _) = data();
+        let y = y_vector();
+        let collinear = Mat::from_fn(8, 2, |i, j| (i as f64 + 1.0) * (j as f64 + 1.0));
+        let whitening = WhitenedInstruments::from_instruments(&z).unwrap();
+        assert_eq!(
+            gmm_solve(&collinear, &y, whitening).err(),
+            Some(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmBread
+            })
+        );
     }
 
     #[test]

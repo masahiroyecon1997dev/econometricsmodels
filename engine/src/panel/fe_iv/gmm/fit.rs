@@ -12,12 +12,10 @@ use crate::panel::fe_iv::common::{
     FeIvInput, WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
 };
 use crate::shared::error::CommonError;
-use crate::shared::gmm::gmm_sandwich_covariance;
 use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
 use crate::shared::gmm_weight::validate_weight_type;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::wald::wald_chi2_test;
-use faer::Mat;
 use statrs::distribution::Normal;
 
 /// [`FeGmmEstimator::fit_with_absorption`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
@@ -88,6 +86,7 @@ pub(super) fn fit_fe_gmm(
     // 初期推定: W₀ = (Z̃'Z̃)⁻¹（2SLSと同じ重み）。
     let GmmInitialStep {
         ztz,
+        solution: solution0,
         beta: beta0,
         residuals: residuals0,
         classical_s,
@@ -105,6 +104,7 @@ pub(super) fn fit_fe_gmm(
     // 方式（`gmm_type`）に応じた回数の再推定。
     let GmmIteration {
         beta,
+        solution,
         residuals,
         s_used,
         n_iter,
@@ -118,6 +118,7 @@ pub(super) fn fit_fe_gmm(
         &x,
         &y,
         &ztz,
+        solution0,
         beta0,
         residuals0,
         classical_s,
@@ -151,14 +152,18 @@ pub(super) fn fit_fe_gmm(
     let df_resid = n - df_model;
     let residual_values: Vec<f64> = (0..n).map(|i| *residuals.get(i, 0)).collect();
     let groups = input.index().effect_codes();
+    // `Ω̂`は白色化した`Z̃ = Z L⁻ᵀ`から組み立てて、直接`Ω̃ = L⁻¹Ω̂L⁻ᵀ`を得る（`iv::gmm`と同じ。
+    // HC2・HC3のレバレッジ`z_i'(Z'Z)⁻¹z_i`は`Z`の列の線形変換で変わらない）。
+    let z_tilde = solution.z_tilde();
+    let ztz_tilde = z_tilde.transpose() * z_tilde;
     let PanelMoment {
-        omega,
+        omega: omega_tilde,
         dk_bandwidth_used,
     } = panel_moment_covariance(
         &cov_type,
         &PanelMomentInput {
-            z: &z,
-            ztz: &ztz,
+            z: z_tilde,
+            ztz: &ztz_tilde,
             residuals: &residual_values,
             df_resid,
             df_model,
@@ -167,7 +172,7 @@ pub(super) fn fit_fe_gmm(
             levels: &levels,
         },
     )?;
-    let cov_params = symmetrized(gmm_sandwich_covariance(&z, &x, &s_used, &omega)?);
+    let (cov_params, wald_coordinates) = solution.covariance(&omega_tilde);
 
     let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
     let InferenceTable {
@@ -181,11 +186,13 @@ pub(super) fn fit_fe_gmm(
     let wald = if k == 0 {
         None
     } else {
-        Some(wald_chi2_test(&beta, &cov_params, 0, k).map_err(|source| {
-            PanelError::FTestFailed {
-                source: source.into(),
-            }
-        })?)
+        Some(
+            wald_chi2_test(&wald_coordinates.coordinates, &wald_coordinates.meat, 0, k).map_err(
+                |source| PanelError::FTestFailed {
+                    source: source.into(),
+                },
+            )?,
+        )
     };
 
     // R²は構造残差ベース。between・overallは変換前の`y`と実際の`X`で`FeEstimator`と同じ式。
@@ -222,13 +229,6 @@ pub(super) fn fit_fe_gmm(
         r_squared_between,
         r_squared_overall,
         hansen_j,
-    })
-}
-
-/// 丸めで厳密には非対称な`cov_params`を対称化する（`gmm_sandwich_covariance`は対称化しない）。
-fn symmetrized(cov: Mat<f64>) -> Mat<f64> {
-    Mat::from_fn(cov.nrows(), cov.ncols(), |i, j| {
-        0.5 * (*cov.get(i, j) + *cov.get(j, i))
     })
 }
 

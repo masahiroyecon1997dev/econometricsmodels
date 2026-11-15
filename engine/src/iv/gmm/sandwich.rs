@@ -14,13 +14,16 @@ use crate::shared::covariance::{
     resolve_hac_lags, time_ordering,
 };
 use crate::shared::error::{ClusterSetting, CommonError};
-use crate::shared::gmm::{gmm_sandwich_covariance, invert_spd};
+use crate::shared::gmm::{GmmSolution, invert_spd};
 use crate::shared::gmm_weight::hac_moment_covariance;
 use crate::shared::group_codes::GroupCodes;
+use crate::shared::orthonormal::WaldCoordinates;
 
 /// [`sandwich_covariance`]の戻り値。
 pub(super) struct GmmCovariance {
     pub(super) cov_params: Mat<f64>,
+    /// 全体Wald検定に使う直交座標（`b̃`・`M̃`。`cov_params = R⁻¹M̃R⁻ᵀ`と同じ計算から出る）。
+    pub(super) wald: WaldCoordinates,
     /// `cov_type=Hac`のとき実際に使われたラグ数。それ以外では`None`。
     pub(super) hac_lags_used: Option<usize>,
 }
@@ -28,18 +31,28 @@ pub(super) struct GmmCovariance {
 /// GMMのサンドイッチ型係数分散共分散行列
 /// `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`B = X'ZWZ'X`、`W = S_used⁻¹`は点推定に実際に使った
 /// 重み、k×k）。`gmm.rs`のモジュールdoc「標準誤差・検定統計量（cov_type対応）」参照。
+/// 代数は白色化した最小二乗の直交座標（`solution`。`shared::gmm::GmmSolution`）で行い、
+/// `B`も`B⁻¹`も作らない。ここは`cov_type`ごとの`Ω̂`を組み立てる。
 ///
 /// `df_resid`は`cov_type=Classical`の`σ̂² = Σ(êᵢ-ē)²/df_resid`にだけ使う（`fit()`は`n - k`を
 /// 渡す）。HC1・クラスターの小標本補正は`n`・`k`（`x`の形）に従う。
 pub(super) fn sandwich_covariance(
     cov_type: &CovType,
-    z: &Mat<f64>,
     x: &Mat<f64>,
     residuals: &Mat<f64>,
-    ztz: &Mat<f64>,
-    s_used: &Mat<f64>,
+    solution: &GmmSolution,
     df_resid: usize,
 ) -> Result<GmmCovariance, IvError> {
+    // `Ω̂`は、`Z`ではなく白色化した`Z̃ = Z L⁻ᵀ`から組み立てて、直接`Ω̃ = L⁻¹Ω̂L⁻ᵀ`を得る
+    // （`GmmSolution::z_tilde`）。以下の`z`・`ztz`は`Z̃`・`Z̃'Z̃`。
+    let z = solution.z_tilde();
+    // `Z̃'Z̃`は古典的な`Ω̂`と、HC2・HC3のレバレッジにだけ使う（他では作らない）。
+    let ztz_tilde = if matches!(cov_type, CovType::Classical | CovType::Hc2 | CovType::Hc3) {
+        z.transpose() * z
+    } else {
+        Mat::zeros(0, 0)
+    };
+    let ztz = &ztz_tilde;
     let n = z.nrows();
     let l = z.ncols();
     let k = x.ncols();
@@ -81,9 +94,10 @@ pub(super) fn sandwich_covariance(
         }
     };
 
-    let cov_params = gmm_sandwich_covariance(z, x, s_used, &omega_hat)?;
+    let (cov_params, wald) = solution.covariance(&omega_hat);
     Ok(GmmCovariance {
         cov_params,
+        wald,
         hac_lags_used,
     })
 }

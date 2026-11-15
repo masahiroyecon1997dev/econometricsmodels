@@ -87,14 +87,25 @@ QRのままでは`cond(X)`が`1e8`〜`1e15`の設計も推定でき、残差が�
 
 REの最終回帰と、Hausmanのcluster・DK経路は、`fit_auxiliary`（QR 1回）の後に同じ設計行列を`OrthonormalDesign::new`でもう一度分解している（`OlsEstimator`が`R`・`Q`を保持しないため）。計測では時間が変更前以下（clusterの+12%はノイズの範囲）なので、整理は見送った。
 
+### 再レビュー後の追加（段階5、2026-11-15）
+
+再レビュー（`rust-reviewer`・`testing-completeness-reviewer`）の指摘に対応した。
+
+- **ランク判定も列を揃えた`R`で行う**（`cd58e20c`）。生の`R`の相対閾値`max|R_ii|`だと、共線な2列を1e-12倍するだけで`DESIGN_MATRIX_SINGULAR`として先に弾かれ、条件数のガードの不変性が活きなかった（変更前から同じ挙動）。列を揃えた行列を1度作り、ランク判定と条件数の両方を行う。共線な2列の単位を1e±12倍しても、6手法で境界が動かない。
+- 失敗の契約（FE・FE-IVの全体F検定の`FTestFailed`、FE-IVのWu-Hausmanの`None`、REのHausmanの`HausmanTestFailed`）は、データから厳密に特異な共分散を作ると特異性の判定が丸め誤差の大きさで決まり不安定になるので、写像を小さな関数に切り出し、手組みの零行列の`M̃`で決定的にテストする（`panel/common/overall_wald.rs`・`panel/fe_iv/wu_hausman.rs`・`panel/re/hausman/tests/undefined.rs`）。`g = q+1`のクラスターのテスト（`test_unit_invariance.py`・`ols/cov_params/tests/cluster.rs`）は、固有値が約1e-17という丸め誤差級の特異性に依存したままで、堅牢な代替を作れなかった。
+- **REの別名窓**: Hausman補助回帰とbetween回帰は相対残差1e-7未満の列を別名として落とす（Rの`lm`流。相関ランダム効果のための設計で、変更前から同じ）。傾きの相対差が約3e-7以下で`hausman_df`が2から1に減り、統計量と`θ`が変わる。条件数のガード（5e7）とは別の判定。既存の設計として残し、`validation.md`に明記し、挙動をテストで固定した（`test_near_collinear_reparametrization.py`）。
+- **精度の検証**: 傾き2列を`(x1, (x2-x1)/2^k)`に厳密に置き換えた設計（引き算と2の冪での割り算は正確）との一致を、RE・hac・dk・Hausman・Wu-Hausmanで確かめる（実測の最大差7.3e-9。変更前の実装は同じ設計で最大39%ずれた）。有理数の厳密値との照合は、OLS・WLS・IV・FE・FE-IVの全`cov_type`のWald・係数・標準誤差（ロバスト標準誤差を含む）に広げた。変更前のRE（classical）のHausmanは、傾きの相対差1e-6で厳密値から1.1%ずれていた。
+- IV GMM・Logit・Probit・Tobitは、ガードの対象外（GMMは共分散を作って反転する従来の経路で、近共線の設計に対して2SLSより厳しく止まる。Logit・Probit・TobitはHessianの境界）。FE-GMMはPythonのAPIに公開されていない。
+- `RTOL_WALD_CARD_CLUSTER`は2SLSの特例を外した（相対差が8.5e-10・6.8e-11に改善。基本の許容誤差1e-8で比べる）。GMMの2つだけ`5e-8`を残した。
+
 ## 7. 解決済みの事項
 
 `least_squares`の`(X'X)⁻¹`（`DESIGN_GRAM`）の扱い: 本体から`least_squares`を外し、`new_checked`の条件数のガードで同じ受け入れ範囲を保つ（上の「計測と、QR 1本への統合・条件数のガード」）。
 
 ## 8. 次の手順（`/clear`後の再開用）
 
-1. 本ノートと`git -C /workspaces/econometricsmodels-wald log --oneline -6`・`git status`で状態を確認する。ワークツリーの`.venv`にはdebugビルドの拡張が入っている（`uv run --no-sync pytest`で使う）。最新のコミットは`cf30c291`。検証の結果: `cargo test -p engine` 1558件、`pytest tests --check-error-coverage` 14741件、clippy・fmt・ruff通過。
-2. レビューの再実行: `rust-reviewer`と`testing-completeness-reviewer`（サブエージェント）に通し、指摘を反映する。メインの作業ツリーとは別のgit worktreeなので、サブエージェントには差分ファイル（`git diff de8a6c8c..HEAD`をスクラッチパッドへ書き出したもの）と、ワークツリーの絶対パスで読むよう指示する。前回のレビューの指摘のうち、失敗の契約（FE`FTestFailed`・RE`HausmanTestFailed`・FE-IVのWu-Hausman→`None`）の固定と、`g = q+1`のクラスターのテスト（丸め誤差級の特異性に依存）は、堅牢な入力を作れず未対応。
+1. 本ノートと`git -C /workspaces/econometricsmodels-wald log --oneline -6`・`git status`で状態を確認する。ワークツリーの`.venv`にはdebugビルドの拡張が入っている（`uv run --no-sync pytest`で使う）。最新のコミットは段階5cのもの（`git log`で確認）。検証の結果: `cargo test -p engine` 1567件、`pytest tests --check-error-coverage` 14899件、clippy・fmt・ruff通過。
+2. 必要なら最終確認のレビュー（`rust-reviewer`・`testing-completeness-reviewer`）。メインの作業ツリーとは別のgit worktreeなので、サブエージェントには差分ファイル（`git diff de8a6c8c..HEAD`をスクラッチパッドへ書き出したもの）と、ワークツリーの絶対パスで読むよう指示する。再レビューの指摘は段階5で対応済み（上の「再レビュー後の追加」）。未対応は、`g = q+1`のクラスターのテスト（丸め誤差級の特異性に依存し、他OSで合否が変わりうる）。
 3. `release/v0.10.0`へ取り込む: 先に捨てる一時ワークツリーで`git cherry-pick -n`し、`cargo test -p engine`が通ることを確かめる（`release/v0.10.0`は先へ進んでいる）。その後、メインの作業ツリー（`release/v0.10.0`をチェックアウト済み）で`git cherry-pick <コミット>...`（署名の確認がホストに出る）。並行作業の未コミット変更とファイルが重ならないことを`git status`で確認する。pushとIssueのクローズは、ユーザーが指示してから。
 4. 後片付け（ユーザーの確認後）: `git worktree remove --force /workspaces/econometricsmodels-wald`、`git worktree remove --force /workspaces/econometricsmodels-base`、`git branch -D feat/wald-qr-statistic`。取り込み後は内容が同じであることを`git diff`で確認してから消す。
 5. #658の受け入れ条件の確認と、別Issueの起票（ユーザーの承認後。英語）: (a) IV GMM・FE-GMM・Tobitの直交座標の経路（設計行列のQRを持たず、breadが`Z'X`側・Hessian側なので別設計）、(b) #535（IV `card`のcluster共分散の精度）への影響の確認。IV 2SLSのcluster共分散は`V = R⁻¹M̃R⁻ᵀ`になったので、`RTOL_WALD_CARD_CLUSTER`（`tests/support/_tolerances_iv.py`、現状`5e-8`。`tests/iv/test_iv_reference.py`の`card`のcluster照合が使う）を測り直し、`1e-8`へ戻せるかを#535に報告する。

@@ -139,22 +139,18 @@ def _check_result(
     check_wu_hausman: bool = True,
     n_clusters: int | None = None,
     check_sargan: bool = True,
-    rtol_wald: float = RTOL_STRICT,
 ) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL_STRICT, atol=ATOL)
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
-    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
-    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
     _assert_fields_close(res, ref, ("r_squared", "adj_r_squared"), label)
     assert_fields_close(
         res,
         ref,
         (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
         label,
-        rtol=rtol_wald,
+        rtol=RTOL_STRICT,
         atol=ATOL,
     )
 
@@ -583,5 +579,4 @@ def test_card_cluster_matches_r(crosscheck_wooldridge):
         crosscheck_wooldridge["card"]["cluster"],
         "card/cluster/R",
         n_clusters=df[CARD_REGION_COLUMN].n_unique(),
-        rtol_wald=TOLERANCES["iv_crosscheck"]["rtol_wald_card_cluster"],
     )

@@ -77,6 +77,12 @@ _FITTERS: dict[str, Callable[[pl.DataFrame], object]] = {
 # 2.5倍以上の余裕がある）。
 _INSIDE = [1e-5, 1e-6, 1e-7]
 _OUTSIDE = [1e-9, 1e-10, 1e-11]
+# 境界の近く: 列を揃えた条件数は、`eps = 5e-8`で約4e7（上限5e7の内側、約1.2倍の余裕）、
+# `eps = 3e-8`で約9e7（外側、約1.8倍）。手法ごとの前処理（WLSの重み、FEのwithin変換、REの`θ`、
+# IVの`X̂`）が境界を桁単位でずらさないことを、1.2〜1.8倍の幅で固定する。条件数の計算誤差は
+# 約1e-9で、他のOSでも合否は変わらない。
+_NEAR_INSIDE = 5e-8
+_NEAR_OUTSIDE = 3e-8
 # 条件数が約1e12を超える範囲（列の順序によって、ランク落ちか悪条件かが変わる）。
 _FAR_BEYOND = [1e-12, 1e-13, 1e-14]
 
@@ -125,3 +131,11 @@ def test_the_limit_does_not_move_with_the_unit_of_the_correlated_columns(
     _FITTERS[method](_data(_INSIDE[-1], scale))
     with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="DESIGN_GRAM"):
         _FITTERS[method](_data(_OUTSIDE[0], scale))
+
+
+@pytest.mark.parametrize("method", list(_FITTERS))
+def test_the_limit_is_the_same_close_to_the_boundary_in_every_method(method):
+    """境界の近く（上限の0.8倍と1.8倍の条件数）でも、全手法が同じ側に分かれる。"""
+    _FITTERS[method](_data(_NEAR_INSIDE))
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="DESIGN_GRAM"):
+        _FITTERS[method](_data(_NEAR_OUTSIDE))

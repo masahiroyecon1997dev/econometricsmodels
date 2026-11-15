@@ -12,16 +12,16 @@ OLS・WLS・IV 2SLS・FE・FE-IVは、共分散と全体のWald/F統計量を直
 
 from __future__ import annotations
 
-from functools import partial
+from functools import cache, partial
 
 import numpy as np
 import polars as pl
 import pytest
 from _assertions import assert_close
 from _exact_wald import (
-    exact_coefficients,
+    ExactInference,
+    exact_inference,
     exact_projected_design,
-    exact_slope_wald,
 )
 from _tolerances import TOLERANCES
 from econometricsmodels import (
@@ -40,6 +40,9 @@ from econometricsmodels import (
 assert_wald_close = partial(assert_close, **TOLERANCES["near_collinear_wald"])
 assert_coef_close = partial(
     assert_close, **TOLERANCES["near_collinear_coefficient"]
+)
+assert_se_close = partial(
+    assert_close, **TOLERANCES["near_collinear_standard_error"]
 )
 
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "cluster"]
@@ -141,33 +144,41 @@ def _cluster_label(
     return df[column].to_list() if cov_type == "cluster" else None
 
 
-def _ols_options(cov_type: str) -> OLSOptions:
-    return OLSOptions(
+# ── 手法ごとのケース ──────────────────────────────────────────────────
+#
+# 各`_<手法>_case(cov_type, eps)`は、推定結果（`res`）・全体Wald統計量（`W = F·q`）・係数と
+# 標準誤差の厳密値（有理数。`ExactInference`）を返す。同じ組合せで、全体Waldと係数・標準誤差の
+# 2つのテストが使うので、有理数の計算は1回に抑える（キャッシュ）。
+
+
+class _Case:
+    """推定結果と、同じ入力の厳密値。"""
+
+    def __init__(self, res, wald: float, exact: ExactInference) -> None:
+        self.res = res
+        self.wald = wald
+        self.exact = exact
+
+
+@cache
+def _ols_case(cov_type: str, eps: float) -> _Case:
+    df = _ols_data(eps)
+    options = OLSOptions(
         cov_type=cov_type, cluster="g" if cov_type == "cluster" else None
     )
-
-
-# ── OLS・WLS ──────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("eps", EPS)
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_ols_wald_matches_the_exact_value(cov_type, eps):
-    df = _ols_data(eps)
-    res = OLS(df, "y", ["x1", "x2"], options=_ols_options(cov_type)).fit()
+    res = OLS(df, "y", ["x1", "x2"], options=options).fit()
     x = [[1.0, a, b] for a, b in zip(df["x1"], df["x2"], strict=True)]
-    exact = exact_slope_wald(
+    exact = exact_inference(
         x,
         df["y"].to_list(),
         cov_type=cov_type,
         groups=_cluster_label(cov_type, df, "g"),
     )
-    assert_wald_close(res.f_statistic * 2, exact, f"OLS {cov_type} eps={eps}")
+    return _Case(res, res.f_statistic * 2, exact)
 
 
-@pytest.mark.parametrize("eps", EPS)
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_wls_wald_matches_the_exact_value(cov_type, eps):
+@cache
+def _wls_case(cov_type: str, eps: float) -> _Case:
     """WLSは`sqrt(w)`倍した変数へのOLSと同じ。厳密値も、同じ`sqrt(w)`倍の値から求める。"""
     df = _ols_data(eps)
     options = WLSOptions(
@@ -178,22 +189,28 @@ def test_wls_wald_matches_the_exact_value(cov_type, eps):
     x = np.column_stack(
         [root_w, df["x1"].to_numpy() * root_w, df["x2"].to_numpy() * root_w]
     )
-    exact = exact_slope_wald(
+    exact = exact_inference(
         x.tolist(),
         (df["y"].to_numpy() * root_w).tolist(),
         cov_type=cov_type,
         groups=_cluster_label(cov_type, df, "g"),
     )
-    assert_wald_close(res.f_statistic * 2, exact, f"WLS {cov_type} eps={eps}")
+    return _Case(res, res.f_statistic * 2, exact)
 
 
-# ── FE ────────────────────────────────────────────────────────────────
-
-
-def _fe_exact(df: pl.DataFrame, cov_type: str) -> float:
+@cache
+def _fe_case(cov_type: str, eps: float) -> _Case:
+    df = _panel_data(eps)
+    res = FE(
+        df,
+        y="y",
+        x=["x1", "x3"],
+        effects=["entity"],
+        options=FEOptions(cov_type=cov_type),
+    ).fit()
     rows = _within(df, ["x1", "x3", "y"])
     n = df.height
-    return exact_slope_wald(
+    exact = exact_inference(
         [row[:2] for row in rows],
         _column(rows, 2),
         cov_type=cov_type,
@@ -203,32 +220,11 @@ def _fe_exact(df: pl.DataFrame, cov_type: str) -> float:
         cluster_k=3,  # 個体でクラスターすると固定効果がネストされ、K = k + 1
         extra_leverage=[1 / N_PERIODS] * n,  # 固定効果ダミーのレバレッジ
     )
+    return _Case(res, res.f_statistic * 2, exact)
 
 
-@pytest.mark.parametrize("eps", EPS)
-@pytest.mark.parametrize("cov_type", PANEL_COV_TYPES)
-def test_fe_wald_matches_the_exact_value(cov_type, eps):
-    df = _panel_data(eps)
-    res = FE(
-        df,
-        y="y",
-        x=["x1", "x3"],
-        effects=["entity"],
-        options=FEOptions(cov_type=cov_type),
-    ).fit()
-    assert_wald_close(
-        res.f_statistic * 2,
-        _fe_exact(df, cov_type),
-        f"FE {cov_type} eps={eps}",
-    )
-
-
-# ── IV 2SLS・FE-IV ────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("eps", EPS)
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_iv_wald_matches_the_exact_value(cov_type, eps):
+@cache
+def _iv_case(cov_type: str, eps: float) -> _Case:
     df = _iv_data(eps)
     res = IV(
         df,
@@ -242,21 +238,18 @@ def test_iv_wald_matches_the_exact_value(cov_type, eps):
     ).fit()
     x = [[1.0, *row] for row in df.select("x1", "x2", "endog").rows()]
     z = [[1.0, *row] for row in df.select("x1", "x2", "z1", "z2", "z3").rows()]
-    exact = exact_slope_wald(
+    exact = exact_inference(
         x,
         df["y"].to_list(),
         cov_type=cov_type,
         groups=_cluster_label(cov_type, df, "g"),
         x_hat=exact_projected_design(z, x),
     )
-    assert_wald_close(
-        res.wald_statistic * res.wald_df_num, exact, f"IV {cov_type} eps={eps}"
-    )
+    return _Case(res, res.wald_statistic * res.wald_df_num, exact)
 
 
-@pytest.mark.parametrize("eps", EPS)
-@pytest.mark.parametrize("cov_type", PANEL_COV_TYPES)
-def test_fe_iv_wald_matches_the_exact_value(cov_type, eps):
+@cache
+def _fe_iv_case(cov_type: str, eps: float) -> _Case:
     df = _panel_data(eps)
     res = FEIV(
         df,
@@ -271,7 +264,7 @@ def test_fe_iv_wald_matches_the_exact_value(cov_type, eps):
     rows = _within(df, ["x1", "x3", "endog", "z1", "z2", "z3", "y"])
     x = [row[:3] for row in rows]
     z = [[row[0], row[1], row[3], row[4], row[5]] for row in rows]
-    exact = exact_slope_wald(
+    exact = exact_inference(
         x,
         _column(rows, 6),
         cov_type=cov_type,
@@ -282,61 +275,55 @@ def test_fe_iv_wald_matches_the_exact_value(cov_type, eps):
         extra_leverage=[1 / N_PERIODS] * n,
         x_hat=exact_projected_design(z, x),
     )
+    return _Case(res, res.wald_statistic * res.wald_df_num, exact)
+
+
+_CASES = {
+    "OLS": (_ols_case, COV_TYPES),
+    "WLS": (_wls_case, COV_TYPES),
+    "IV": (_iv_case, COV_TYPES),
+    "FE": (_fe_case, PANEL_COV_TYPES),
+    "FE-IV": (_fe_iv_case, PANEL_COV_TYPES),
+}
+
+_PARAMS = [
+    (method, cov_type, eps)
+    for method, (_, cov_types) in _CASES.items()
+    for cov_type in cov_types
+    for eps in EPS
+]
+_IDS = [f"{m}-{c}-{e:g}" for m, c, e in _PARAMS]
+
+
+@pytest.mark.parametrize(("method", "cov_type", "eps"), _PARAMS, ids=_IDS)
+def test_wald_matches_the_exact_value(method, cov_type, eps):
+    case = _CASES[method][0](cov_type, eps)
     assert_wald_close(
-        res.wald_statistic * res.wald_df_num,
-        exact,
-        f"FE-IV {cov_type} eps={eps}",
+        case.wald, case.exact.wald, f"{method} {cov_type} eps={eps}"
     )
 
 
-# ── 係数と標準誤差 ────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("eps", EPS)
-def test_ols_coefficients_and_standard_errors_match_the_exact_values(eps):
-    """係数の誤差は、標準誤差を単位にして測る（ほぼ共線な方向の係数は標準誤差が大きく、
-    その幅に比べて数値誤差が十分小さいこと）。標準誤差は相対で比べる。"""
-    df = _ols_data(eps)
-    res = OLS(df, "y", ["x1", "x2"]).fit()
-    x = [[1.0, a, b] for a, b in zip(df["x1"], df["x2"], strict=True)]
-    beta, se = exact_coefficients(x, df["y"].to_list())
-    for name, b_exact, se_exact in zip(res.param_names, beta, se, strict=True):
+@pytest.mark.parametrize(("method", "cov_type", "eps"), _PARAMS, ids=_IDS)
+def test_coefficients_and_standard_errors_match_the_exact_values(
+    method, cov_type, eps
+):
+    """係数の誤差は、標準誤差を単位にして測る（ほぼ共線な方向の係数は標準誤差が大きく、その幅に
+    比べて数値誤差が十分小さいこと）。標準誤差は厳密値との比で比べる（サンドイッチ共分散
+    `V = R⁻¹M̃R⁻ᵀ`の再構成の精度。`cov_type`ごとに確かめる）。"""
+    case = _CASES[method][0](cov_type, eps)
+    names = list(case.res.param_names)
+    assert len(names) == len(case.exact.beta)
+    for name, b_exact, se_exact in zip(
+        names, case.exact.beta, case.exact.se, strict=True
+    ):
+        label = f"{method} {cov_type} {name} eps={eps}"
         assert_coef_close(
-            abs(res.params[name] - b_exact) / se_exact,
+            abs(case.res.params[name] - b_exact) / se_exact,
             0.0,
-            f"OLS {name} error in standard errors, eps={eps}",
+            f"{label} coefficient error in standard errors",
         )
-        assert_coef_close(
-            res.std_errors[name] / se_exact,
+        assert_se_close(
+            case.res.std_errors[name] / se_exact,
             1.0,
-            f"OLS {name} standard error ratio, eps={eps}",
-        )
-
-
-@pytest.mark.parametrize("eps", EPS)
-def test_fe_coefficients_and_standard_errors_match_the_exact_values(eps):
-    df = _panel_data(eps)
-    res = FE(
-        df,
-        y="y",
-        x=["x1", "x3"],
-        effects=["entity"],
-        options=FEOptions(cov_type="classical"),
-    ).fit()
-    rows = _within(df, ["x1", "x3", "y"])
-    beta, se = exact_coefficients(
-        [row[:2] for row in rows],
-        _column(rows, 2),
-        df_resid=df.height - 2 - N_ENTITIES,
-    )
-    for name, b_exact, se_exact in zip(res.param_names, beta, se, strict=True):
-        assert_coef_close(
-            abs(res.params[name] - b_exact) / se_exact,
-            0.0,
-            f"FE {name} error in standard errors, eps={eps}",
-        )
-        assert_coef_close(
-            res.std_errors[name] / se_exact,
-            1.0,
-            f"FE {name} standard error ratio, eps={eps}",
+            f"{label} standard error ratio",
         )

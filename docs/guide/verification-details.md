@@ -8,11 +8,11 @@ These notes explain how particular reference comparisons are set up, and where a
 
 ### IV: Wald statistic with cluster standard errors on `card`
 
-With the nine regional clusters of the Wooldridge `card` example, the Wald (F) statistic differs from every reference by up to `1.7e-8` (2SLS) and `1.1e-8` (GMM), while all other statistics agree to `1e-10`.
+With the nine regional clusters of the Wooldridge `card` example, the Wald (F) statistic of the GMM estimator differs from the references by up to `1.1e-8`, while all other statistics agree to `1e-10`. The 2SLS estimator agrees with linearmodels to `8.5e-10` and with `ivreg` to `6.8e-11`, like its other statistics.
 
-An independent computation in 60-digit decimal arithmetic gives `F = 400.0460063`. `ivreg` is off by `6.7e-11`, linearmodels by `8.5e-10` and this package by `1.6e-8`, so the difference is this package's. The coefficients (`1e-14`) and standard errors (`1e-12`) are accurate, and the exact covariance matrix with this package's coefficients gives the exact `F`. The loss comes from the covariance matrix's relative error of about `3e-12`, amplified by the condition number of its slope block (about `3e7`; the squared experience variable has a much larger scale).
+An independent computation in 60-digit decimal arithmetic gives `F = 400.0460063`, with `ivreg` off by `6.7e-11` and linearmodels by `8.5e-10`. The loss in the covariance matrix comes from its relative error of about `3e-12`, amplified by the condition number of its slope block (about `3e7`; the squared experience variable has a much larger scale). The 2SLS estimator computes the covariance matrix and the overall statistic in orthogonal coordinates from a QR decomposition of the design matrix, which removes the amplification (the difference from `ivreg` was `1.6e-8` before). The GMM estimator still builds the covariance matrix first and inverts its slope block, so the amplification remains there.
 
-The tolerance for these two statistics on this example is therefore `5e-8`, about three times the largest measured difference. Improving the accuracy of the covariance computation is tracked separately.
+The tolerance for the 2SLS Wald statistic on this example is therefore the same as for the other statistics (`1e-8`), and for the GMM Wald statistic it is `5e-8`, about three times the largest measured difference.
 
 ### IV GMM cross-check with momentfit
 

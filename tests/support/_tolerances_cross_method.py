@@ -19,8 +19,16 @@ CROSS_METHOD_TOLERANCES: dict[str, dict[str, float]] = {
     # 全`cov_type`（classical・hc0〜hc3・cluster）の実測の最大相対差は2.6e-9（IVの`eps = 1e-7`）。
     # 差は`eps`が小さいほど大きく、条件数×機械イプシロン（2.8e7×1.1e-16 ≈ 3e-9）の程度。実測の約10倍。
     "near_collinear_wald": {"rtol": 3e-8, "atol": 0.0},
-    # 同じ設計での係数と標準誤差（OLS・FE）。係数の誤差は標準誤差を単位にして測り（0との比較なので
-    # `atol`）、実測の最大は4.7e-9（OLSの`eps = 1e-7`）。標準誤差は厳密値との比（1との比較なので
-    # `rtol`）で、実測の最大の差は8.2e-10。どちらも実測の約10倍。
-    "near_collinear_coefficient": {"rtol": 1e-8, "atol": 5e-8},
+    # 同じ設計での係数の誤差。標準誤差を単位にして測り、0との比較なので`atol`だけを置く
+    # （OLS・WLS・IV・FE・FE-IVの全`cov_type`の実測の最大は5.8e-9、WLSのclusterの`eps = 1e-7`）。
+    # 実測の約10倍。
+    "near_collinear_coefficient": {"rtol": 0.0, "atol": 6e-8},
+    # 標準誤差の厳密値との比（1との比較なので`rtol`だけ）。サンドイッチ共分散`V = R⁻¹M̃R⁻ᵀ`の
+    # 再構成の精度で、全`cov_type`の実測の最大は2.4e-9（IVのcluster）。実測の約12倍。
+    "near_collinear_standard_error": {"rtol": 3e-8, "atol": 0.0},
+    # 傾き2列を`(x1, (x2 - x1)/2^k)`に厳密に置き換えた設計との、全体Wald/F・Hausman・
+    # Wu-Hausmanの相対差（OLS・IV・FE・FE-IV・REの全`cov_type`、`eps = 1e-5, 1e-6, 1e-7`）。
+    # 実測の最大は7.3e-9（FE-IVのWu-Hausman）。変更前の実装は同じ設計で最大39%ずれ、一部は
+    # 止まった。実測の約10倍。
+    "near_collinear_reparametrization": {"rtol": 1e-7, "atol": 0.0},
 }

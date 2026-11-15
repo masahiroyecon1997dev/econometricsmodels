@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from fractions import Fraction as F
 
 
@@ -82,26 +83,16 @@ def _exact_fit(
     return gram, beta, inverse, resid, rows
 
 
-def exact_coefficients(
-    x: Sequence[Sequence[float]],
-    y: Sequence[float],
-    *,
-    df_resid: int | None = None,
-) -> tuple[list[float], list[float]]:
-    """係数と、classicalの標準誤差（`σ² = SSR / (n - k)`、`df_resid`で分母を差し替え）。
+@dataclass(frozen=True)
+class ExactInference:
+    """`exact_inference`の結果（浮動小数点に直した値）。"""
 
-    ほぼ共線な設計で、返された係数・標準誤差の精度を確かめるための基準値。
-    """
-    n, k = len(x), len(x[0])
-    dof = n - k if df_resid is None else df_resid
-    _, beta, inverse, resid, _ = _exact_fit(x, y, None)
-    sigma2 = sum(e * e for e in resid) / dof
-    # 有理数の平方根は無いので、分散を浮動小数点に直してから平方根を取る。
-    se = [float(sigma2 * inverse[a][a]) ** 0.5 for a in range(k)]
-    return [float(b[0]) for b in beta], se
+    beta: list[float]
+    se: list[float]
+    wald: float
 
 
-def exact_slope_wald(
+def exact_inference(
     x: Sequence[Sequence[float]],
     y: Sequence[float],
     *,
@@ -112,8 +103,8 @@ def exact_slope_wald(
     cluster_k: int | None = None,
     x_hat: Sequence[Sequence[F]] | None = None,
     extra_leverage: Sequence[F | float] | None = None,
-) -> float:
-    """設計行列`x`（先頭`n_constants`列が切片）の傾きが全てゼロという仮説のWald統計量。
+) -> ExactInference:
+    """係数・標準誤差と、設計行列`x`（先頭`n_constants`列が切片）の傾きが全てゼロという仮説のWald統計量。
 
     `cov_type`は`"classical"`・`"hc0"`〜`"hc3"`・`"cluster"`（`groups`が必要）。小標本補正は
     classicalが`SSR/(n-k)`、hc1が`n/(n-k)`、clusterが`G/(G-1)·(n-1)/(n-k)`。hc2・hc3は
@@ -123,7 +114,7 @@ def exact_slope_wald(
     （既定は`k`。固定効果がクラスターにネストされたパネルは、fixest流で`k + 1`）。
     `x_hat`（`exact_projected_design`の戻り値）を渡すと2SLSになる（breadと係数を`x_hat`
     から、構造残差を`x`から作る）。`extra_leverage`は、行ごとに足すレバレッジ（固定効果の
-    ダミー分。1-wayなら`1/T_i`）。戻り値は`F`ではなく`W`（`F = W / q`）。
+    ダミー分。1-wayなら`1/T_i`）。Wald統計量は`F`ではなく`W`（`F = W / q`）。標準誤差は`cov`の対角の平方根。
     """
     n, k = len(x), len(x[0])
     dof = n - k if df_resid is None else df_resid
@@ -199,4 +190,14 @@ def exact_slope_wald(
     v_slopes = [[cov[a][b] for b in slopes] for a in slopes]
     b_slopes = [[beta[a][0]] for a in slopes]
     solved = _solve(v_slopes, b_slopes)
-    return float(sum(b[0] * s[0] for b, s in zip(b_slopes, solved)))
+    wald = float(sum(b[0] * s[0] for b, s in zip(b_slopes, solved)))
+    # 有理数の平方根は無いので、分散を浮動小数点に直してから平方根を取る。
+    se = [float(cov[a][a]) ** 0.5 for a in range(k)]
+    return ExactInference(beta=[float(b[0]) for b in beta], se=se, wald=wald)
+
+
+def exact_slope_wald(
+    x: Sequence[Sequence[float]], y: Sequence[float], **kwargs: object
+) -> float:
+    """`exact_inference`のWald統計量だけ（引数は同じ）。"""
+    return exact_inference(x, y, **kwargs).wald  # type: ignore[arg-type]

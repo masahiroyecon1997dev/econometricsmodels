@@ -149,3 +149,9 @@ REの最終回帰と、Hausmanのcluster・DK経路は、`fit_auxiliary`（QR 1�
 段階6のあと、8章の手順（`release/v0.10.0`への取り込み、後片付け、#658・#535・別Issue、`docs/spec/`への集約）に進む。
 
 守ること（CLAUDE.md）: コード・仕様書・`CLAUDE.md`のコメントにIssue番号・`docs/planning/specs/`への参照を書かない（6章）。判断が分かれる点は独自判断で埋めずにユーザーへ確認する（14章）。メインの作業ツリーの並行作業には触れない（`git worktree`で作業する）。
+
+## 10. GMM・Tobitの直交座標化（#662。release/v0.10.0上で実施。2026-11-15〜）
+
+調査（試作は数値実験のみ）: IV GMMは`eps ≤ 1e-5`（条件数約2e5）で`GMM_BREAD`で止まり、Tobitは`eps=1e-4`でWaldの相対誤差が1e-5（cluster）、`1e-6`で`COEFFICIENT_COVARIANCE`で止まる。GMMは重み`S=LL'`で白色化した`Z̃ = ZL⁻ᵀ`に対し`Ĝ = Z̃'X = QR`から`β̂ = R⁻¹Q'r`・`V = R⁻¹M̃R⁻ᵀ`・Wald`b̃_S'M̃_SS⁻¹b̃_S`（OLSと同じ形）。Tobitは`−H = R'R`（Hessianのコレスキー、傾きを末尾に並べ替え）で同じ形になるが、Hessian自体の`cond(X)²`の丸めは残る（同じ`H`・`S`を入力にした厳密値との誤差が`eps=1e-5`でsandwich 9e-4→1.3e-10）。ユーザー決定: GMMを先に（2段階）、受け入れ範囲は2SLS系の5e7にそろえる、Tobitの境界も新設して合わせる、レビューはGMMの文書まで終えた時点（Tobitの前）で1回、Tobitは軽く。
+
+GMM（コミット`b7de4fa7`・`ccb10e97`と、文書のコミット）: `shared/gmm.rs`の`WhitenedInstruments`（初期推定・古典的重みは`Z`のQR、ロバスト・クラスターは`D S D`の条件数が1e6以下ならCholesky、超えたら`S = A'A`の`A`のQR、HACはCholesky）・`gmm_solve`・`GmmSolution`（`covariance`・`hansen_j_test`・`with_weight_scale`）。`Ω̂`は`Z̃`から組み立てる（IV・FEIV GMM共通）。Hansen Jは`‖Z̃'ê‖²/c`。ガードは`Ĝ`の列を揃えた条件数（5e7・1e12。`GMM_BREAD`、`Z`は`GMM_WEIGHT`）。精度: 有理数との相対誤差でWald最大1.6e-9（`eps=1e-7`、1段階・2段階×classical・hc0・hc1・cluster）。速度（n=100万、変更前比）+10〜30%、ピークメモリ+10%。`RTOL_WALD_CARD_CLUSTER_GMM`（5e-8）は不要になり削除（card×clusterのWald: momentfitと2.1e-9、linearmodelsと7e-11）。C統計量は従来の明示的な経路のまま（未着手）。次: Tobit（軽いレビュー）。

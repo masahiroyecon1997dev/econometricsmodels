@@ -26,7 +26,7 @@
 //!    （`shared::gmm_iteration::gmm_iterate`。`iv::gmm`と同じコア）。
 //! 6. 標準誤差: `cov_type`に応じたモーメント条件の分散`Ω̂`（`panel_moment_covariance`）を作り、サンドイッチ
 //!    `B⁻¹(X̃'Z̃WΩ̂WZ̃'X̃)B⁻¹`（`B = X̃'Z̃WZ̃'X̃`、`W = S_used⁻¹`は点推定に使った重み。
-//!    `shared::gmm::gmm_sandwich_covariance`）を求める。`cov_type`と重みは独立の選択で、一般形を常に使う。
+//!    `shared::gmm::GmmSolution::covariance`。白色化した`Z̃`から作った`Ω̃`を渡す）を求める。`cov_type`と重みは独立の選択で、一般形を常に使う。
 //!    正規分布の推論表と、傾き係数の同時Wald χ²検定（自由度`k`）を計算する。
 //! 7. R²: 構造残差ベース。within = `1 − e'e/ỹ'ỹ`、between・overallは`β̂`と実際の`X`で`FeEstimator`と同じ式。
 //! 8. Hansen J過剰識別検定（`len(instruments) > len(x_endog)`のとき。`gmm/hansen_j.rs`）。

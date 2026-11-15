@@ -13,15 +13,6 @@ from _tolerances_common import (
     RTOL_MACHINE_PRECISION,
 )
 
-# GMMの、実データ（Wooldridge card）×クラスター共分散（居住地域の9グループ）のWald/F統計量
-# とそのp値だけの相対許容誤差。他の統計量（係数・SE・z値・信頼区間・Hansen J）は同じ比較で
-# 1e-10以下で一致する。原因: クラスター共分散行列Vの精度（相対約3e-12）が、傾き係数の部分行列の
-# 条件数（約3e7、`expersq`のスケール由来）で増幅される。GMMは、共分散`V`を作って反転する
-# 従来の経路のまま（直交座標のQRを持たない）。Wald/Fの実測最大の相対差は、本実装と各参照の間で
-# 8.3e-9（linearmodels）、1.1e-8（momentfit）なので、約3倍のマージンで5e-8とする。
-# 2SLSは直交座標の経路（`V = R⁻¹M̃R⁻ᵀ`）に移ったため、この特例を使わず基本の許容誤差で比べる。
-RTOL_WALD_CARD_CLUSTER_GMM = 5e-8
-
 IV_TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels/R）との数値比較 ---
     # 2SLSのlinearmodelsとの比較（実測は新旧シナリオ・実データ全体）。係数・SE・t値・
@@ -44,7 +35,6 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     "iv_gmm_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
-        "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER_GMM,
     },
     # --- 独立実装（R等）とのクロスチェック ---
     # 2SLSのR ivregとの比較。係数・SE・t値・Wu-Hausman統計量・Wald・弱操作変数Fは
@@ -63,16 +53,16 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     # 2.5e-11、Hansen J1.3e-12。いずれも最大はWooldridge cardで、合成データはより
     # 小さい。信頼区間・p値は0付近の値で相対誤差が膨らむ（信頼区間の実測最大絶対
     # 誤差1.4e-10）ため、他のクロスチェックと共通の絶対誤差フロアを使う）。
-    # card×クラスターのWald/Fだけは`rtol_wald_card_cluster`（実測1.1e-8）。それ以外の
-    # Waldは最大7.9e-11、Hansen Jは1.9e-12、z値8.3e-11、SE8.2e-11、係数2.0e-11（新シナリオ
-    # 追加後の再実測、合成データの方が実データより小さい）。信頼区間端点は0付近の値で
+    # card×クラスターのWald/Fは直交座標の経路（`V = R⁻¹M̃R⁻ᵀ`）で求めるため特例の許容誤差は無い
+    # （実測最大: momentfitとの相対差2.1e-9、linearmodelsとは7.3e-11）。Waldは最大7.9e-11、
+    # Hansen Jは1.9e-12、z値8.3e-11、SE8.2e-11、係数2.0e-11（新シナリオ追加後の再実測、
+    # 合成データの方が実データより小さい）。信頼区間端点は0付近の値で
     # 相対差が最大4.3e-7に膨らむが、絶対差は下限の1/100以下。
     # momentfitを揃えるための設定と原因は`benchmark/iv/references/run_momentfit.R`の
     # ヘッダコメント参照。
     "iv_gmm_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER_GMM,
     },
     # --- MOP有効F統計量のオラクル（`benchmark/iv/references/mop_oracle.py`）の自己検証 ---
     # `rtol_effective`: 有効F・臨界値（オラクルが保証する精度。浮動小数点の範囲で

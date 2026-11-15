@@ -183,7 +183,7 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 
 - **GMMの反復コア・重み行列は`shared/`へ**（`shared/gmm_iteration.rs`・`gmm_weight.rs`・`gmm.rs`・`gmm_c_statistic.rs`。`iv::gmm`も同じコアを呼ぶ）。`GmmEstimator`が自由度`n − k`固定で吸収した効果の数を渡せないため、
   `gmm_iterate`・`sandwich_covariance`を行列受け取り・自由度引数付きに改めて共有する（CUE・Windmeijer補正を二重に書かない）。返すエラーは`IvError`でなく`CommonError`
-  （`code`・文面・`params`は不変）。FE-GMMは自前の`Ω̂`（FEのクラスター補正・DK・FEのレバレッジ）で`gmm_sandwich_covariance`を呼ぶ。
+  （`code`・文面・`params`は不変）。FE-GMMは自前の`Ω̂`（FEのクラスター補正・DK・FEのレバレッジ）を白色化した`Z̃`から作り、`GmmSolution::covariance`に渡す（`iv::gmm`と同じ。`gmm_sandwich_covariance`は参照実装として`cfg(test)`だけに残る）。
 - 重みの型は`FeWeightType`（`Classical`・`Robust`・`Cluster{groups}`）、方式は`FeGmmType`。`iv::gmm`の`WeightType`とは別にした（`Hac`を型で表せない。`INTERNAL_ERROR`で弾くより、到達できない型にする）。
   重みの既定（`effects[0]`でのクラスター）はバインディングの責務で、engineは`Cluster{groups}`を明示で受ける。
 - 点推定: `β̂(W) = (X̃'Z̃ W Z̃'X̃)⁻¹X̃'Z̃ W Z̃'ỹ`。`Z̃ = [x̃_exog, z̃]`（`l = k_exog + k_instruments`列）。構造残差の完全適合は段階なしの`CommonError::PerfectFit`（GMMに第二段階は無い）。

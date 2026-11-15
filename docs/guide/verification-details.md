@@ -8,11 +8,9 @@ These notes explain how particular reference comparisons are set up, and where a
 
 ### IV: Wald statistic with cluster standard errors on `card`
 
-With the nine regional clusters of the Wooldridge `card` example, the Wald (F) statistic of the GMM estimator differs from the references by up to `1.1e-8`, while all other statistics agree to `1e-10`. The 2SLS estimator agrees with linearmodels to `8.5e-10` and with `ivreg` to `6.8e-11`, like its other statistics.
+With the nine regional clusters of the Wooldridge `card` example, the Wald (F) statistic agrees with the references to the same tolerance as every other statistic (`1e-8`): the 2SLS estimator to `8.5e-10` (linearmodels) and `6.8e-11` (`ivreg`), the GMM estimator to `7e-11` (linearmodels) and `2.1e-9` (`momentfit`).
 
-An independent computation in 60-digit decimal arithmetic gives `F = 400.0460063`, with `ivreg` off by `6.7e-11` and linearmodels by `8.5e-10`. The loss in the covariance matrix comes from its relative error of about `3e-12`, amplified by the condition number of its slope block (about `3e7`; the squared experience variable has a much larger scale). The 2SLS estimator computes the covariance matrix and the overall statistic in orthogonal coordinates from a QR decomposition of the design matrix, which removes the amplification (the difference from `ivreg` was `1.6e-8` before). The GMM estimator still builds the covariance matrix first and inverts its slope block, so the amplification remains there.
-
-The tolerance for the 2SLS Wald statistic on this example is therefore the same as for the other statistics (`1e-8`), and for the GMM Wald statistic it is `5e-8`, about three times the largest measured difference.
+The example is badly conditioned: the squared experience variable has a much larger scale than the other regressors, so the slope block of the covariance matrix has a condition number of about `3e7`. Building the covariance matrix from an explicit inverse loses that factor from its relative error of about `3e-12`; an independent computation in 60-digit decimal arithmetic gives `F = 400.0460063` for 2SLS, with `ivreg` off by `6.7e-11` and linearmodels by `8.5e-10`, and the difference of this package from `ivreg` used to be `1.6e-8` (and about `1.1e-8` for GMM against linearmodels and `momentfit`). Both estimators now compute the covariance matrix and the overall statistic in orthogonal coordinates (a QR decomposition of the design matrix for 2SLS, of the weighted moment matrix for GMM), which removes the amplification.
 
 ### IV GMM cross-check with momentfit
 

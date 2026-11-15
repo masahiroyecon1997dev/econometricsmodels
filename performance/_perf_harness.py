@@ -348,6 +348,18 @@ class PerfAdapter:
             は `check=True` なので、engine の `.fit()` が例外を投げれば benchmark
             ジョブが失敗する（例: Tobit で大標本 Hessian 特異エラーが
             再発した場合）。空なら追加なし。
+        max_n_iter: n 軸の engine の行（`n_sweep`・`n_sweep_engine_only`、既定の
+            標準誤差）に課す反復回数 `n_iter` の上限。`{(method, n): 上限}`（method は
+            `default_method`）。「収束はするが反復が増えて遅くなる」退行は
+            `.fit()` が例外を投げないため `check=True` では捕捉できない。反復回数は
+            時間と違い共有 CI ランナーの速度のばらつきに依らない（同一環境では
+            決定的。CPU・libm の違いで浮動小数点の丸めが変わると1ずれうる）ので、
+            超過は警告ではなくジョブの失敗（`_meta["failures"]`・非0終了）にする。
+            上限は実測値に余裕を足して固定値で決める。検知したい退行（修正を
+            戻したときの実測）より小さくすること。誤検知したときは、上限を上げる前に
+            CI 上の実測 `n_iter` を確認する（上げると検知したい退行が通る）。
+            空なら検査なし。`fit_once` が返す結果が
+            `n_iter` を持つ engine 専用（リファレンス実装の行は対象外）。
         check_report: `report dict -> list[str]`。全スイープ完了後に呼ばれ、
             返した文字列は `_meta["warnings"]` に格納されて job summary に
             `> [!WARNING]` として表示される（`render_performance_summary`）。
@@ -378,6 +390,7 @@ class PerfAdapter:
     n_sweep: Sequence[int] = (10_000, 100_000, 1_000_000)
     n_sweep_fixed_k: int = 5
     n_sweep_engine_only: Sequence[int] = ()
+    max_n_iter: Mapping[tuple[str, int], int] = field(default_factory=dict)
     k_sweep: Sequence[int] = (5, 20)
     k_sweep_fixed_n: int = 10_000
     k_sweep_libraries: Sequence[str] | None = None
@@ -406,6 +419,14 @@ class PerfAdapter:
                 f"{sorted(unknown_methods)} are neither default_method nor "
                 "in extra_methods"
             )
+        n_axis_ns = {*self.n_sweep, *self.n_sweep_engine_only}
+        for method, n in self.max_n_iter:
+            if method != self.default_method or n not in n_axis_ns:
+                raise ValueError(
+                    f"{self.method}: max_n_iter key {(method, n)!r} must be "
+                    f"(default_method={self.default_method!r}, n in the n "
+                    f"axis {sorted(n_axis_ns)})"
+                )
         for case in self.cov_cases:
             unknown = set(case.libraries or ()) - set(self.libraries)
             if unknown:
@@ -504,7 +525,7 @@ def _worker(
     if library == "engine":
         _warn_if_debug_build()
 
-    adapter.fit_once(ctx)  # warmup
+    warmup_result = adapter.fit_once(ctx)  # warmup
 
     times: list[float] = []
     for _ in range(repeats):
@@ -517,6 +538,13 @@ def _worker(
         "time_all_s": times,
         "peak_rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
         "n_clusters": n_clusters,
+        # 反復回数は決定的なので計測前のウォームアップ実行の値を使う。反復最適化を
+        # 持たない手法・リファレンス実装の行は None（`PerfAdapter.max_n_iter`）。
+        "n_iter": (
+            getattr(warmup_result, "n_iter", None)
+            if library == "engine"
+            else None
+        ),
     }
 
 
@@ -741,6 +769,50 @@ def run_method_sweep(
     return results
 
 
+def check_n_iter_limits(adapter: PerfAdapter, report: dict) -> list[str]:
+    """`adapter.max_n_iter` を超えた（または検査できなかった）点の失敗文を返す。
+
+    対象は n 軸の engine の行（既定の標準誤差）。n 軸を回していないレポート
+    （`--axes` で絞った場合）は検査しない。上限を決めた点の行が無い・`n_iter` が
+    無い場合は、検査が黙って無効になるのを防ぐため失敗として扱う。
+    """
+    if not adapter.max_n_iter or "n" not in report["_meta"]["axes"]:
+        return []
+    default_case = adapter.default_cov_case
+    failures: list[str] = []
+    for (method, n), limit in sorted(adapter.max_n_iter.items()):
+        rows = [
+            r
+            for r in report["results"]
+            if r["axis"] == "n"
+            and r["library"] == "engine"
+            and r["cov_case"] == default_case
+            and r["n"] == n
+            and r["method"] == method
+        ]
+        point = f"{adapter.method} method={method} n={n:,}"
+        if not rows:
+            failures.append(
+                f"{point}: 計測行が無く、反復回数の上限 {limit} を"
+                f"検査できなかった。"
+            )
+            continue
+        counts = [r.get("n_iter") for r in rows]
+        if any(c is None for c in counts):
+            failures.append(
+                f"{point}: 結果に n_iter が無く、反復回数の上限 {limit} を"
+                f"検査できなかった。"
+            )
+            continue
+        n_iter = max(counts)
+        if n_iter > limit:
+            failures.append(
+                f"{point}: n_iter={n_iter} が上限 {limit} を超えた。収束が"
+                f"遅くなる退行の可能性（`PerfAdapter.max_n_iter` 参照）。"
+            )
+    return failures
+
+
 def _case_meta(case: CovCase) -> dict:
     return {
         "label": case.label,
@@ -815,6 +887,10 @@ def build_report(
         report["_meta"]["warnings"] = report_warnings
         for warning in report_warnings:
             print(f"WARNING: {warning}", file=sys.stderr)
+    failures = check_n_iter_limits(adapter, report)
+    report["_meta"]["failures"] = failures
+    for failure in failures:
+        print(f"ERROR: {failure}", file=sys.stderr)
     return report
 
 
@@ -834,7 +910,8 @@ def _apply_overrides(
     """絞り込み用の CLI 引数を adapter・軸・cov フィルタへ反映する。
 
     ローカルで一部の点だけを素早く回すための上書き。`--n-sweep` を指定すると
-    n 軸全体を上書きするため `n_sweep_engine_only` も空にする。
+    n 軸全体を上書きするため `n_sweep_engine_only` と、n 軸の点に紐づく
+    `max_n_iter` も空にする（上限の検査は無効になる）。
     """
     axes = _csv(args.axes) if args.axes else list(AXES)
     for axis in axes:
@@ -845,6 +922,7 @@ def _apply_overrides(
     if args.n_sweep:
         changes["n_sweep"] = _csv_ints(args.n_sweep)
         changes["n_sweep_engine_only"] = ()
+        changes["max_n_iter"] = {}
     if args.k_sweep:
         changes["k_sweep"] = _csv_ints(args.k_sweep)
     if args.cov_sweep_n:
@@ -924,7 +1002,10 @@ def run_cli(
     )
     narrowing.add_argument(
         "--n-sweep",
-        help="n 軸の n をカンマ区切りで上書き（n_sweep_engine_only も空にする）",
+        help=(
+            "n 軸の n をカンマ区切りで上書き"
+            "（n_sweep_engine_only・max_n_iter も空にする）"
+        ),
     )
     narrowing.add_argument("--k-sweep", help="k 軸の k をカンマ区切りで上書き")
     narrowing.add_argument(
@@ -965,3 +1046,6 @@ def run_cli(
         print(f"wrote {output_path}", file=sys.stderr)
     else:
         print(json.dumps(report, indent=2, ensure_ascii=False))
+    # レポートを書いた後に落とす（CI は結果 JSON と job summary を残せる）。
+    if report["_meta"]["failures"]:
+        raise SystemExit(1)

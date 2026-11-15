@@ -54,13 +54,21 @@ OLS/WLS/Logit/Probit は statsmodels、IV は linearmodels をリファレンス
 - **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。このバグは seed 依存で、
   seed=1 は n=200,000 で既に破綻していたが、この guard が回す seed=42 では
   n=200,000 は再現しない。
+- **反復回数の上限**（`max_n_iter`）: n=1,000,000・newton の `n_iter` が8を超えると
+  benchmark ジョブが失敗する（実測6反復）。「収束はするが反復・cost評価が増えて
+  遅くなる」退行は、例外を投げず `check=True` を通るためこの上限で捕捉する。
+  対象は、コストの対数尤度の総和を補償和にした対応と、予測減少量がコストの分解能
+  以下ならコスト比較を省く（`BelowCostResolution`）対応の**両方**を戻した状態
+  （実測11反復・約8.6秒）。**片方だけ戻しても `n_iter`・時間とも変わらない**
+  （この標本では互いに冗長な保護）ため検知できない。
 - **このガードの限界**（深いカバレッジは docstring 末尾「今後」および
   `docs/performance/tobit.md`「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）:
   - **単一 seed**（42）。このバグが示した seed 感度（seed=1 は n=200,000 で破綻）は
     `run_cli` の `--seed` がレポート全体で1つのため、この仕組みでは検査できない。
-  - **捕捉できるのは再発時の「例外」のみ**。この修正が持ち込みうる新しい失敗様式
-    （非最適点で収束宣言＝silently-wrong な収束）は、finite な結果さえ返れば
-    `check=True` を通ってしまうため、この性能スクリプトでは構造上検知できない。
+  - **捕捉できるのは再発時の「例外」と、n=1,000,000・newton の反復回数の増加のみ**。
+    この修正が持ち込みうる新しい失敗様式（非最適点で収束宣言＝silently-wrong な収束）
+    は、finite な結果さえ返れば例外にも反復回数の上限にも掛からないため、この性能
+    スクリプトでは構造上検知できない。
   - **発火はリリース単位**。`benchmark_performance.yml` はタグ push（`v*`）+
     `workflow_dispatch` のみで、per-PR では回らない。solver 回帰が
     リリースブランチにマージされても次のタグまで捕捉されない。
@@ -229,9 +237,12 @@ TOBIT_ADAPTER = PerfAdapter(
     # Hessian 特異エラーの再現点で、修正（d797f9b / 5b79ffe）の回帰検知を担う。
     # n=200,000 は n スケーリングのデータ点＋早期警告（seed=42 では再現
     # しない）。詳細・
-    # 限界（単一 seed / 例外のみ捕捉 / リリース単位で発火）は docstring
+    # 限界（単一 seed / silently-wrong な収束は対象外 / リリース単位で発火）は docstring
     # 「## n 軸の大標本点」参照。
     n_sweep_engine_only=(200_000, 1_000_000),
+    # 反復回数の上限（実測6、補償和と BelowCostResolution を両方戻すと11。
+    # docstring「反復回数の上限」参照）。
+    max_n_iter={("newton", 1_000_000): 8},
     # method 軸: lbfgs のみ（bfgs は #292 で発散するため除外）。代表点は
     # classical・k=5・n=100,000。既定の newton は n/k スイープに含まれる。
     extra_methods=("lbfgs",),

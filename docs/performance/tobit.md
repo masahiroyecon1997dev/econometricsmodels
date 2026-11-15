@@ -30,9 +30,10 @@
 ## n 軸の大標本ガード（classical のみ n=200,000 / 1,000,000、seed=42）
 
 - かつて engine は乱数 β の `moderate_censoring` DGP で `ComputationError: the Hessian is singular and cannot be inverted` になっていた（seed 依存。seed=42 は n=500,000 まで成功・n=1,000,000 で失敗、seed=1 は n=200,000 で失敗。Probit と同系統）。`d797f9b` / `5b79ffe` で `FaerNewton` に停滞収束判定を入れて解消済み。
-- **n=1,000,000（seed=42）が過去の再現点**で、再発を benchmark ジョブの失敗（`_run_isolated` は `check=True`）として捕捉する回帰ガード。実 Tobit 経路を大標本で通す唯一の自動チェック（`engine/src/nonlinear/common/newton/tests/stall.rs` の単体テストは停滞判定ロジックの模擬）。n=1,000,000 は `n_iter=11` で真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない）。
+- **n=1,000,000（seed=42）が過去の再現点**で、再発を benchmark ジョブの失敗（`_run_isolated` は `check=True`）として捕捉する回帰ガード。実 Tobit 経路を大標本で通す唯一の自動チェック（`engine/src/nonlinear/common/newton/tests/stall.rs` の単体テストは停滞判定ロジックの模擬）。n=1,000,000 は真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない。確認時は `n_iter=11`。コストの総和の補償和と `BelowCostResolution` の導入後は `n_iter=6`）。
+- **反復回数の上限（`max_n_iter`）**: n=1,000,000・newton の `n_iter` が8を超えると benchmark ジョブが失敗する（実測6）。収束はするが反復・cost評価が増えて遅くなる退行は、例外を投げず `check=True` を通るためこの上限で捕捉する。反復回数は時間と違い共有ランナーの速度のばらつきに依らず、同一環境では決定的なので、警告ではなくジョブの失敗にしている（CPU・libm の違いで丸めが変わると1ずれうる。誤検知したときは上限を上げる前に CI 上の実測 `n_iter` を確認すること。上限は余裕+2・検知対象11）。補償和と `BelowCostResolution` の**両方**を戻すと `n_iter=11`・約8.6秒で、上限を超えて失敗する。**片方だけ戻しても `n_iter`・時間とも変わらず検知できない**（この標本では互いに冗長な保護）。cost評価回数は engine が公開していないため上限の対象にしていない。bfgs/lbfgs は補償和を戻しただけで `n_iter` が1動く（lbfgs 13→12）ため、誤検知を避けて対象外にした。
 - **n=200,000 は n スケーリングのデータ点＋安価な早期警告**。guard が回す seed=42 では再現しない（破綻していたのは seed=1）。
-- **この guard の限界**（深いカバレッジは「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）: (1) **単一 seed（42）**——`run_cli` の `--seed` はレポート全体で1つのため、このバグが示した seed 感度は検査できない。(2) **捕捉できるのは再発時の「例外」のみ**——この修正が持ち込みうる silently-wrong な収束（非最適点で収束宣言）は、finite な結果さえ返れば `check=True` を通る。(3) **発火はリリース単位**——`benchmark_performance.yml` はタグ push（`v*`）+ `workflow_dispatch` のみで、solver 回帰がリリースブランチにマージされても次のタグまで捕捉されない。
+- **この guard の限界**（深いカバレッジは「今後の検討事項」の凍結フィクスチャ + `AER::tobit` に委ねる）: (1) **単一 seed（42）**——`run_cli` の `--seed` はレポート全体で1つのため、このバグが示した seed 感度は検査できない。(2) **捕捉できるのは再発時の「例外」と newton の反復回数の増加のみ**——この修正が持ち込みうる silently-wrong な収束（非最適点で収束宣言）は、finite な結果さえ返れば `check=True` にも反復回数の上限にも掛からない。(3) **発火はリリース単位**——`benchmark_performance.yml` はタグ push（`v*`）+ `workflow_dispatch` のみで、solver 回帰がリリースブランチにマージされても次のタグまで捕捉されない。
 
 ## 結果
 
@@ -95,7 +96,7 @@ uv run python -m performance.render_performance_summary \
 | 200,000 | 0.2530s / 229MB | -（engine 単独） | - |
 | 1,000,000 | 5.9000s / 461MB | -（engine 単独） | - |
 
-engine 単独の 200,000 / 1,000,000 行は過去のバグの回帰ガード（下記「既知の限界」）。n=1,000,000 は `n_iter=11` で真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない）。
+engine 単独の 200,000 / 1,000,000 行は過去のバグの回帰ガード（下記「既知の限界」）。n=1,000,000 は真の β と ~1e-3、σ≈1.001、logLik≈-1.03e6 の正しい最適点へ収束することを確認済み（停滞判定の早期打ち切りではない。確認時は `n_iter=11`。コストの総和の補償和と `BelowCostResolution` の導入後は `n_iter=6`）。
 
 #### cluster
 

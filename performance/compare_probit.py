@@ -50,8 +50,18 @@ random / sorted）。Logit/Probit は OLS/WLS と違い HAC を持たない。
   この点を回帰ガードとして追加する。
 - **n=200,000 は n スケーリングのデータ点＋安価な早期警告**（Tobit の guard
   と同じ位置づけ）。
-- このガードの限界（単一 seed=42・例外のみ捕捉・リリース単位で発火）は
-  `compare_tobit.py`「## n 軸の大標本点」と同じ（詳細はそちらを参照）。
+- **反復回数の上限**（`max_n_iter`）: n=1,000,000・newton の `n_iter` が6を超えると
+  benchmark ジョブが失敗する（実測5反復）。「収束はするが反復・cost評価が増えて
+  遅くなる」退行は、例外を投げず `check=True` を通るためこの上限で捕捉する。
+  対象は、コストの対数尤度の総和を補償和にした対応と、予測減少量がコストの分解能
+  以下ならコスト比較を省く（`BelowCostResolution`）対応の**両方**を戻した状態
+  （実測7反復・約4秒）。**片方だけ戻しても `n_iter`・時間とも変わらない**
+  （この標本では互いに冗長な保護）ため検知できない。上限の余裕は+1反復しかなく、
+  CPU・libm の違いで反復数が1ずれると誤検知しうる。ただし検知したい退行が7反復
+  なので上限6が余裕を残せる唯一の値で、上げると退行が通る。誤検知したときは、
+  上限を上げる前に CI 上の実測 `n_iter` を確認する。
+- このガードの限界（単一 seed=42・リリース単位で発火・silently-wrong な収束は
+  対象外）は `compare_tobit.py`「## n 軸の大標本点」と同じ（詳細はそちらを参照）。
 - **Hessian重みのクランプ不整合は修正済み**: 以前は`ProbitProblem::hessian`の
   重み`w=λᵢ(λᵢ+zᵢ)`が`U_CLAMP`でクランプした`λᵢ`と生の`zᵢ`を混在させ、
   `|z|>U_CLAMP`の反復点で`w`が負になりえた（Probit尤度の大域凹性の根拠
@@ -181,6 +191,9 @@ PROBIT_ADAPTER = PerfAdapter(
     # library・cov_type で回すと CI 時間がかさむため classical・engine に絞る。
     # 詳細・限界は docstring「## n 軸の大標本点」参照。
     n_sweep_engine_only=(200_000, 1_000_000),
+    # 反復回数の上限（実測5、補償和と BelowCostResolution を両方戻すと7。
+    # docstring「反復回数の上限」参照）。
+    max_n_iter={("newton", 1_000_000): 6},
     # method 軸: bfgs/lbfgs を代表点（classical・k=5・n=100,000）で計測する。
     extra_methods=("bfgs", "lbfgs"),
 )

@@ -52,12 +52,15 @@ assert_se_close = partial(
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "cluster"]
 # FE・FE-IVは`hc0`を持たない。
 PANEL_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
-# IVのGMMはHC2・HC3に外部の参照実装が無く、厳密値の組み立ても定義が別（`Z`のレバレッジ）なので、
-# classical・hc0・hc1・clusterを確かめる。
-GMM_COV_TYPES = ["classical", "hc0", "hc1", "cluster"]
-# 固定効果つきのGMMは`hc0`を持たない（FE・FE-IVと同じ）。HC2・HC3・DKは厳密値の組み立てが別なので含めない。
-FE_GMM_COV_TYPES = ["classical", "hc1", "cluster"]
 EPS = [1e-5, 1e-6, 1e-7]
+# クラスター重みの`S = A'A`の因子`A`（クラスターのスコア）は、クラスター数が少ないと設計行列より条件数が
+# 大きくなり、`eps = 1e-7`（設計行列の条件数が約2.8e7）で`A`の列を揃えた条件数が上限5e7を超える
+# （`test_gmm_cluster_weight_has_its_own_limit`）。厳密値の照合はその内側だけ。
+GMM_CLUSTER_WEIGHT_EPS = [1e-5, 1e-6]
+# HAC重みの2段階GMMは、入力の丸め（相対1e-15）だけで`eps = 1e-6`のWaldが相対1e-6動く（重みの
+# 弱い方向が、スコアの窓和でさらに小さくなり、`S`が入力の丸めに敏感になるため。ロバスト・クラスター
+# 重みは`2e-11`）。算法の誤差ではなく問題の条件の悪さなので、厳密値の照合は`eps = 1e-5`だけ。
+GMM_HAC_WEIGHT_EPS = [1e-5]
 # REの内部の補助回帰が別名の列を落とす窓（約`3e-7`以下）の中も含める。最終回帰は全列を使う。
 RE_EPS = [1e-5, 1e-6, 1e-7, 6e-8]
 
@@ -259,22 +262,53 @@ def _iv_case(cov_type: str, eps: float) -> _Case:
     return _Case(res, res.wald_statistic * res.wald_df_num, exact)
 
 
-def _iv_gmm_case(gmm_type: str, cov_type: str, eps: float) -> _Case:
-    """IVのGMM（1段階、または重みを`Σ ê₀² z z'`にする2段階）。Waldはχ²統計量（自由度で割らない）。"""
-    df = _iv_data(eps)
+# GMMの設定（推定の段数・2段階目以降の重み）。反復GMMは有理数の桁が反復ごとに膨らんで遅いので含めない
+# （再パラメータ化のテストで確かめる）。`weight`は`gmm_weight_type`、`hac`はHAC重みのラグ数。
+GMM_CONFIGS = {
+    "one-step": {"gmm_type": "one_step"},
+    "two-step-robust": {"gmm_type": "two_step", "weight": "robust"},
+    "two-step-classical": {"gmm_type": "two_step", "weight": "classical"},
+    "two-step-cluster": {"gmm_type": "two_step", "weight": "cluster"},
+    "two-step-hac": {"gmm_type": "two_step", "weight": "hac", "hac": 2},
+}
+# 2段階目以降の重みを`gmm_weight_type`以外の`cov_type`と組み合わせる数は絞る（robust重みだけ全`cov_type`）。
+GMM_ALL_COV = ["classical", "hc0", "hc1", "hc2", "hc3", "cluster"]
+GMM_FEW_COV = ["classical", "hc1", "cluster"]
+
+
+def _gmm_options(
+    config: dict, cov_type: str, cluster: str, options_cls, extra: dict
+):
+    kwargs = {
+        "estimator": "gmm",
+        "gmm_type": config["gmm_type"],
+        "cov_type": cov_type,
+        "cluster": cluster if cov_type == "cluster" else None,
+        **extra,
+    }
+    if "weight" in config:
+        kwargs["gmm_weight_type"] = config["weight"]
+        if config["weight"] == "cluster":
+            kwargs["cluster"] = cluster
+        if config["weight"] == "hac":
+            kwargs["hac_lags"] = config["hac"]
+    return options_cls(**kwargs)
+
+
+@cache
+def _iv_gmm_case(name: str, cov_type: str, eps: float) -> _Case:
+    """IVのGMM。Waldはχ²統計量（自由度で割らない）。重みの作り方は`GMM_CONFIGS`、厳密値は
+    パッケージが返した推定の回数`n_iter`だけ有理数で繰り返す。"""
+    config = GMM_CONFIGS[name]
+    df = _iv_data(eps).with_columns(pl.int_range(pl.len()).alias("t"))
+    extra = {"hac_time": "t"} if config.get("weight") == "hac" else {}
     res = IV(
         df,
         "y",
         ["x1", "x2"],
         ["endog"],
         ["z1", "z2", "z3"],
-        options=IVOptions(
-            estimator="gmm",
-            gmm_type=gmm_type,
-            gmm_weight_type="robust" if gmm_type == "two_step" else None,
-            cov_type=cov_type,
-            cluster="g" if cov_type == "cluster" else None,
-        ),
+        options=_gmm_options(config, cov_type, "g", IVOptions, extra),
     ).fit()
     x = [[1.0, *row] for row in df.select("x1", "x2", "endog").rows()]
     z = [[1.0, *row] for row in df.select("x1", "x2", "z1", "z2", "z3").rows()]
@@ -282,7 +316,11 @@ def _iv_gmm_case(gmm_type: str, cov_type: str, eps: float) -> _Case:
         x,
         z,
         df["y"].to_list(),
-        two_step=gmm_type == "two_step",
+        steps=res.n_iter,
+        weight=config.get("weight", "robust"),
+        weight_groups=df["g"].to_list(),
+        hac_lags=config.get("hac", 0),
+        hac_order=list(range(df.height)),
         cov_type=cov_type,
         groups=_cluster_label(cov_type, df, "g"),
     )
@@ -290,18 +328,9 @@ def _iv_gmm_case(gmm_type: str, cov_type: str, eps: float) -> _Case:
 
 
 @cache
-def _iv_gmm_one_step_case(cov_type: str, eps: float) -> _Case:
-    return _iv_gmm_case("one_step", cov_type, eps)
-
-
-@cache
-def _iv_gmm_two_step_case(cov_type: str, eps: float) -> _Case:
-    return _iv_gmm_case("two_step", cov_type, eps)
-
-
-def _fe_iv_gmm_case(gmm_type: str, cov_type: str, eps: float) -> _Case:
-    """固定効果つきIVのGMM（within変換した行列で、IVのGMMと同じ代数）。重みは1段階が`(Z̃'Z̃)⁻¹`、
-    2段階が`Σ ẽ² z̃ z̃'`（`robust`）。Waldはχ²統計量（自由度で割らない）。"""
+def _fe_iv_gmm_case(name: str, cov_type: str, eps: float) -> _Case:
+    """固定効果つきIVのGMM（within変換した行列で、IVのGMMと同じ代数）。"""
+    config = GMM_CONFIGS[name]
     df = _panel_data(eps)
     res = FEIV(
         df,
@@ -310,40 +339,33 @@ def _fe_iv_gmm_case(gmm_type: str, cov_type: str, eps: float) -> _Case:
         x_endog=["endog"],
         instruments=["z1", "z2", "z3"],
         effects=["entity"],
-        options=FEIVOptions(
-            estimator="gmm",
-            gmm_type=gmm_type,
-            gmm_weight_type="robust" if gmm_type == "two_step" else None,
-            cov_type=cov_type,
-        ),
+        options=_gmm_options(config, cov_type, "entity", FEIVOptions, {}),
     ).fit()
     n = df.height
     rows = _within(df, ["x1", "x3", "endog", "z1", "z2", "z3", "y"])
     x = [row[:3] for row in rows]
     z = [[row[0], row[1], row[3], row[4], row[5]] for row in rows]
+    weight = config.get("weight", "robust")
     exact = exact_gmm_inference(
         x,
         z,
         _column(rows, 6),
-        two_step=gmm_type == "two_step",
+        steps=res.n_iter,
+        weight=weight,
+        weight_groups=df["entity"].to_list(),
         cov_type=cov_type,
         groups=_cluster_label(cov_type, df, "entity"),
         n_constants=0,
         df_resid=n - 3 - N_ENTITIES,
         cluster_k=4,  # 個体でクラスターすると固定効果がネストされ、K = k + 1
         center=False,
+        extra_leverage=[1 / N_PERIODS] * n,  # 固定効果ダミーのレバレッジ
+        # 古典的な重み（1段階・`classical`重み）のHansen Jは、`S`を`n/(n−吸収した効果の数)`倍する。
+        hansen_extra_scale=F(n, n - N_ENTITIES)
+        if config["gmm_type"] == "one_step" or weight == "classical"
+        else 1,
     )
     return _Case(res, res.wald_statistic, exact)
-
-
-@cache
-def _fe_iv_gmm_one_step_case(cov_type: str, eps: float) -> _Case:
-    return _fe_iv_gmm_case("one_step", cov_type, eps)
-
-
-@cache
-def _fe_iv_gmm_two_step_case(cov_type: str, eps: float) -> _Case:
-    return _fe_iv_gmm_case("two_step", cov_type, eps)
 
 
 @cache
@@ -421,12 +443,32 @@ _CASES = {
     "IV": (_iv_case, COV_TYPES, EPS),
     "FE": (_fe_case, PANEL_COV_TYPES, EPS),
     "FE-IV": (_fe_iv_case, PANEL_COV_TYPES, EPS),
-    "IV-GMM-one-step": (_iv_gmm_one_step_case, GMM_COV_TYPES, EPS),
-    "IV-GMM-two-step": (_iv_gmm_two_step_case, GMM_COV_TYPES, EPS),
-    "FE-IV-GMM-one-step": (_fe_iv_gmm_one_step_case, FE_GMM_COV_TYPES, EPS),
-    "FE-IV-GMM-two-step": (_fe_iv_gmm_two_step_case, FE_GMM_COV_TYPES, EPS),
     "RE": (_re_case, PANEL_COV_TYPES, RE_EPS),
 }
+for _name in GMM_CONFIGS:
+    # `hc0`は固定効果つきのGMMに無く、`hac`の重みは固定効果つきのGMMに無い（行単位のカーネルを
+    # パネルに使えない）。robust重み以外の`cov_type`は絞る。
+    _CASES[f"IV-GMM-{_name}"] = (
+        partial(_iv_gmm_case, _name),
+        GMM_ALL_COV if _name == "two-step-robust" else GMM_FEW_COV,
+        GMM_CLUSTER_WEIGHT_EPS
+        if _name == "two-step-cluster"
+        else GMM_HAC_WEIGHT_EPS
+        if _name == "two-step-hac"
+        else EPS,
+    )
+    if _name != "two-step-hac":
+        _CASES[f"FE-IV-GMM-{_name}"] = (
+            partial(_fe_iv_gmm_case, _name),
+            [
+                c
+                for c in (
+                    GMM_ALL_COV if _name == "two-step-robust" else GMM_FEW_COV
+                )
+                if c != "hc0"
+            ],
+            GMM_CLUSTER_WEIGHT_EPS if _name == "two-step-cluster" else EPS,
+        )
 
 _PARAMS = [
     (method, cov_type, eps)
@@ -469,3 +511,23 @@ def test_coefficients_and_standard_errors_match_the_exact_values(
             1.0,
             f"{label} standard error ratio",
         )
+
+
+_GMM_PARAMS = [p for p in _PARAMS if "GMM" in p[0]]
+
+
+@pytest.mark.parametrize(
+    ("method", "cov_type", "eps"),
+    _GMM_PARAMS,
+    ids=[f"{m}-{c}-{e:g}" for m, c, e in _GMM_PARAMS],
+)
+def test_gmm_hansen_j_matches_the_exact_value(method, cov_type, eps):
+    """Hansen J `(Z'ê)'S⁻¹(Z'ê)`の絶対値（1段階・古典的重みの`σ̂²`の尺度、FEの`n/(n−吸収した効果の数)`
+    の補正を含む）を、`S`を有理数で組んだ値と比べる。再パラメータ化の不変性は定数倍の取り違えを
+    検出できない。"""
+    case = _CASES[method][0](cov_type, eps)
+    assert_wald_close(
+        case.res.overid_statistic,
+        case.exact.hansen_j,
+        f"{method} {cov_type} eps={eps} Hansen J",
+    )

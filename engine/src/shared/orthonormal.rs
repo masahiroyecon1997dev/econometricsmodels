@@ -146,6 +146,13 @@ impl OrthonormalDesign {
         &self.q
     }
 
+    /// 各行のレバレッジ `h_ii = ‖q_i‖²`（`X(X'X)⁻¹X'`の対角）。`X'X`も`(X'X)⁻¹`も作らない。
+    pub(crate) fn row_leverages(&self) -> Vec<f64> {
+        (0..self.q.nrows())
+            .map(|i| (0..self.q.ncols()).map(|j| self.q.get(i, j).powi(2)).sum())
+            .collect()
+    }
+
     /// `Q`と`R`に分解して取り出す（`Q`をコピーせず別の構造体へ移すとき）。
     pub(crate) fn into_parts(self) -> (Mat<f64>, Mat<f64>) {
         (self.q, self.r)

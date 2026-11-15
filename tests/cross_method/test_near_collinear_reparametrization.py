@@ -160,19 +160,45 @@ def test_iv_wald_and_wu_hausman_are_invariant_to_reparametrization(
     _check(fit, df, _reparametrize(df, "x1", "x2", eps), f"IV {cov_type}")
 
 
-@pytest.mark.parametrize("eps", EPS)
-@pytest.mark.parametrize("gmm_type", ["one_step", "two_step"])
-@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hac", "cluster"])
+# GMMの設定（`gmm_type`と2段階目以降の重み）。HAC重み・クラスター重みは、重みの弱い方向が入力の丸めに
+# 敏感（HAC）、または重みの因子`A`の条件数が設計より大きくなる（クラスター。`eps = 1e-7`で受け入れ
+# 限界を超える）ので、`eps`を絞る。
+GMM_SETTINGS = [
+    ("one_step", None, EPS),
+    ("two_step", "robust", EPS),
+    ("two_step", "classical", EPS),
+    ("iterated", "robust", EPS),
+    ("two_step", "cluster", [1e-5, 1e-6]),
+    ("two_step", "hac", [1e-5]),
+]
+_IV_GMM_PARAMS = [
+    (gmm_type, weight, cov_type, eps)
+    for gmm_type, weight, eps_values in GMM_SETTINGS
+    for cov_type in (
+        ["classical", "hc1", "hc2", "hc3", "hac", "cluster"]
+        if (gmm_type, weight) == ("two_step", "robust")
+        else ["classical", "hc1", "hac", "cluster"]
+    )
+    for eps in eps_values
+]
+
+
+@pytest.mark.parametrize(
+    ("gmm_type", "weight", "cov_type", "eps"),
+    _IV_GMM_PARAMS,
+    ids=[f"{g}-{w}-{c}-{e:g}" for g, w, c, e in _IV_GMM_PARAMS],
+)
 def test_iv_gmm_wald_and_hansen_j_are_invariant_to_reparametrization(
-    cov_type, gmm_type, eps
+    gmm_type, weight, cov_type, eps
 ):
     options = IVOptions(
         estimator="gmm",
         gmm_type=gmm_type,
-        gmm_weight_type="robust" if gmm_type == "two_step" else None,
+        gmm_weight_type=weight,
+        hac_lags=2 if weight == "hac" else None,
         cov_type=cov_type,
-        cluster="g" if cov_type == "cluster" else None,
-        hac_time="t" if cov_type == "hac" else None,
+        cluster="g" if "cluster" in (cov_type, weight) else None,
+        hac_time="t" if "hac" in (cov_type, weight) else None,
     )
 
     def fit(df: pl.DataFrame) -> dict[str, float]:
@@ -190,7 +216,12 @@ def test_iv_gmm_wald_and_hansen_j_are_invariant_to_reparametrization(
         }
 
     df = _with_time(_iv_data(eps))
-    _check(fit, df, _reparametrize(df, "x1", "x2", eps), f"IV GMM {cov_type}")
+    _check(
+        fit,
+        df,
+        _reparametrize(df, "x1", "x2", eps),
+        f"IV GMM {gmm_type} {weight} {cov_type}",
+    )
 
 
 # ── FE・FE-IV（dk を含む） ────────────────────────────────────────────
@@ -241,16 +272,31 @@ def test_fe_iv_wald_and_wu_hausman_are_invariant_to_reparametrization(
     _check(fit, df, _reparametrize(df, "x1", "x3", eps), f"FE-IV {cov_type}")
 
 
-@pytest.mark.parametrize("eps", EPS)
-@pytest.mark.parametrize("gmm_type", ["one_step", "two_step"])
-@pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster", "dk"])
+_FE_IV_GMM_PARAMS = [
+    (gmm_type, weight, cov_type, eps)
+    for gmm_type, weight, eps_values in GMM_SETTINGS
+    if weight != "hac"
+    for cov_type in (
+        ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
+        if (gmm_type, weight) == ("two_step", "robust")
+        else ["classical", "hc1", "cluster", "dk"]
+    )
+    for eps in eps_values
+]
+
+
+@pytest.mark.parametrize(
+    ("gmm_type", "weight", "cov_type", "eps"),
+    _FE_IV_GMM_PARAMS,
+    ids=[f"{g}-{w}-{c}-{e:g}" for g, w, c, e in _FE_IV_GMM_PARAMS],
+)
 def test_fe_iv_gmm_wald_and_hansen_j_are_invariant_to_reparametrization(
-    cov_type, gmm_type, eps
+    gmm_type, weight, cov_type, eps
 ):
     options = FEIVOptions(
         estimator="gmm",
         gmm_type=gmm_type,
-        gmm_weight_type="robust" if gmm_type == "two_step" else None,
+        gmm_weight_type=weight,
         cov_type=cov_type,
         dk_time="period" if cov_type == "dk" else None,
     )
@@ -272,7 +318,10 @@ def test_fe_iv_gmm_wald_and_hansen_j_are_invariant_to_reparametrization(
 
     df = _with_time(_panel_data(eps))
     _check(
-        fit, df, _reparametrize(df, "x1", "x3", eps), f"FE-IV GMM {cov_type}"
+        fit,
+        df,
+        _reparametrize(df, "x1", "x3", eps),
+        f"FE-IV GMM {gmm_type} {weight} {cov_type}",
     )
 
 

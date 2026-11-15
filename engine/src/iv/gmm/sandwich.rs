@@ -1,5 +1,5 @@
 //! `cov_type`別のモーメント条件の分散共分散行列`Ω̂`の組み立てと、係数の分散共分散行列（サンドイッチ型）。
-//! サンドイッチの代数そのものは共有の`shared::gmm::gmm_sandwich_covariance`。
+//! サンドイッチの代数は共有の`shared::gmm::GmmSolution::covariance`（白色化した操作変数の直交座標）。
 //!
 //! 定義は`gmm.rs`のモジュールdoc「標準誤差・検定統計量（`cov_type`対応）」参照。
 //!
@@ -10,14 +10,14 @@ use faer::Mat;
 use crate::iv::common::IvError;
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
-    HcScale, HcVariant, cluster_correction, cluster_meat, hc_meat, hc_scales, leverages,
-    resolve_hac_lags, time_ordering,
+    HcScale, HcVariant, cluster_correction, cluster_meat, hc_meat, hc_scales, resolve_hac_lags,
+    time_ordering,
 };
 use crate::shared::error::{ClusterSetting, CommonError};
-use crate::shared::gmm::{GmmSolution, invert_spd};
+use crate::shared::gmm::GmmSolution;
 use crate::shared::gmm_weight::hac_moment_covariance;
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::orthonormal::WaldCoordinates;
+use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 
 /// [`sandwich_covariance`]の戻り値。
 pub(super) struct GmmCovariance {
@@ -46,8 +46,8 @@ pub(super) fn sandwich_covariance(
     // `Ω̂`は、`Z`ではなく白色化した`Z̃ = Z L⁻ᵀ`から組み立てて、直接`Ω̃ = L⁻¹Ω̂L⁻ᵀ`を得る
     // （`GmmSolution::z_tilde`）。以下の`z`・`ztz`は`Z̃`・`Z̃'Z̃`。
     let z = solution.z_tilde();
-    // `Z̃'Z̃`は古典的な`Ω̂`と、HC2・HC3のレバレッジにだけ使う（他では作らない）。
-    let ztz_tilde = if matches!(cov_type, CovType::Classical | CovType::Hc2 | CovType::Hc3) {
+    // `Z̃'Z̃`は古典的な`Ω̂`にだけ使う（他では作らない。HC2・HC3のレバレッジは`Z̃`のQRから）。
+    let ztz_tilde = if matches!(cov_type, CovType::Classical) {
         z.transpose() * z
     } else {
         Mat::zeros(0, 0)
@@ -70,10 +70,10 @@ pub(super) fn sandwich_covariance(
             let sigma2 = centered_ssr / (df_resid as f64);
             Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
         }
-        CovType::Hc0 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc0)?,
-        CovType::Hc1 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc1)?,
-        CovType::Hc2 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc2)?,
-        CovType::Hc3 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc3)?,
+        CovType::Hc0 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc0)?,
+        CovType::Hc1 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc1)?,
+        CovType::Hc2 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc2)?,
+        CovType::Hc3 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc3)?,
         CovType::Hac { lags, time_order } => {
             let lags = resolve_hac_lags(*lags, n)?;
             hac_lags_used = Some(lags);
@@ -104,7 +104,7 @@ pub(super) fn sandwich_covariance(
 
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
 /// （l×l）。係数のHC（`shared::covariance::hc_cov_params`）と同じ外積の和（`hc_meat`）で、
-/// 設計行列の代わりに`Z`を使い、レバレッジは`Z`（点推定用の`ztz`をそのまま流用）から計算する
+/// 設計行列の代わりに`Z`（呼び出し側が渡す白色化した`Z̃`）を使い、レバレッジは`Z̃`のQR分解から計算する
 /// ——**GMMのHC2/HC3は外部参照実装での検証は不可能**（`linearmodels`の`IVGMM`にもRクロス
 /// チェックの`momentfit`にも対応する共分散推定が無い、`docs/spec/iv-spec.md`4章）。2SLSの
 /// HC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認済み
@@ -122,10 +122,8 @@ pub(super) fn sandwich_covariance(
 fn gmm_hc_omega(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
-    ztz: &Mat<f64>,
     n: usize,
     k: usize,
-    l: usize,
     variant: HcVariant,
 ) -> Result<Mat<f64>, IvError> {
     let resid = |i: usize| *residuals.get(i, 0);
@@ -136,30 +134,30 @@ fn gmm_hc_omega(
             hc_scales(n, resid, HcScale::Hc1 { factor })
         }
         HcVariant::Hc2 => {
-            let h = z_leverages(z, ztz, l)?;
+            let h = z_leverages(z)?;
             hc_scales(n, resid, HcScale::Hc2 { leverage: &h })
         }
         HcVariant::Hc3 => {
-            let h = z_leverages(z, ztz, l)?;
+            let h = z_leverages(z)?;
             hc_scales(n, resid, HcScale::Hc3 { leverage: &h })
         }
     };
     Ok(hc_meat(z, &scales))
 }
 
-/// `Z`のレバレッジ`h_ii = z_i'(Z'Z)⁻¹z_i`（HC2/HC3用）。
+/// `Z̃`のレバレッジ`h_ii = z̃_i'(Z̃'Z̃)⁻¹z̃_i`（HC2/HC3用）。`Z`の列の線形変換で不変なので、`Z`の
+/// レバレッジと同じ値。`Z̃`のQR分解の`Q`の行ノルムから求め（`Z̃'Z̃`も逆行列も作らない）、
+/// 近共線な操作変数・クラスター重みで`Z̃'Z̃`の条件数が大きくなっても精度を失わない。
 ///
-/// `Z'Z`は理論上full column rank（点推定の`W₀=(Z'Z)⁻¹`が既に反転成功済み）のため、ここでの
-/// 特異性は理論上到達不能だが、浮動小数点演算の丸めによる境界的な失敗に備えて`Result`のまま
-/// 扱う（`two_sls/cov.rs`の`xtx_inverse`と同じ防御的な扱い、`.claude/rules/rust-style.md`
-/// 「unwrap/expectはプロトタイプ段階を除き避ける」）。
-fn z_leverages(z: &Mat<f64>, ztz: &Mat<f64>, l: usize) -> Result<Vec<f64>, IvError> {
-    let ztz_inv = invert_spd(
-        ztz,
-        l,
-        CommonError::internal("Z'Z could not be factorized for the HC2/HC3 leverage"),
-    )?;
-    Ok(leverages(z, &ztz_inv))
+/// `Z̃`は重みの白色化でfull column rankに作られているため、QR分解の失敗は理論上到達不能だが、
+/// 丸め誤差に備えて`Result`のまま扱う（`.claude/rules/rust-style.md`「unwrap/expectは避ける」）。
+fn z_leverages(z: &Mat<f64>) -> Result<Vec<f64>, IvError> {
+    let design = OrthonormalDesign::new(z).map_err(|_| {
+        CommonError::internal(
+            "the whitened instruments could not be factorized for the HC2/HC3 leverage",
+        )
+    })?;
+    Ok(design.row_leverages())
 }
 
 /// クラスターロバストなモーメント条件の分散共分散行列（cov_type用）:

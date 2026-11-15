@@ -122,12 +122,17 @@ pub(crate) fn hac_moment_covariance(
 }
 
 /// `S = A'A`となる行列`A`（`m×l`）を返す。ロバスト重みは行`êᵢzᵢ`（`m = n`）、クラスター重みは
-/// クラスターごとのスコア`Σ_{i∈g} êᵢzᵢ`（`m = G`）。`S`を作って分解せず、`A`のQR分解から白色化する
-/// ため（`WhitenedInstruments::from_factor_rows`）。`Classical`・`Hac`は`A`の形に書けない
-/// （`Classical`は`σ̂²Z'Z`で`Z`のQRを使う）ので`None`。
+/// クラスターごとのスコア`Σ_{i∈g} êᵢzᵢ`（`m = G`）、HAC重み（Bartlettカーネル）は長さ`L+1`の窓の
+/// スコア和`w_t = Σ_{j=0}^{L} u_{t−j}`（`u_s = ê z`を時系列順に並べ、範囲の外は0、`t = 0..n+L`）を
+/// `√(L+1)`で割った行（`m = n + L`）。HACは`Σ_t w_t w_t' = Σ_h (L+1−|h|) Γ_h`（窓が2つのスコアを
+/// 両方含む数が`L+1−h`）なので、`(1/(L+1)) Σ_t w_t w_t' = Γ₀ + Σ_h (1 − h/(L+1))(Γ_h + Γ_h')`
+/// で`hac_meat`の`S`に厳密に一致する。`S`を作って分解せず、`A`のQR分解から白色化するため
+/// （`WhitenedInstruments::from_factor_rows`）。`Classical`は`A`の形に書けない（`σ̂²Z'Z`で`Z`のQRを使う）
+/// ので`None`。`Hac`で`hac`が無い、`Cluster`で`cluster`が無いときも`None`。
 pub(crate) fn moment_factor_rows(
     weight_type: &WeightType,
     cluster: Option<&GroupCodes>,
+    hac: Option<&(usize, Vec<usize>)>,
     z: &Mat<f64>,
     residuals: &Mat<f64>,
 ) -> Option<Mat<f64>> {
@@ -146,7 +151,24 @@ pub(crate) fn moment_factor_rows(
             }
             Some(scores)
         }
-        WeightType::Classical | WeightType::Hac { .. } => None,
+        WeightType::Hac { .. } => {
+            let (lags, order) = hac?;
+            let lags = *lags;
+            let norm = 1.0 / ((lags + 1) as f64).sqrt();
+            Some(Mat::from_fn(n + lags, l, |t, a| {
+                // 窓`[t − L, t]`のうち`0..n`に入る位置のスコアの和（直接足して、累積和の丸めを避ける）。
+                let first = t.saturating_sub(lags);
+                let last = t.min(n - 1);
+                let sum: f64 = (first..=last)
+                    .map(|s| {
+                        let row = order[s];
+                        *residuals.get(row, 0) * *z.get(row, a)
+                    })
+                    .sum();
+                norm * sum
+            }))
+        }
+        WeightType::Classical => None,
     }
 }
 
@@ -195,6 +217,65 @@ mod tests {
         WeightType::Cluster {
             groups: Some(GroupCodes::from_labels_without_keys(&labels)),
         }
+    }
+
+    fn moment_data() -> (Mat<f64>, Mat<f64>) {
+        let n = 24;
+        let wave = |i: usize| ((i * 37 % 29) as f64 - 14.0) / 6.0;
+        let z = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => wave(i),
+            _ => wave(i + 5) + 0.4 * wave(i),
+        });
+        let e = Mat::from_fn(n, 1, |i, _| 0.3 + wave(i + 9));
+        (z, e)
+    }
+
+    /// `moment_factor_rows`の`A`は、`A'A`が`moment_covariance`の`S`と一致する（ロバスト・クラスター・HAC）。
+    #[test]
+    fn factor_rows_reproduce_the_moment_covariance() {
+        let (z, e) = moment_data();
+        let n = z.nrows();
+        let ztz = z.transpose() * &z;
+        let cluster = groups(n, 4);
+        let codes = match &cluster {
+            WeightType::Cluster { groups: Some(g) } => g,
+            _ => unreachable!(),
+        };
+        for lags in [0_usize, 1, 3, 7] {
+            let order: Vec<usize> = (0..n).rev().collect();
+            let hac = (lags, order);
+            let weight = WeightType::Hac {
+                lags: Some(lags as i64),
+                time_order: (0..n).map(|i| (n - i) as f64).collect(),
+            };
+            let cases = [
+                (&WeightType::Robust, None, None),
+                (&cluster, Some(codes), None),
+                (&weight, None, Some(&hac)),
+            ];
+            for (index, (weight_type, cluster, hac)) in cases.into_iter().enumerate() {
+                let a = moment_factor_rows(weight_type, cluster, hac, &z, &e).unwrap();
+                let s = moment_covariance(weight_type, cluster, hac, &z, &e, &ztz).unwrap();
+                let gram = a.transpose() * &a;
+                for i in 0..3 {
+                    for j in 0..3 {
+                        let scale = s.get(i, j).abs().max(1e-12);
+                        assert!(
+                            (*gram.get(i, j) - *s.get(i, j)).abs() <= 1e-12 * scale.max(1.0),
+                            "lags={lags} case={index} ({i},{j})"
+                        );
+                    }
+                }
+            }
+        }
+        // `Classical`は`A`の形に書けない。`Hac`で時系列順・ラグが無いときは`None`。
+        assert!(moment_factor_rows(&WeightType::Classical, None, None, &z, &e).is_none());
+        let hac_weight = WeightType::Hac {
+            lags: None,
+            time_order: vec![],
+        };
+        assert!(moment_factor_rows(&hac_weight, None, None, &z, &e).is_none());
     }
 
     /// 過剰識別（`l > k`）は`G < l`で拒否し`G == l`は受理、丁度識別（`l == k`）は`G <= l`で拒否し

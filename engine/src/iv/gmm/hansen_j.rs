@@ -14,17 +14,15 @@ pub(super) struct HansenJTest {
 
 /// Hansen J過剰識別検定（docs/spec/iv-spec.md 3.5節）。
 /// `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、`gmm.rs`のモジュールdoc
-/// 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定`beta`に
-/// 実際に使った重み行列`s_used`）。自由度は`len(instruments) - len(x_endog)`
+/// 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定に実際に使った
+/// 重み行列）。白色化した操作変数での内積`‖Z̃'ê‖²/c`として求める（`GmmSolution::hansen_j_test`。
+/// `S`を作って分解しない）。自由度は`len(instruments) - len(x_endog)`
 /// （`two_sls/sargan.rs`のSargan検定と同じ、`docs/spec/iv-spec.md`1.1節の`instruments`＝
 /// 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
 /// （`docs/spec/iv-spec.md`1.2節・3.5節）。
 ///
-/// `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`classical_s`
-/// 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
-/// 行列のため、ここでの特異性は理論上到達不能（`two_sls/cov.rs`の`xtx_inverse`と
-/// 同じ防御的`Result`化）。計算は共有の`shared::gmm::hansen_j_test`で、IVは自由度を
-/// ここで決めて渡す。
+/// 重みの白色化と`Ĝ`の分解は点推定（`gmm_solve`）で済んでいるので、ここで特異性による失敗は
+/// 起きない（`Err`は自由度0など呼び出し側の誤りだけ）。IVは自由度をここで決めて渡す。
 pub(super) fn hansen_j_test(
     input: &IvInput,
     solution: &GmmSolution,

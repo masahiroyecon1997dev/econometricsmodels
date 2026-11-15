@@ -68,7 +68,8 @@ pub enum MatrixKind {
     Opg,
     /// GMMのモーメント条件の重み行列（`S`）。
     GmmWeight,
-    /// GMMの係数の「パン」`X'ZWZ'X`。
+    /// GMMの重みで白色化した構造方程式のモーメント行列`Ĝ = Z̃'X`（`X'ZWZ'X = Ĝ'Ĝ`のパンの因子）の、
+    /// 列を揃えた条件数・ランクの判定。
     GmmBread,
 }
 

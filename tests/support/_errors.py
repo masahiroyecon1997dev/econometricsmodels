@@ -128,8 +128,10 @@ MIGRATED_CODES: frozenset[str] = frozenset(
 # 文面・形式はカタログ全体の検査（`_lib.raise_error_for_test`）とRustの単体テストが固定する。
 # `MATRIX_NEAR_SINGULAR`の`matrix`のうち、Pythonから構成できているのは
 # `COEFFICIENT_COVARIANCE`と`DESIGN_GRAM`（列を揃えた条件数が上限を超える設計。
-# `tests/cross_method/test_collinearity_boundary.py`）。`HESSIAN`・`OPG`・`GMM_WEIGHT`は、
-# 前段の検査や分解が先に失敗するため、極端なスケール差のデータでも構成できていない。
+# `tests/cross_method/test_collinearity_boundary.py`）。`GMM_BREAD`（`Ĝ`の条件数超過）と
+# `GMM_WEIGHT`（操作変数・重みの因子の条件数超過。FEIVのGMMは第一段階が無く`Z`で止まる）も、
+# 同じファイルで構成できている。`HESSIAN`・`OPG`は、前段の検査や分解が先に失敗するため、極端な
+# スケール差のデータでも構成できていない。
 # 共分散が実際に特異なときの契約（FEの`FTestFailed`・REの`HausmanTestFailed`・FE-IVの
 # Wu-Hausmanが`None`）は、特異性の判定が丸め誤差の大きさで決まり、データから堅牢に構成できない
 # ため、手組みの特異な`M̃`でRustの単体テストが固定する（`panel/common/overall_wald.rs`・

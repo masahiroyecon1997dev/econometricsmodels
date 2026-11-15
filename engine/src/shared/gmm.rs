@@ -21,6 +21,7 @@ use super::orthonormal::{OrthonormalDesign, WaldCoordinates};
 ///
 /// # Errors
 /// `mat`が正定値でないとき`failure`。
+#[cfg(test)]
 pub(crate) fn invert_spd(
     mat: &Mat<f64>,
     dim: usize,
@@ -82,7 +83,7 @@ impl WhitenedInstruments {
                 let sum: f64 = (0..a.nrows())
                     .map(|i| (*a.get(i, j) / largest).powi(2))
                     .sum();
-                1.0 / (largest * sum.sqrt())
+                (1.0 / largest) / sum.sqrt()
             })
             .collect();
         if scale.iter().any(|d| !d.is_finite() || *d <= 0.0) {
@@ -101,17 +102,11 @@ impl WhitenedInstruments {
     /// `S`の対角が正の有限値でないか、`S`が正定値でないとき、`CommonError::NearSingularMatrix`
     /// （`MatrixKind::GmmWeight`）。
     pub(crate) fn from_weight(z: &Mat<f64>, s: &Mat<f64>) -> Result<Self, CommonError> {
-        let failure = || CommonError::NearSingularMatrix {
-            matrix: MatrixKind::GmmWeight,
-        };
-        let l = s.nrows();
-        let scale: Vec<f64> = (0..l).map(|j| 1.0 / s.get(j, j).sqrt()).collect();
-        if scale.iter().any(|d| !d.is_finite() || *d <= 0.0) {
-            return Err(failure());
-        }
-        let s_unit = Mat::from_fn(l, l, |i, j| scale[i] * *s.get(i, j) * scale[j]);
-        let llt = s_unit.llt(Side::Lower).map_err(|_| failure())?;
-        Ok(Self::from_unit_lower(z, &scale, llt.L().to_owned()))
+        Self::from_weight_if_well_conditioned(z, s, f64::INFINITY)?.ok_or(
+            CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight,
+            },
+        )
     }
 
     /// [`Self::from_weight`]と同じ白色化を、`S`（対角を揃えた`D S D`）の条件数が`max_condition`以下
@@ -179,6 +174,10 @@ impl GmmSolution {
     /// 点推定に使った重みが、白色化の元の重みの`scale`倍であることを記録する（Hansen Jの尺度）。
     /// 係数・共分散・Wald統計量は重みのスカラー倍で変わらない。
     pub(crate) fn with_weight_scale(mut self, scale: f64) -> Self {
+        debug_assert!(
+            scale.is_finite() && scale > 0.0,
+            "the weight scale must be positive"
+        );
         self.weight_scale = scale;
         self
     }
@@ -401,6 +400,7 @@ pub(crate) fn hansen_j_test(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::wald::wald_quadratic_form;
 
     /// n=8、操作変数l=3(定数・z1・z2)、構造方程式の設計行列k=2(定数・内生変数)。
     fn data() -> (Mat<f64>, Mat<f64>, Mat<f64>) {
@@ -477,13 +477,24 @@ mod tests {
                     );
                 }
             }
-            // 直交座標の二次形式が、共分散を使った二次形式と一致する（傾き1個）。
+            // 直交座標の二次形式（`(b̃, M̃)`）が、共分散を使った二次形式と一致する。傾き1個（切片が先頭）と、
+            // 全係数（切片なし）の2通り。
             let slope = *solution.beta().get(1, 0);
-            let wald_from_cov = slope * slope / *cov.get(1, 1);
-            let b_tilde = &wald.coordinates;
-            let r_inv_b = solution.design.coefficients(b_tilde);
-            assert!((*r_inv_b.get(1, 0) - slope).abs() < 1e-10);
-            assert!(wald_from_cov.is_finite());
+            let one = wald_quadratic_form(&wald.coordinates, &wald.meat, 1, 1).unwrap();
+            assert!(
+                (one - slope * slope / *cov.get(1, 1)).abs() <= 1e-8 * one.abs(),
+                "{index}: slope Wald"
+            );
+            let all = wald_quadratic_form(&wald.coordinates, &wald.meat, 0, 2).unwrap();
+            let (b0, b1) = (*solution.beta().get(0, 0), *solution.beta().get(1, 0));
+            let det = *cov.get(0, 0) * *cov.get(1, 1) - *cov.get(0, 1) * *cov.get(1, 0);
+            let direct = (b0 * b0 * *cov.get(1, 1) - 2.0 * b0 * b1 * *cov.get(0, 1)
+                + b1 * b1 * *cov.get(0, 0))
+                / det;
+            assert!(
+                (all - direct).abs() <= 1e-8 * all.abs(),
+                "{index}: joint Wald"
+            );
         }
         // `S = Z'Z`の`Z`のQR分解（初期推定）は、`Z'Z`をCholesky分解した白色化と同じ係数になる。
         let ztz = z.transpose() * &z;
@@ -494,6 +505,137 @@ mod tests {
         for i in 0..2 {
             assert!((*from_qr.beta().get(i, 0) - *from_chol.beta().get(i, 0)).abs() < 1e-10);
         }
+    }
+
+    /// `GmmSolution::hansen_j_test`（白色化した空間の内積`‖Z̃'ê‖²/c`）が、明示形
+    /// `(Z'ê)'S⁻¹(Z'ê)`（`hansen_j_statistic`）と一致する。重みの白色化3通りと、`weight_scale`・
+    /// `extra_scale`（`S`を`c`倍・`extra`倍したときの`J`の尺度）を含む。
+    #[test]
+    fn hansen_j_in_the_whitened_space_matches_the_explicit_quadratic_form() {
+        let (z, x, e0) = data();
+        let y = y_vector();
+        let a = Mat::from_fn(8, 3, |i, j| *e0.get(i, 0) * *z.get(i, j));
+        let s = a.transpose() * &a;
+        let beta_resid = |solution: &GmmSolution| &y - &x * solution.beta();
+        let cases = [
+            (WhitenedInstruments::from_weight(&z, &s).unwrap(), 1.0, 1.0),
+            (
+                WhitenedInstruments::from_factor_rows(&z, &a).unwrap(),
+                1.0,
+                1.0,
+            ),
+            // `S_used = c · Z'Z`（`Z`のQR分解は`Z'Z`で白色化）。FEの補正`extra`はさらに`S`を`extra`倍する。
+            (
+                WhitenedInstruments::from_instruments(&z).unwrap(),
+                0.37,
+                1.0,
+            ),
+            (
+                WhitenedInstruments::from_instruments(&z).unwrap(),
+                0.37,
+                8.0 / 6.0,
+            ),
+        ];
+        for (index, (whitening, c, extra)) in cases.into_iter().enumerate() {
+            let solution = gmm_solve(&x, &y, whitening).unwrap().with_weight_scale(c);
+            let residuals = beta_resid(&solution);
+            let s_used = if index < 2 {
+                s.clone()
+            } else {
+                let ztz = z.transpose() * &z;
+                Mat::from_fn(3, 3, |i, j| c * extra * *ztz.get(i, j))
+            };
+            let explicit = hansen_j_statistic(&z, &residuals, &s_used).unwrap();
+            let whitened = solution.hansen_j_statistic(&residuals, extra);
+            assert!(
+                (whitened - explicit).abs() <= 1e-10 * explicit.abs().max(1.0),
+                "{index}: {whitened} vs {explicit}"
+            );
+            let test = solution.hansen_j_test(&residuals, extra, 2).unwrap();
+            assert_eq!(test.statistic, whitened);
+            assert!((0.0..=1.0).contains(&test.p_value));
+        }
+        let solution =
+            gmm_solve(&x, &y, WhitenedInstruments::from_instruments(&z).unwrap()).unwrap();
+        assert!(solution.hansen_j_test(&y, 1.0, 0).is_err());
+    }
+
+    /// 近共線な操作変数（`D S D`の条件数が`WEIGHT_CHOLESKY_MAX_CONDITION`を超える）では、Cholesky分解の
+    /// 白色化は`None`になり（QRの経路に切り替わる）、条件数が小さいときは2つの経路が同じ係数・共分散を返す。
+    #[test]
+    fn the_qr_and_cholesky_whitenings_agree_and_the_condition_threshold_switches_between_them() {
+        let n = 40;
+        let wave = |i: usize| ((i * 37 % 41) as f64 - 20.0) / 9.0;
+        let y = Mat::from_fn(n, 1, |i, _| 1.0 + wave(i) + 0.3 * wave(i + 5));
+        let x = Mat::from_fn(n, 2, |i, j| {
+            if j == 0 {
+                1.0
+            } else {
+                wave(i + 11) + 0.2 * wave(i)
+            }
+        });
+        for (offset, near) in [(0.3, true), (1e-5, false)] {
+            // `z2 = z1 + offset · ノイズ`。`offset`が小さいほど`Z`・`S`の条件数が大きい。
+            let z = Mat::from_fn(n, 3, |i, j| match j {
+                0 => 1.0,
+                1 => wave(i),
+                _ => wave(i) + offset * wave(i + 3),
+            });
+            let e = Mat::from_fn(n, 1, |i, _| 0.5 + wave(i + 7));
+            let a = Mat::from_fn(n, 3, |i, j| *e.get(i, 0) * *z.get(i, j));
+            let s = a.transpose() * &a;
+            let cholesky =
+                WhitenedInstruments::from_weight_if_well_conditioned(&z, &s, 1e6).unwrap();
+            assert_eq!(cholesky.is_some(), near, "offset={offset}");
+            let qr = gmm_solve(
+                &x,
+                &y,
+                WhitenedInstruments::from_factor_rows(&z, &a).unwrap(),
+            )
+            .unwrap();
+            if let Some(cholesky) = cholesky {
+                let chol = gmm_solve(&x, &y, cholesky).unwrap();
+                for i in 0..2 {
+                    assert!((*qr.beta().get(i, 0) - *chol.beta().get(i, 0)).abs() < 1e-9);
+                }
+                let resid = &y - &x * qr.beta();
+                let (cov_qr, _) = qr.covariance(&robust_omega(qr.z_tilde(), &resid));
+                let (cov_chol, _) = chol.covariance(&robust_omega(chol.z_tilde(), &resid));
+                for i in 0..2 {
+                    for j in 0..2 {
+                        let scale = cov_qr.get(i, j).abs().max(1e-12);
+                        assert!((*cov_qr.get(i, j) - *cov_chol.get(i, j)).abs() <= 1e-8 * scale);
+                    }
+                }
+            }
+        }
+    }
+
+    /// `Ĝ = Z̃'X`の列を揃えた条件数が上限を超えるとき（比例ではなく近共線）も`GMM_BREAD`。
+    #[test]
+    fn gmm_solve_rejects_a_nearly_collinear_weighted_moment_matrix() {
+        let n = 30;
+        let wave = |i: usize| ((i * 37 % 31) as f64 - 15.0) / 7.0;
+        let z = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => wave(i),
+            _ => wave(i + 4),
+        });
+        let y = Mat::from_fn(n, 1, |i, _| wave(i + 2));
+        let x = Mat::from_fn(n, 2, |i, j| {
+            if j == 0 {
+                wave(i)
+            } else {
+                wave(i) + 1e-9 * wave(i + 9)
+            }
+        });
+        let whitening = WhitenedInstruments::from_instruments(&z).unwrap();
+        assert_eq!(
+            gmm_solve(&x, &y, whitening).err(),
+            Some(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmBread
+            })
+        );
     }
 
     #[test]

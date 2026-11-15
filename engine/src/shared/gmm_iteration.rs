@@ -108,7 +108,8 @@ pub(crate) struct GmmInitialStep {
 /// 初期推定（`W₀ = (Z'Z)⁻¹`、`weight_type`によらず共通）と、その残差・`Z'Z`・等分散の`S`を求める。
 ///
 /// # Errors
-/// `Z'Z`または`X'ZW₀Z'X`が数値的に特異のとき`CommonError::NearSingularMatrix`。
+/// `Z`の列のランク落ち・悪条件のとき`NearSingularMatrix`（`GMM_WEIGHT`）、`Ĝ = Q_Z'X`のランク落ち・
+/// 条件数超過のとき`NearSingularMatrix`（`GMM_BREAD`）。
 pub(crate) fn gmm_initial_step(
     z: &Mat<f64>,
     x: &Mat<f64>,
@@ -196,12 +197,12 @@ pub(crate) fn gmm_iterate(
                 &residuals,
                 ztz,
             )?;
-            // 白色化: 古典的な重み`σ̂²Z'Z`は`Z`のQR分解、ロバスト・クラスターは`S`（対角を揃えた`D S D`）の
+            // 白色化: 古典的な重み`σ̂²Z'Z`は`Z`のQR分解、ロバスト・クラスター・HACは`S`（対角を揃えた`D S D`）の
             // 条件数が小さければ`S`のCholesky分解、大きければ`S = A'A`の`A`のQR分解（`S`を作らない。
-            // `A`の条件数の2乗で精度を失わない）。HACは`S`のCholesky分解。
+            // `A`の条件数の2乗で精度を失わない。HACは窓のスコア和の行）。
             let whitening = match weight_type {
                 WeightType::Classical => WhitenedInstruments::from_instruments(z)?,
-                WeightType::Robust | WeightType::Cluster { .. } => {
+                WeightType::Robust | WeightType::Cluster { .. } | WeightType::Hac { .. } => {
                     match WhitenedInstruments::from_weight_if_well_conditioned(
                         z,
                         &s_next,
@@ -212,6 +213,7 @@ pub(crate) fn gmm_iterate(
                             let rows = moment_factor_rows(
                                 weight_type,
                                 weight_cluster_codes,
+                                hac_precomputed.as_ref(),
                                 z,
                                 &residuals,
                             )
@@ -222,7 +224,6 @@ pub(crate) fn gmm_iterate(
                         }
                     }
                 }
-                WeightType::Hac { .. } => WhitenedInstruments::from_weight(z, &s_next)?,
             };
             let mut solution_next = gmm_solve(x, y, whitening)?;
             if matches!(weight_type, WeightType::Classical) {

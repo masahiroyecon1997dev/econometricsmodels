@@ -17,9 +17,9 @@ pub(super) struct FeHansenJ {
     pub(super) df: usize,
 }
 
-/// 固定効果つきGMMのHansen J検定。`z_tilde`は変換後の全操作変数`Z̃`、`residuals`は構造残差、
-/// `s_used`は最終の係数に使った重み行列、`df = len(instruments) − len(x_endog)`は呼び出し側が決める
-/// （丁度識別・内生変数なしは検定が無いので呼ばない）。
+/// 固定効果つきGMMのHansen J検定。`solution`は最終の係数の白色化した解（`J = ‖Z̃'ẽ‖²/c`を
+/// 白色化した空間の内積で求める）、`residuals`は構造残差、`df = len(instruments) − len(x_endog)`は
+/// 呼び出し側が決める（丁度識別・内生変数なしは検定が無いので呼ばない）。
 ///
 /// `homoskedastic_weight`は`S`が`σ̂²Z̃'Z̃`（`σ̂² = e'e/n`。`Classical`の重みと`OneStep`）のとき`true`で、
 /// `S`を`n/(n − n_absorbed)`倍して`σ̂² = e'e/(n − n_absorbed)`にする。within変換後の残差の二乗和の期待値は
@@ -31,8 +31,7 @@ pub(super) struct FeHansenJ {
 /// 不均一分散の下では`n/(n − n_absorbed)`でも直らない（`gmm.rs`のモジュールdoc「`Robust`重みの限界」）。
 ///
 /// # Errors
-/// `S`が正定値でないとき`CommonError::NearSingularMatrix`。`S`は点推定で既に反転成功済み（その正の
-/// スカラー倍も正定値）なので、到達しないはずの防御的な`Result`。
+/// `df`が0のとき（呼び出し側の誤り）。重みの特異性は点推定（`gmm_solve`）が先に報告する。
 pub(super) fn fe_hansen_j(
     solution: &GmmSolution,
     residuals: &Mat<f64>,

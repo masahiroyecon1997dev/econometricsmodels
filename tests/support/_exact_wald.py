@@ -90,6 +90,7 @@ class ExactInference:
     beta: list[float]
     se: list[float]
     wald: float
+    hansen_j: float | None = None
 
 
 def exact_inference(
@@ -222,14 +223,25 @@ def _eye(d: int) -> list[list[F]]:
 
 
 def _moment_sum(
-    z: list[list[F]], e: list[F], groups: Sequence[object] | None
+    z: list[list[F]],
+    e: list[F],
+    groups: Sequence[object] | None,
+    leverage: Sequence[F] | None = None,
+    power: int = 1,
 ) -> list[list[F]]:
-    """`Σ ê² z z'`（`groups`があれば`Σ_g (Σ_i ê z)(Σ_i ê z)'`）。"""
+    """`Σ ê² z z'`（`groups`があれば`Σ_g (Σ_i ê z)(Σ_i ê z)'`）。`leverage`があれば、HC2・HC3の
+    `ê²/(1 − h)^power`（`power`は1か2）で重みを付ける。"""
     n, l = len(z), len(z[0])
     if groups is None:
+        weights = [
+            e[i] * e[i] / (1 - leverage[i]) ** power
+            if leverage is not None
+            else e[i] * e[i]
+            for i in range(n)
+        ]
         return [
             [
-                sum(e[i] * e[i] * z[i][a] * z[i][b] for i in range(n))
+                sum(weights[i] * z[i][a] * z[i][b] for i in range(n))
                 for b in range(l)
             ]
             for a in range(l)
@@ -246,27 +258,57 @@ def _moment_sum(
     return out
 
 
+def _hac_sum(
+    z: list[list[F]], e: list[F], lags: int, order: Sequence[int]
+) -> list[list[F]]:
+    """Newey-West（Bartlettカーネル）の`Γ₀ + Σ_h (1 − h/(L+1))(Γ_h + Γ_h')`。`order`は時系列順の行。"""
+    n, l = len(z), len(z[0])
+    u = [[e[order[t]] * z[order[t]][a] for a in range(l)] for t in range(n)]
+    out = [
+        [sum(u[t][a] * u[t][b] for t in range(n)) for b in range(l)]
+        for a in range(l)
+    ]
+    for h in range(1, lags + 1):
+        w = F(lags + 1 - h, lags + 1)
+        for a in range(l):
+            for b in range(l):
+                gamma = sum(u[t][a] * u[t - h][b] for t in range(h, n))
+                gamma_t = sum(u[t][b] * u[t - h][a] for t in range(h, n))
+                out[a][b] += w * (gamma + gamma_t)
+    return out
+
+
 def exact_gmm_inference(
     x: Sequence[Sequence[float]],
     z: Sequence[Sequence[float]],
     y: Sequence[float],
     *,
-    two_step: bool = False,
+    steps: int = 1,
+    weight: str = "robust",
+    weight_groups: Sequence[object] | None = None,
+    hac_lags: int = 0,
+    hac_order: Sequence[int] | None = None,
     cov_type: str = "classical",
     groups: Sequence[object] | None = None,
     n_constants: int = 1,
     df_resid: int | None = None,
     cluster_k: int | None = None,
     center: bool = True,
+    extra_leverage: Sequence[F | float] | None = None,
+    hansen_extra_scale: F | float = 1,
 ) -> ExactInference:
-    """GMM（1段階、または重みを`Σ ê₀² z z'`にする2段階）の係数・標準誤差・傾きのWald統計量（χ²）。
+    """GMMの係数・標準誤差・傾きのWald統計量（χ²）・Hansen J統計量。
 
-    1段階の重みは`W₀ = (Z'Z)⁻¹`。`cov_type`は`classical`（`σ̂²Z'Z`、`σ̂²`は中心化した残差の
-    `/(n−k)`）・`hc0`・`hc1`（`n/(n−k)`）・`cluster`（`G/(G−1)·(n−1)/(n−k)`、`groups`が必要）。
-    共分散は`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`B = X'ZWZ'X`）。入力のf64の値をそのまま有理数にする。
-    `df_resid`は`n − k`の代わり（classicalの`σ̂²`・hc1の補正。固定効果を吸収したパネルは
-    `n − k − 吸収した効果の数`）、`cluster_k`はclusterの`n − K`の`K`（既定は`k`）、
-    `center=False`は`σ̂²`で残差の平均を引かない（within変換した残差の平均は0）。
+    `steps`は推定の回数（1: 1段階、2: 2段階、3以上: 反復。パッケージの`n_iter`を渡す）。1回目の
+    重みは`W₀ = (Z'Z)⁻¹`。2回目以降の重み`S`は直前の残差から`weight`で作る: `"classical"`
+    （`σ̂²Z'Z`、`σ̂² = e'e/n`）・`"robust"`（`Σ ê² z z'`）・`"cluster"`（`weight_groups`のスコアの和）・
+    `"hac"`（`hac_lags`・`hac_order`のBartlettカーネル）。`cov_type`は`classical`（`σ̂²Z'Z`、`σ̂²`は
+    `/(n−k)`）・`hc0`・`hc1`（`n/(n−k)`）・`hc2`・`hc3`（`h = z'(Z'Z)⁻¹z`に`extra_leverage`を足す）・
+    `cluster`（`G/(G−1)·(n−1)/(n−K)`、`groups`が必要）。共分散は`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
+    （`B = X'ZWZ'X`）。Hansen Jは`(Z'ê)'S⁻¹(Z'ê)`で、`S`は最後の推定に使った重み（1段階は`σ̂²Z'Z`）。
+    `hansen_extra_scale`は`S`にさらに掛ける倍率（FEの`n/(n−吸収した効果の数)`。古典的な重みのときだけ
+    呼び出し側が渡す）。入力のf64の値をそのまま有理数にする。`df_resid`は`n − k`の代わり、
+    `cluster_k`はclusterの`n − K`の`K`（既定は`k`）、`center=False`は`σ̂²`で残差の平均を引かない。
     """
     n, k, l = len(x), len(x[0]), len(z[0])
     dof = n - k if df_resid is None else df_resid
@@ -275,6 +317,8 @@ def exact_gmm_inference(
     yf = [F(v) for v in y]
     ztx = _mm(_t(zf), xf)
     zty = _mm(_t(zf), [[v] for v in yf])
+    ztz = _mm(_t(zf), zf)
+    ztz_inv = _solve(ztz, _eye(l))
 
     def solve_gmm(
         s: list[list[F]],
@@ -288,21 +332,46 @@ def exact_gmm_inference(
         ]
         return w, beta, resid
 
-    s = _mm(_t(zf), zf)
-    w, beta, resid = solve_gmm(s)
-    if two_step:
-        s = _moment_sum(zf, resid, None)
+    def sigma2_of(resid: list[F]) -> F:
+        return sum(e * e for e in resid) / n
+
+    w, beta, resid = solve_gmm(ztz)
+    s_used = [[sigma2_of(resid) * v for v in row] for row in ztz]
+    for _ in range(steps - 1):
+        if weight == "classical":
+            s = [[sigma2_of(resid) * v for v in row] for row in ztz]
+        elif weight == "robust":
+            s = _moment_sum(zf, resid, None)
+        elif weight == "cluster":
+            s = _moment_sum(zf, resid, weight_groups)
+        elif weight == "hac":
+            s = _hac_sum(zf, resid, hac_lags, hac_order or list(range(n)))
+        else:
+            raise ValueError(f"unsupported weight: {weight}")
         w, beta, resid = solve_gmm(s)
+        s_used = s
 
     if cov_type == "classical":
         mean = sum(resid) / n if center else F(0)
         sigma2 = sum((e - mean) ** 2 for e in resid) / dof
-        ztz = _mm(_t(zf), zf)
         omega = [[sigma2 * v for v in row] for row in ztz]
     elif cov_type in {"hc0", "hc1"}:
         omega = _moment_sum(zf, resid, None)
         if cov_type == "hc1":
             omega = [[v * F(n, dof) for v in row] for row in omega]
+    elif cov_type in {"hc2", "hc3"}:
+        leverage = [
+            sum(
+                zf[i][a] * ztz_inv[a][b] * zf[i][b]
+                for a in range(l)
+                for b in range(l)
+            )
+            + (F(0) if extra_leverage is None else F(extra_leverage[i]))
+            for i in range(n)
+        ]
+        omega = _moment_sum(
+            zf, resid, None, leverage, 1 if cov_type == "hc2" else 2
+        )
     elif cov_type == "cluster":
         if groups is None:
             raise ValueError("cluster needs groups")
@@ -326,4 +395,13 @@ def exact_gmm_inference(
         sum(b[0] * s_[0] for b, s_ in zip(b_slopes, solved, strict=True))
     )
     se = [float(cov[a][a]) ** 0.5 for a in range(k)]
-    return ExactInference(beta=[float(b[0]) for b in beta], se=se, wald=wald)
+    # Hansen J: (Z'ê)' S⁻¹ (Z'ê)、`S`は最後の推定に使った重み（`hansen_extra_scale`倍）。
+    zte = _mm(_t(zf), [[e] for e in resid])
+    s_scaled = [[F(hansen_extra_scale) * v for v in row] for row in s_used]
+    solved_j = _solve(s_scaled, zte)
+    hansen_j = float(
+        sum(a[0] * c[0] for a, c in zip(zte, solved_j, strict=True))
+    )
+    return ExactInference(
+        beta=[float(b[0]) for b in beta], se=se, wald=wald, hansen_j=hansen_j
+    )

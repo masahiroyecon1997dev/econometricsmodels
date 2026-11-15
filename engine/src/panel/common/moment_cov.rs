@@ -1,7 +1,7 @@
 //! `cov_type`別の、固定効果つきGMMのモーメント条件の分散共分散行列`Ω̂`（l×l）。
 //!
 //! 係数の共分散行列（サンドイッチ）の中身にあたる部分で、サンドイッチの代数は
-//! `shared::gmm::gmm_sandwich_covariance`が行う。`panel_cov_params`の`cov_type`ごとの補正
+//! `shared::gmm::GmmSolution::covariance`が行う（呼び出し側が、白色化した操作変数`Z̃`を`z`として渡す）。`panel_cov_params`の`cov_type`ごとの補正
 //! （HC1の`n/df_resid`、HC2/HC3のレバレッジ、クラスターの`K`、DKの`T/(T-1)`）と事前検証を、設計行列の
 //! 代わりに変換後の操作変数`Z̃`のスコア`ẽ_it z̃_it`に適用する。検証と`K`の決め方は`panel_cov_params`と
 //! 同じ関数（`cluster_setup`・`dk_setup`）を共有する。
@@ -13,13 +13,11 @@ use super::cov_type::PanelCovType;
 use super::error::PanelError;
 use super::fe_adjustment::leverage_full;
 use super::panel_cov::{ClusterSetup, DkSetup, PanelStructure, cluster_setup, dk_setup};
-use crate::shared::covariance::{
-    HcScale, cluster_correction, cluster_meat, hc_meat, hc_scales, leverages,
-};
+use crate::shared::covariance::{HcScale, cluster_correction, cluster_meat, hc_meat, hc_scales};
 use crate::shared::error::CommonError;
 use crate::shared::error_catalog::Stage;
-use crate::shared::gmm::invert_spd;
 use crate::shared::group_codes::GroupCodes;
+use crate::shared::orthonormal::OrthonormalDesign;
 
 /// [`panel_moment_covariance`]の入力。
 pub(crate) struct PanelMomentInput<'a> {
@@ -54,7 +52,7 @@ pub(crate) struct PanelMoment {
 ///
 /// - `Classical`: `σ̂² Z̃'Z̃`、`σ̂² = ẽ'ẽ/df_resid`（within変換後の`ẽ`は平均0なので中心化は要らない）。
 /// - `Hc1`: `Σ (n/df_resid) ẽ² z̃z̃'`。
-/// - `Hc2`・`Hc3`: レバレッジ`h = z̃'(Z̃'Z̃)⁻¹z̃`に吸収した効果のレバレッジ（`leverage_full`）を足す
+/// - `Hc2`・`Hc3`: レバレッジ`h = z̃'(Z̃'Z̃)⁻¹z̃`（`Z̃`のQR分解の行ノルムで求める）に吸収した効果のレバレッジ（`leverage_full`）を足す
 ///   （ダミーを操作変数に入れたときのハット行列の対角と一致する）。
 /// - `Cluster`: `(G/(G-1))((n-1)/(n-K)) Σ_g (Σ ẽ z̃)(Σ ẽ z̃)'`。
 /// - `Dk`: `T/(T-1) × (n-1)/(n-K)` と、時点ごとのスコアの和へのBartlettカーネル和。`K = df_model`。
@@ -95,13 +93,14 @@ pub(crate) fn panel_moment_covariance(
             Ok(plain(hc_meat(z, &scales)))
         }
         PanelCovType::Hc2 | PanelCovType::Hc3 => {
-            // `Z̃'Z̃`は点推定の初期重み`(Z̃'Z̃)⁻¹`で反転成功済み。
-            let ztz_inv = invert_spd(
-                ztz,
-                l,
-                CommonError::internal("Z'Z could not be factorized for the HC2/HC3 leverage"),
-            )?;
-            let h = leverage_full(&leverages(z, &ztz_inv), levels, n)?;
+            // `Z̃'Z̃`の逆行列を作らず、`Z̃`のQR分解の`Q`の行ノルムからレバレッジを求める
+            // （`Z`の列の線形変換で不変。近共線な操作変数でも精度を失わない）。
+            let design = OrthonormalDesign::new(z).map_err(|_| {
+                CommonError::internal(
+                    "the instruments could not be factorized for the HC2/HC3 leverage",
+                )
+            })?;
+            let h = leverage_full(&design.row_leverages(), levels, n)?;
             let scale = if matches!(cov_type, PanelCovType::Hc2) {
                 HcScale::Hc2 { leverage: &h }
             } else {

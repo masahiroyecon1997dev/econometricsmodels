@@ -97,7 +97,8 @@ _FITTERS: dict[str, Callable[[pl.DataFrame], object]] = {
 
 
 # 固定効果つきのIV GMMは第一段階を持たないので、操作変数の列・`Ĝ`の判定（`GMM_WEIGHT`・`GMM_BREAD`）で
-# 止まる（受け入れる境界は他の手法と同じ）。下の専用のテストで確かめる。
+# 止まる（受け入れる境界は他の手法とほぼ同じで、このデータでは約`4.2e-8`〜`4.5e-8`。他は約`3.8e-8`）。
+# 下の専用のテストで確かめる。
 def _FE_IV_GMM(df: pl.DataFrame) -> object:
     return FEIV(
         df,
@@ -414,3 +415,74 @@ def test_fe_iv_gmm_rejects_designs_outside_the_limit(eps, scale):
             "GMM_BREAD",
             "DESIGN_GRAM",
         }
+
+
+# ── GMMの`Ĝ`（`GMM_BREAD`）と、クラスター重みの因子の限界 ─────────────────────────
+
+
+def _fit_gmm_two_endogenous(method: str, df: pl.DataFrame) -> object:
+    options_kwargs = {"estimator": "gmm"}
+    if method == "iv_gmm":
+        return IV(
+            df,
+            "y",
+            ["a"],
+            ["d1", "d2"],
+            ["z1", "z2", "z3"],
+            options=IVOptions(**options_kwargs),
+        ).fit()
+    return FEIV(
+        df,
+        y="y",
+        x_exog=["a"],
+        x_endog=["d1", "d2"],
+        instruments=["z1", "z2", "z3"],
+        effects=["entity"],
+        options=FEIVOptions(**options_kwargs),
+    ).fit()
+
+
+@pytest.mark.parametrize("method", ["iv_gmm", "fe_iv_gmm"])
+@pytest.mark.parametrize("eps", [1e-5, 1e-6])
+def test_gmm_estimates_when_the_weighted_moment_matrix_is_inside_the_limit(
+    method, eps
+):
+    _fit_gmm_two_endogenous(method, _instrument_data(eps, "dd"))
+
+
+@pytest.mark.parametrize("method", ["iv_gmm", "fe_iv_gmm"])
+@pytest.mark.parametrize("eps", [1e-7, 1e-8, 1e-10])
+def test_gmm_rejects_a_nearly_collinear_weighted_moment_matrix(method, eps):
+    """第一段階の設計行列は良条件で、内生変数の操作変数で説明される部分（`Ĝ = Z̃'X`）だけがほぼ共線の
+    とき、`GMM_BREAD`で止まる（2SLSの第二段階の`DESIGN_GRAM`と同じ境界）。"""
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="GMM_BREAD"):
+        _fit_gmm_two_endogenous(method, _instrument_data(eps, "dd"))
+
+
+def test_the_cluster_weight_has_its_own_limit_through_its_score_matrix():
+    """クラスター重みの`S = A'A`の因子`A`（クラスターのスコア）は、クラスター数が少ないと設計行列より
+    条件数が大きくなる（8クラスター・操作変数6本で、`eps = 1e-7`の設計行列の条件数2.8e7に対し、
+    `A`は列を揃えて約5.6e7）。受け入れる範囲の内側でも`GMM_WEIGHT`で止まる。変更前の`S`の
+    Cholesky分解も同じ`S`の条件数（約3e15）で失敗しており、退行ではない。"""
+    from test_near_collinear_exact import _iv_data
+
+    options = IVOptions(
+        estimator="gmm",
+        gmm_type="two_step",
+        gmm_weight_type="cluster",
+        cluster="g",
+    )
+
+    def fit(eps: float) -> object:
+        return IV(
+            _iv_data(eps),
+            "y",
+            ["x1", "x2"],
+            ["endog"],
+            ["z1", "z2", "z3"],
+            options=options,
+        ).fit()
+
+    fit(1e-6)
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="GMM_WEIGHT"):
+        fit(1e-7)

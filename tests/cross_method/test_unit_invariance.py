@@ -150,24 +150,28 @@ def test_one_column_in_other_units_gives_the_same_statistics(name, scale):
 
 
 def test_a_singular_cluster_meat_raises_near_singular_matrix():
-    """クラスター数が`g = q + 1`（4クラスター・傾き3個）の境界で、直交座標のミートの傾き
-    部分行列の最小固有値が最大の約`1e-17`倍（実質0）になるデータは、`g > q`で事前検証は通るが、
-    全体のWald検定が`MATRIX_NEAR_SINGULAR`（`COEFFICIENT_COVARIANCE`）で止める。桁落ちではなく、
-    共分散が実際に特異な場合に止まることの確認で、共線性の程度には依らない。"""
-    n = 12
-    i = np.arange(n)
-    x1 = (i + 1).astype(float)
+    """OLSの残差が、4クラスターのうち2つにしか乗らないデータ（傾き3個で`g = 4 > q`のため
+    事前検証は通る）。切片を含む4本の正規方程式から、残差の2つのクラスターのスコアは符号だけ
+    逆（`s_0 = -s_1`）で、他の2つは0なので、クラスター共分散のミート`M̃`のランクは1になる。
+    傾き部分行列の固有値は、最大の`1e-32`倍程度（検定の閾値より10桁以上小さい）で、丸めの
+    向きによらず全体のWald検定が`MATRIX_NEAR_SINGULAR`（`COEFFICIENT_COVARIANCE`）で止める。
+    残差は、整数のデータで`X'r = 0`を厳密に満たす（クラスター0・1の6行の設計の零空間の
+    ベクトル。`r`が`y`にそのまま乗る）。"""
+    x1 = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8]
+    x2 = [2, 7, 1, 8, 2, 8, 1, 8, 2, 8, 4, 5]
+    x3 = [1, 0, 2, 2, 1, 0, 3, 1, 0, 2, 1, 3]
+    # クラスター`g0`・`g1`（行`i % 4`が0か1）にだけ乗る残差。`X'r = 0`。
+    r = [-25, 6, 0, 0, 23, -6, 0, 0, 1, 1, 0, 0]
     df = pl.DataFrame(
         {
-            "x1": x1,
-            "x2": x1**2,
-            "x3": (i % 3).astype(float),
-            "g": [f"g{k % 4}" for k in i],
-            "y": 1.0
-            + 2.0e6 * x1
-            + 3.0e-3 * x1**2
-            + 0.5 * (i % 3)
-            + np.where(i % 2 == 0, 1e3, -1e3),
+            "x1": [float(v) for v in x1],
+            "x2": [float(v) for v in x2],
+            "x3": [float(v) for v in x3],
+            "g": [f"g{i % 4}" for i in range(12)],
+            "y": [
+                float(1 + 2 * a - b + 3 * c + e)
+                for a, b, c, e in zip(x1, x2, x3, r, strict=True)
+            ],
         }
     )
     options = OLSOptions(cov_type="cluster", cluster="g")

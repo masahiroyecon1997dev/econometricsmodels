@@ -3,8 +3,8 @@
 OLS・WLS・IV 2SLS・FE・FE-IVは、共分散と全体のWald/F統計量を直交座標（QR）で求めるため、
 傾きの相関が極端に高くても、`cov_type`ごとのサンドイッチ共分散が桁落ちで不正確にならない。
 基準値は、データから有理数（`fractions`）で組んだ値（`tests/support/_exact_wald.py`）で、
-返された`cov_params`は使わない。REは準偏差化の`θ`が無理数のため、厳密値を作れない
-（REは単位テストと参照実装との照合で確かめる）。
+返された`cov_params`は使わない。REは準偏差化の`θ`が無理数だが、返された`θ`（倍精度の値は有理数）
+で準偏差化した設計に対する最小二乗の厳密値を基準にする（`θ`の推定そのものは確かめない）。
 
 受け入れる範囲は、列を揃えた条件数が約`5e7`以下（`test_collinearity_boundary.py`）。
 `eps`は、傾きの相関が`1 - O(eps²)`になる強さ（`eps = 1e-7`で条件数は約`2.8e7`）。
@@ -12,6 +12,7 @@ OLS・WLS・IV 2SLS・FE・FE-IVは、共分散と全体のWald/F統計量を直
 
 from __future__ import annotations
 
+from fractions import Fraction as F
 from functools import cache, partial
 
 import numpy as np
@@ -29,11 +30,13 @@ from econometricsmodels import (
     FEIV,
     IV,
     OLS,
+    RE,
     WLS,
     FEIVOptions,
     FEOptions,
     IVOptions,
     OLSOptions,
+    REOptions,
     WLSOptions,
 )
 
@@ -49,6 +52,8 @@ COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "cluster"]
 # FE・FE-IVは`hc0`を持たない。
 PANEL_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 EPS = [1e-5, 1e-6, 1e-7]
+# REの内部の補助回帰が別名の列を落とす窓（約`3e-7`以下）の中も含める。最終回帰は全列を使う。
+RE_EPS = [1e-5, 1e-6, 1e-7, 6e-8]
 
 N_ENTITIES = 12
 N_PERIODS = 5
@@ -278,19 +283,59 @@ def _fe_iv_case(cov_type: str, eps: float) -> _Case:
     return _Case(res, res.wald_statistic * res.wald_df_num, exact)
 
 
+@cache
+def _re_case(cov_type: str, eps: float) -> _Case:
+    """返された`θ`（全個体で同じ）で準偏差化した設計（切片の列は`1 - θ`）の、厳密な最小二乗。"""
+    df = _panel_data(eps)
+    res = RE(
+        df,
+        y="y",
+        x=["x1", "x3"],
+        effects=["entity"],
+        options=REOptions(cov_type=cov_type),
+    ).fit()
+    (theta,) = {F(t) for t in res.theta.values()}
+    entity = df["entity"].to_list()
+    columns = {c: df[c].to_list() for c in ["x1", "x3", "y"]}
+    means = {
+        (e, c): sum(
+            F(columns[c][i]) for i in range(N_PERIODS * e, N_PERIODS * (e + 1))
+        )
+        / N_PERIODS
+        for e in range(N_ENTITIES)
+        for c in columns
+    }
+
+    def quasi_demeaned(c: str, i: int) -> F:
+        return F(columns[c][i]) - theta * means[(entity[i], c)]
+
+    n = df.height
+    exact = exact_inference(
+        [
+            [1 - theta, quasi_demeaned("x1", i), quasi_demeaned("x3", i)]
+            for i in range(n)
+        ],
+        [quasi_demeaned("y", i) for i in range(n)],
+        cov_type=cov_type,
+        groups=_cluster_label(cov_type, df, "entity"),
+    )
+    return _Case(res, res.f_statistic * 2, exact)
+
+
 _CASES = {
-    "OLS": (_ols_case, COV_TYPES),
-    "WLS": (_wls_case, COV_TYPES),
-    "IV": (_iv_case, COV_TYPES),
-    "FE": (_fe_case, PANEL_COV_TYPES),
-    "FE-IV": (_fe_iv_case, PANEL_COV_TYPES),
+    "OLS": (_ols_case, COV_TYPES, EPS),
+    "WLS": (_wls_case, COV_TYPES, EPS),
+    "IV": (_iv_case, COV_TYPES, EPS),
+    "FE": (_fe_case, PANEL_COV_TYPES, EPS),
+    "FE-IV": (_fe_iv_case, PANEL_COV_TYPES, EPS),
+    "RE": (_re_case, PANEL_COV_TYPES, RE_EPS),
 }
 
 _PARAMS = [
     (method, cov_type, eps)
-    for method, (_, cov_types) in _CASES.items()
+    for method, (_, cov_types, eps_values) in _CASES.items()
     for cov_type in cov_types
-    for eps in EPS
+    for eps in eps_values
 ]
 _IDS = [f"{m}-{c}-{e:g}" for m, c, e in _PARAMS]
 

@@ -35,8 +35,8 @@ def exact_projected_design(
 ) -> list[list[F]]:
     """操作変数`Z`への射影 `X̂ = Z (Z'Z)⁻¹ Z'X`（有理数。2SLSの第二段階の設計行列）。"""
     n, kz, kx = len(z), len(z[0]), len(x[0])
-    zf = [[F(float(v)) for v in row] for row in z]
-    xf = [[F(float(v)) for v in row] for row in x]
+    zf = [[F(v) for v in row] for row in z]
+    xf = [[F(v) for v in row] for row in x]
     ztz = [
         [sum(zf[i][a] * zf[i][b] for i in range(n)) for b in range(kz)]
         for a in range(kz)
@@ -65,8 +65,8 @@ def _exact_fit(
     各行、`x_hat`があれば`x_hat`の各行（ミートのスコアと、レバレッジに使う）。
     """
     n, k = len(x), len(x[0])
-    xf = [[F(float(v)) for v in row] for row in x]
-    yf = [F(float(v)) for v in y]
+    xf = [[F(v) for v in row] for row in x]
+    yf = [F(v) for v in y]
     rows = [list(r) for r in x_hat] if x_hat is not None else xf
     gram = [
         [sum(rows[i][a] * rows[i][b] for i in range(n)) for b in range(k)]

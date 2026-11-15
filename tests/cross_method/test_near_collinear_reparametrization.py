@@ -1,11 +1,14 @@
 """ほぼ共線な傾きの検定統計量が、モデルの厳密な再パラメータ化で変わらないこと。
 
 傾きの2列`(x1, x2)`を`(x1, (x2 - x1) / 2^k)`に置き換える（`2^k`は`eps`に近い2の冪）。近い値同士の
-引き算は正確で、2の冪での割り算も正確なので、これはデータの丸めを増やさないモデルの再表現になる。
+引き算は正確で、2の冪での割り算も正確なので、OLS・WLS・IVでは、データの丸めを増やさない
+モデルの再表現になる（FE・RE・FE-IVは個体平均を引くときの丸めで、約`1e-9`の摂動が入る。
+許容誤差`1e-7`はその分を見込んでいる）。
 置き換えた設計は条件が良く、全体のWald/F統計量・Hausman・Wu-Hausman・分散成分は、傾きの正則な
 線形変換で変わらない。元の設計（条件数が最大2.8e7）と置き換えた設計の統計量の一致で、
 `tests/cross_method/test_near_collinear_exact.py`の有理数の厳密値が作れない場合
-（REの準偏差化の`θ`が無理数のとき、`hac`・`dk`、Hausman・Wu-Hausman）の精度を確かめる。
+（`hac`・`dk`、Hausman・Wu-Hausman）の精度を確かめる。REの全体Fは、返された`θ`を使う厳密値
+（同ファイル）でも確かめる。
 
 REのHausman補助回帰とbetween回帰は、相対残差`1e-7`未満の列を「別名」として落とす
 （Rの`lm`流。相関ランダム効果のための設計）。その窓（`eps`が約`3e-7`以下）では再パラメータ化の
@@ -30,11 +33,13 @@ from econometricsmodels import (
     IV,
     OLS,
     RE,
+    WLS,
     FEIVOptions,
     FEOptions,
     IVOptions,
     OLSOptions,
     REOptions,
+    WLSOptions,
 )
 from test_near_collinear_exact import (
     N_ENTITIES,
@@ -89,7 +94,7 @@ def _check(
         assert_invariant(got[name], expected[name], f"{label} {name}")
 
 
-# ── OLS・IV（hac を含む） ─────────────────────────────────────────────
+# ── OLS・WLS・IV（hac を含む） ─────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("eps", EPS)
@@ -107,6 +112,23 @@ def test_ols_overall_f_is_invariant_to_reparametrization(cov_type, eps):
 
     df = _with_time(_ols_data(eps))
     _check(fit, df, _reparametrize(df, "x1", "x2", eps), f"OLS {cov_type}")
+
+
+@pytest.mark.parametrize("eps", EPS)
+@pytest.mark.parametrize("cov_type", ["classical", "hc1", "hac", "cluster"])
+def test_wls_overall_f_is_invariant_to_reparametrization(cov_type, eps):
+    options = WLSOptions(
+        cov_type=cov_type,
+        cluster="g" if cov_type == "cluster" else None,
+        hac_time="t" if cov_type == "hac" else None,
+    )
+
+    def fit(df: pl.DataFrame) -> dict[str, float]:
+        res = WLS(df, "y", ["x1", "x2"], "w", options=options).fit()
+        return {"f_statistic": res.f_statistic}
+
+    df = _with_time(_ols_data(eps))
+    _check(fit, df, _reparametrize(df, "x1", "x2", eps), f"WLS {cov_type}")
 
 
 @pytest.mark.parametrize("eps", EPS)
@@ -244,3 +266,23 @@ def test_re_drops_a_nearly_aliased_column_from_the_hausman_regression(
     ).fit()
     assert inside_window.hausman_df == 1
     assert reparametrized.hausman_df == 2
+
+
+@pytest.mark.parametrize("eps", [1e-7, 6e-8])
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
+)
+def test_re_returns_finite_statistics_inside_the_alias_window(cov_type, eps):
+    """別名の窓の中（`eps = 1e-7`・`6e-8`。条件数のガードの内側）でも、全`cov_type`で全体Fと
+    Hausman統計量が有限で返る（有理数の厳密値は`test_near_collinear_exact.py`）。"""
+    res = RE(
+        _with_time(_panel_data(eps)),
+        y="y",
+        x=["x1", "x3"],
+        effects=["entity"],
+        options=_re_options(cov_type),
+    ).fit()
+    assert math.isfinite(res.f_statistic)
+    assert res.f_statistic >= 0
+    assert math.isfinite(res.hausman_statistic)
+    assert res.hausman_statistic >= 0

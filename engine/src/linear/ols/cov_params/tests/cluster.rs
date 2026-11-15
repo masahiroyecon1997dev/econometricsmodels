@@ -248,21 +248,19 @@ fn fit_with_optional_f_test_does_not_hide_other_cluster_errors() {
         LeastSquaresError::Common(CommonError::ClusterDimensionMismatch { .. })
     ));
 
-    // `g = q + 1`（4クラスター・傾き3個）の境界。直交座標のミートの傾き部分行列`M̃_SS`の
-    // 最小固有値が最大の約1e-17倍（実質0）で、このデータでは実際に特異になる（桁落ちではない。
-    // numpyで確認）。`g > q`なので事前検証（`g <= q`）は通り、Wald検定が
-    // `NearSingularMatrix`で止める。
-    let n = 12;
-    let x1: Vec<f64> = (1..=n).map(|i| i as f64).collect();
-    let x2: Vec<f64> = (1..=n).map(|i| (i as f64).powi(2)).collect();
-    let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
-    let y: Vec<f64> = (0..n)
-        .map(|i| {
-            let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
-            1.0 + 2.0e6 * x1[i] + 3.0e-3 * x2[i] + 0.5 * x3[i] + noise
-        })
+    // 残差が4クラスターのうち2つ（`i % 4`が0か1）にしか乗らないデータ（傾き3個で`g = 4 > q`の
+    // ため事前検証は通る）。切片を含む正規方程式から2つのクラスターのスコアは符号だけ逆で、
+    // 他の2つは0なので、ミート`M̃`のランクは1になる。傾き部分行列の固有値は最大の約1e-32倍で、
+    // 丸めの向きによらずWald検定が`NearSingularMatrix`で止める。残差`r`は整数で`X'r = 0`を
+    // 厳密に満たす（クラスター0・1の6行の設計の零空間のベクトル）ので、`y`も厳密に作れる。
+    let x1: Vec<f64> = vec![3., 1., 4., 1., 5., 9., 2., 6., 5., 3., 5., 8.];
+    let x2: Vec<f64> = vec![2., 7., 1., 8., 2., 8., 1., 8., 2., 8., 4., 5.];
+    let x3: Vec<f64> = vec![1., 0., 2., 2., 1., 0., 3., 1., 0., 2., 1., 3.];
+    let r: [f64; 12] = [-25., 6., 0., 0., 23., -6., 0., 0., 1., 1., 0., 0.];
+    let y: Vec<f64> = (0..12)
+        .map(|i| 1.0 + 2.0 * x1[i] - x2[i] + 3.0 * x3[i] + r[i])
         .collect();
-    let ill_conditioned = OlsInput::from_columns(
+    let rank_one_meat = OlsInput::from_columns(
         &y,
         &[x1, x2, x3],
         vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
@@ -270,7 +268,7 @@ fn fit_with_optional_f_test_does_not_hide_other_cluster_errors() {
         "y".to_string(),
     )
     .unwrap();
-    let result = OlsEstimator::fit_with_optional_f_test(ill_conditioned, cluster_cov_type(4), 0.95);
+    let result = OlsEstimator::fit_with_optional_f_test(rank_one_meat, cluster_cov_type(4), 0.95);
     assert!(matches!(
         result.unwrap_err(),
         LeastSquaresError::Common(CommonError::NearSingularMatrix {

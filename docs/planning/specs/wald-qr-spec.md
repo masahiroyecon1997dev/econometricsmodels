@@ -33,10 +33,10 @@
 | # | 内容 | 状況 |
 |---|---|---|
 | P0 | 共有部品`shared/orthonormal.rs`（ピボットなしQR、`R⁻¹M̃R⁻ᵀ`）と固定値テスト（厳密値は有理数演算）。パネル・IVの凍結データで旧経路との標準誤差の差を測る | 完了・コミット済み（`0d033ecb`） |
-| P1 | OLS・WLS（`fit_ols`、`wald_test_last_columns`は保持した小行列から末尾`q`を取る） | 完了。統計量だけの形は`0f2fa48f`、標準誤差も`M̃`から作る形（B）は未コミット |
-| P2 | IV 2SLS（第一段階はOLS経由で自動、Wu-Hausman） | 完了（B、未コミット） |
-| P3 | パネル（`panel_cov_params`、HC2/3のレバレッジ、RE・FE-IVのHausman・Wu-Hausman） | 完了（B、未コミット） |
-| P4 | 限界を固定していたテストの置換、`docs/guide/validation.md`・各`CLAUDE.md`・`CHANGELOG.md`の更新、時間・メモリの計測、#535への影響の確認、GMM・FE-GMM・Tobitの別Issue | テスト置換・文書更新・時間とピークRSSの計測は完了（未コミット）。**#535・別Issueは未着手** |
+| P1 | OLS・WLS（`fit_ols`、`wald_test_last_columns`は保持した小行列から末尾`q`を取る） | 完了・コミット済み（`77a34955`） |
+| P2 | IV 2SLS（第一段階はOLS経由で自動、Wu-Hausman） | 完了・コミット済み（`77a34955`） |
+| P3 | パネル（`panel_cov_params`、HC2/3のレバレッジ、RE・FE-IVのHausman・Wu-Hausman） | 完了・コミット済み（`77a34955`） |
+| P4 | テスト置換・文書更新・時間とピークRSSの計測・QRの統合・条件数のガード・精度と境界のテスト | 完了・コミット済み（`b34c0eb4`・`f13fc094`・`5f640b03`・`cf30c291`）。**#535・別Issueは未着手** |
 
 ## 6. 進捗（2026-11-14時点）
 
@@ -67,49 +67,37 @@ IV・パネルでAの形のコミットを作らなかった理由: `test_wald_i
 - FE・FE-IV・OLSの高相関（`1 - 5e-13`・`1 - 5e-15`）で、有理数の厳密値との相対誤差は`1e-11`〜`1e-9`
 - classicalで`eps=1e-9`（`1 - 5e-17`）だったデータは、`MATRIX_NEAR_SINGULAR`にならず推定できるようになった（`least_squares`の`DESIGN_GRAM`は`eps ≤ 1e-8`では残る。下の未決事項）
 
-### 計測結果と、OLSのQR統合（2026-11-14）
+### 計測と、QR 1本への統合・条件数のガード（2026-11-15）
 
-n=1M・k=6のOLS（classical）のステップ別（release、ms）: 列ピボットQR 140〜144、`solve_lstsq` 9、残差 9、`(X'X)⁻¹` 5、追加したピボットなしQR 87〜95、`Q`の生成 24、`Q'y` 3、meatは前後で同じ。増加分のほぼ全てが2本目のQRで、`(X'X)⁻¹`は全体の約3%。
+最初の実装（`least_squares`を残して2本目のQRを足した形）は、OLS・FE・IV・FE-IV・REが変更前より+14〜70%遅かった（n=1M・k=6のOLSのclassicalで、増分のほぼ全てが2本目のQR。`(X'X)⁻¹`は全体の約3%）。そこで、全手法をピボットなしQR 1本（`OrthonormalDesign::new_checked`）に統合した: 係数`R⁻¹Q'y`・残差`y - Qb̃`・共分散・全体Fを同じQRから求め、ランク落ちは`R`（k×k）の列ピボットQRで判定する。`least_squares`は本体から外し、テストの独立な参照実装（`#[cfg(test)]`）にした。IV・FE-IVは`two_sls_point_estimate`が`OrthonormalDesign`を受け取り、FE-IVは`X̂`を`Q`生成の直後に解放して`X̃`をその後に作る（同時に持つ行列の数は変わらない）。REのbetween・プール回帰、`partial_f_statistic`の制限モデルも同じ関数を通す。
 
-そこで**OLSだけ**を、ピボットなしQR 1本から係数（`R⁻¹b̃`）・残差・共分散・全体Fを求め、ランク落ちは`R`（k×k）の列ピボットQR（`OrthonormalDesign::new_checked`、閾値は従来と同じ）で判定する形にした（ユーザー承認済み）。`cargo test -p engine` 1550件・`pytest tests --check-error-coverage` 14594件・clippy・fmtは通過。OLSは`least_squares`を使わないので`DESIGN_GRAM`は出なくなった。
+QRのままでは`cond(X)`が`1e8`〜`1e15`の設計も推定でき、残差が非ゼロのとき係数が静かに大きくずれる（傾きの差が相対`1e-13`で係数が数十〜数百%、標準誤差単位で約0.3）。そこで`new_checked`に、列を単位ノルムに揃えた`R`の条件数（k×kの特異値分解）が`MAX_EQUILIBRATED_CONDITION`（5e7）を超える設計を`MATRIX_NEAR_SINGULAR`（`DESIGN_GRAM`）で弾くガードを入れた。値は、変更前の`X'X`のCholeskyの成否の境界（列を揃えた条件数で2.8e7まで成功・9.2e7から失敗）に置いた暫定値。**生の条件数でなく列を揃えた条件数にする**のは、Choleskyの成否が列の一様な拡大縮小に依らず、列の単位（1e-6〜1e6）で境界が動かないようにするため。緩めるのは破壊的でなく、厳しくするのは破壊的。
 
-変更前（`de8a6c8c`）との比較（3回の中央値。同じ変更前の値が計測間で最大25%ずれるので、約±15%以内は有意でない）:
+変更前の挙動で不自然だった点も、これで解消した: (1) OLS・WLS・IVが条件数2e7まで通るのにFE・RE・FE-IVは2e6で止まる、(2) 同じ設計で`COEFFICIENT_COVARIANCE`と`DESIGN_GRAM`がepsごとに入れ替わる、(3) FE-IVで`INTERNAL_ERROR`（部分F検定の制限モデル）。480データセット×5手法（OLS・FE・RE・IV・FE-IV）で、結果の内訳が全手法で同じ（成功200・`DESIGN_GRAM`170・`DESIGN_MATRIX_SINGULAR`110）、`INTERNAL_ERROR`は0件。条件数が約1e12を超えると、faerのピボットなしQRが崩れ（最小ピボットが約1e-10以下で、後ろに独立な列があると`R`の最終行が0になる）、`DESIGN_MATRIX_SINGULAR`になることがある（ガードの閾値5e7より遥か外側で、受け入れる設計は変わらない）。ガードの範囲では逆行列誤差は1e-14程度。
+
+変更前（`de8a6c8c`）との比較（release、3回の中央値。同じ変更前の値が計測間で最大25%ずれるので、約±15%以内は有意でない）:
 
 | 手法 | 時間 | ピークRSS |
 |---|---|---|
-| OLS | −19〜−29% | +4〜14%（n=1M classicalは+14%。`Q`の48MB分） |
-| IV（第一段階がOLS） | −2〜−5% | +0.4〜7% |
-| RE | −1〜+22%（ノイズ内） | +2〜7% |
-| FE | +25〜41%（未対応） | +1.5〜7% |
-| FE-IV | +21〜27%（未対応） | +2〜10% |
+| OLS | −17〜−34% | +0.4〜14%（n=1M classicalは+13.6%。`Q`の48MB分） |
+| FE | −6〜−20% | +0.7〜9% |
+| RE | −10〜+12%（ノイズ内） | +1.5〜6.6% |
+| IV | −22〜−27% | −0.3〜+1.8% |
+| FE-IV | −12〜−26% | −0.4〜+5.1%（n=1M classicalは+5.1%） |
 
-次: FE・FE-IV（と、REの分散成分）へ同じ統合を広げるかをユーザーと決める（OLSのみで進め、有効なら広げる方針）。FE-IVはピークRSSの最適化済みなので、`x_hat`の寿命を延ばさないこと。
+REの最終回帰と、Hausmanのcluster・DK経路は、`fit_auxiliary`（QR 1回）の後に同じ設計行列を`OrthonormalDesign::new`でもう一度分解している（`OlsEstimator`が`R`・`Q`を保持しないため）。計測では時間が変更前以下（clusterの+12%はノイズの範囲）なので、整理は見送った。
 
-## 7. 未決事項（ユーザーに確認する。CLAUDE.md 14章）
+## 7. 解決済みの事項
 
-**`least_squares`の`(X'X)⁻¹`（`DESIGN_GRAM`）をどうするか。** `shared/least_squares.rs`の`least_squares`は今も`X'X`のCholeskyで`(X'X)⁻¹`を求める（OLS・FE・IV・FE-IVでは使わなくなった）。この失敗（`RankDeficient::GramMatrix`→`MATRIX_NEAR_SINGULAR`の`DESIGN_GRAM`）が、`cond(X) ≳ 1e8`（傾きの差が相対`1e-8`以下）の設計を止める。選択肢:
-
-- (a) 今のまま。未使用の`O(nk²)`の計算が残る（性能への影響は計測で見る）。受け付ける準共線の程度は変わらない
-- (b) OLS・FE・IV・FE-IV用に、`(X'X)⁻¹`を作らない関数（係数と残差だけ）を足して切り替える。`cond(X)`が`1e8`〜`1e15`の設計を、QRで推定する範囲が広がる（係数の精度は`cond(X)·ε`で劣化する。Rの`lm`は相対`1e-7`で列を落とす）。`least_squares`の他の呼び出し元（弱操作変数診断・REの分散成分）は変えない
-- (c) 閾値を別途決める
-
-呼び出し元: OLS`linear/ols/fit.rs`、FE`panel/fe/fit.rs`、`shared/instrumental_variables.rs`の`two_sls_point_estimate`（IV・FE-IV）。他は`shared/weak_instruments.rs`・`panel/re/variance*.rs`が`xtx_inv`を使う。
+`least_squares`の`(X'X)⁻¹`（`DESIGN_GRAM`）の扱い: 本体から`least_squares`を外し、`new_checked`の条件数のガードで同じ受け入れ範囲を保つ（上の「計測と、QR 1本への統合・条件数のガード」）。
 
 ## 8. 次の手順（`/clear`後の再開用）
 
-1. 本ノートと`git -C /workspaces/econometricsmodels-wald log --oneline -3`・`git status`で状態を確認する。ワークツリーの`.venv`にはdebugビルドの拡張が入っている（`uv run --no-sync pytest`で使う）。
-2. **時間・ピークメモリの計測（変更前後）**
-   - 変更前: `/workspaces/econometricsmodels-base`（`de8a6c8c`のワークツリー）。release拡張は、同じ`.venv`のmaturinでビルドする: `cd /workspaces/econometricsmodels-base && /workspaces/econometricsmodels-wald/.venv/bin/maturin build --release -o <出力先>`。ホイールを`unzip`して`econometricsmodels/_lib*.so`を取り出す（前回のものはスクラッチパッド`/tmp/claude-1000/-workspaces-econometricsmodels/*/scratchpad/baseline_so/`にあるが、セッション固有なので無ければ再ビルド）
-   - 変更後: `cd /workspaces/econometricsmodels-wald && uv run --no-sync maturin develop --release` の後、`python_package/econometricsmodels/`ディレクトリを丸ごと別の場所へコピーする。変更前は同じディレクトリのコピーに変更前の`.so`を入れる。計測後は`uv run --no-sync maturin develop`でdebugビルドに戻す（pytestに必要）
-   - 実行: ワークツリーで`PYTHONPATH=<コピー先> RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 POLARS_MAX_THREADS=1 uv run --no-sync python -m performance.compare_<手法> --worker --library engine --cov-case <ラベル> --n <N> --k 5`。変更前後を交互に3回ずつ、時間の中央値とピークRSSを比べる（JSONのキーは1回実行して確認する）
-   - 計測点: OLS（`classical`のn=1,000,000、`hc1`・`hc3`・`cluster_g50_random`のn=100,000）、FE（`classical`のn=1,000,000、`hc1`・`cluster`・`dk`のn=100,000）、RE（`classical`のn=1,000,000、`hc1`・`cluster`のn=100,000）、IV（`classical`のn=1,000,000、`hc1`・`cluster_g50_random`のn=100,000）、**FE-IV（`classical`のn=1,000,000が最重要。ピークメモリを減らす最適化`e1aa4635`の直後なので、ピークRSSが増えていないか）**・`hc1`・`cluster`・`hc3`のn=100,000
-   - 判断: 時間の増加が大きい（目安として`classical`で+20%超）、またはFE-IVのピークRSSが増える場合は、`least_squares`の未使用の`(X'X)⁻¹`の除去（上の未決事項(b)）、HCのmeatで`Q`を行スケールして消費する形（`hc_meat`が作るn×kのスコア行列と`Q`が重ならないように）、ピボットなしQRと列ピボットQRの統合（`R`の列ピボットQRでランク判定）を検討する。結果は`docs/performance/`の該当ノートに残す必要は無い（計測値の正は`benchmark_performance.yml`のCI。CLAUDE.md 13章）が、判断の根拠としてユーザーへ報告する
-3. 未決事項（`DESIGN_GRAM`）をユーザーに確認し、決まった方針を実装する。
-4. コミット（署名が走るため、事前に「ホストの端末でパスフレーズの確認が出る」と伝える。`timeout`は120秒以上。失敗したら報告して止まる。`--no-gpg-sign`は使わない。`.claude/rules/commit-signing.md`）。未コミット分は1コミットにまとめる。メッセージ案: `feat(engine): IV・FE・RE・FE-IVの共分散と全体Wald/Fを直交座標で求め、高相関な傾きでも止まらないようにする`
-5. レビュー: `rust-reviewer`と`testing-completeness-reviewer`（サブエージェント）に通し、指摘を反映する（#647のときと同じ手順）。
-6. `release/v0.10.0`へ取り込む: 先に捨てる一時ワークツリーで`git cherry-pick -n`し、`cargo test -p engine`が通ることを確かめる（`release/v0.10.0`は先へ進んでいる）。その後、メインの作業ツリー（`release/v0.10.0`をチェックアウト済み）で`git cherry-pick <コミット>...`（署名の確認がホストに出る）。並行作業の未コミット変更とファイルが重ならないことを`git status`で確認する。pushとIssueのクローズは、ユーザーが指示してから。
-7. 後片付け（ユーザーの確認後）: `git worktree remove --force /workspaces/econometricsmodels-wald`、`git worktree remove --force /workspaces/econometricsmodels-base`、`git branch -D feat/wald-qr-statistic`。取り込み後は内容が同じであることを`git diff`で確認してから消す。
-8. #658の受け入れ条件の確認と、別Issueの起票（ユーザーの承認後。英語）: (a) IV GMM・FE-GMM・Tobitの直交座標の経路（設計行列のQRを持たず、breadが`Z'X`側・Hessian側なので別設計）、(b) #535（IV `card`のcluster共分散の精度）への影響の確認。IV 2SLSのcluster共分散は`V = R⁻¹M̃R⁻ᵀ`になったので、`RTOL_WALD_CARD_CLUSTER`（`tests/support/_tolerances_iv.py`、現状`5e-8`。`tests/iv/test_iv_reference.py`の`card`のcluster照合が使う）を測り直し、`1e-8`へ戻せるかを#535に報告する。
-9. 完了したら、本ノートの内容を`docs/spec/`の該当手法の仕様書（`ols-spec.md`・`fe-spec.md`・`re-spec.md`・`iv-spec.md`）へ、経緯を削って理由だけにして集約し、本ノートを削除する（CLAUDE.md 13章）。
+1. 本ノートと`git -C /workspaces/econometricsmodels-wald log --oneline -6`・`git status`で状態を確認する。ワークツリーの`.venv`にはdebugビルドの拡張が入っている（`uv run --no-sync pytest`で使う）。最新のコミットは`cf30c291`。検証の結果: `cargo test -p engine` 1558件、`pytest tests --check-error-coverage` 14741件、clippy・fmt・ruff通過。
+2. レビューの再実行: `rust-reviewer`と`testing-completeness-reviewer`（サブエージェント）に通し、指摘を反映する。メインの作業ツリーとは別のgit worktreeなので、サブエージェントには差分ファイル（`git diff de8a6c8c..HEAD`をスクラッチパッドへ書き出したもの）と、ワークツリーの絶対パスで読むよう指示する。前回のレビューの指摘のうち、失敗の契約（FE`FTestFailed`・RE`HausmanTestFailed`・FE-IVのWu-Hausman→`None`）の固定と、`g = q+1`のクラスターのテスト（丸め誤差級の特異性に依存）は、堅牢な入力を作れず未対応。
+3. `release/v0.10.0`へ取り込む: 先に捨てる一時ワークツリーで`git cherry-pick -n`し、`cargo test -p engine`が通ることを確かめる（`release/v0.10.0`は先へ進んでいる）。その後、メインの作業ツリー（`release/v0.10.0`をチェックアウト済み）で`git cherry-pick <コミット>...`（署名の確認がホストに出る）。並行作業の未コミット変更とファイルが重ならないことを`git status`で確認する。pushとIssueのクローズは、ユーザーが指示してから。
+4. 後片付け（ユーザーの確認後）: `git worktree remove --force /workspaces/econometricsmodels-wald`、`git worktree remove --force /workspaces/econometricsmodels-base`、`git branch -D feat/wald-qr-statistic`。取り込み後は内容が同じであることを`git diff`で確認してから消す。
+5. #658の受け入れ条件の確認と、別Issueの起票（ユーザーの承認後。英語）: (a) IV GMM・FE-GMM・Tobitの直交座標の経路（設計行列のQRを持たず、breadが`Z'X`側・Hessian側なので別設計）、(b) #535（IV `card`のcluster共分散の精度）への影響の確認。IV 2SLSのcluster共分散は`V = R⁻¹M̃R⁻ᵀ`になったので、`RTOL_WALD_CARD_CLUSTER`（`tests/support/_tolerances_iv.py`、現状`5e-8`。`tests/iv/test_iv_reference.py`の`card`のcluster照合が使う）を測り直し、`1e-8`へ戻せるかを#535に報告する。
+6. 完了したら、本ノートの内容を`docs/spec/`の該当手法の仕様書（`ols-spec.md`・`fe-spec.md`・`re-spec.md`・`iv-spec.md`）へ、経緯を削って理由だけにして集約し、本ノートを削除する（CLAUDE.md 13章）。
 
 守ること（CLAUDE.md）: コード・仕様書・`CLAUDE.md`のコメントにIssue番号・`docs/planning/specs/`への参照を書かない（6章）。判断が分かれる点は独自判断で埋めずにユーザーへ確認する（14章）。メインの作業ツリーの並行作業には触れない（`git worktree`で作業する）。

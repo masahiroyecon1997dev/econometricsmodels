@@ -1,6 +1,6 @@
 # engine_pybind/src/panel/ 実装ノート（FE/RE）
 
-このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は `docs/spec/panel-common.md`）が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（FEIV・FEGMM）（FE/RE共通の論点は `docs/spec/panel-common.md`）が正本。ここは差分の索引のみ。
 
 ## 構成（FE/RE）
 

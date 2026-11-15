@@ -1,6 +1,6 @@
 # python_package/econometricsmodels/panel/ 実装ノート（FE/FEIV/FEGMM/RE）
 
-このファイルは `python_package/econometricsmodels/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は`docs/spec/panel-common.md`）が正本。
+このファイルは `python_package/econometricsmodels/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（FEIV・FEGMM）（FE/RE共通の論点は`docs/spec/panel-common.md`）が正本。
 
 ## 確定済みのスコープ（再提案しない）
 

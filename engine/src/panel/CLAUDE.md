@@ -1,6 +1,6 @@
 # engine/src/panel/ 実装ノート（FE/RE/FEIV）
 
-このファイルは `engine/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景・数式の正本は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は `docs/spec/panel-common.md`）、定義式は `docs/methods/fe.md` / `re.md`。各部品の契約は `fe.rs` / `re.rs` のモジュールdocにある。ここに書くのは「削除するとClaudeが同じ判断を再発見するはめになる」レベルの決定事項・罠のみ。
+このファイルは `engine/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景・数式の正本は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（FEIV・FEGMM）（FE/RE共通の論点は `docs/spec/panel-common.md`）、定義式は `docs/methods/fe.md` / `re.md`。各部品の契約は `fe.rs` / `re.rs` のモジュールdocにある。ここに書くのは「削除するとClaudeが同じ判断を再発見するはめになる」レベルの決定事項・罠のみ。
 
 ## ファイル構成
 

@@ -4,8 +4,8 @@
 悪条件を判定し二次形式を計算する。係数の標準誤差の比（列の単位の比）が倍精度の閾値を
 超えるだけでは失敗しない。1列を`1e9`倍・`1e-9`倍して、単位を揃えたデータと比べる。
 
-ほぼ共線な傾き係数（単位を揃えても悪条件）は今も`MATRIX_NEAR_SINGULAR`で止まる。
-その境界は`docs/guide/validation.md`の記述と合わせて、ここで固定する。
+ほぼ共線な傾き係数（単位を揃えても悪条件）の受け入れ境界は`test_collinearity_boundary.py`、
+その範囲の統計量の精度は`test_near_collinear_exact.py`が固定する。
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import numpy as np
 import polars as pl
 import pytest
 from _errors import raises_error
-from _exact_wald import exact_slope_wald
 from _helpers import assert_unit_change_invariant
 from econometricsmodels import (
     FE,
@@ -31,7 +30,6 @@ from econometricsmodels import (
     Probit,
     Tobit,
 )
-from test_wald_ill_conditioned import _exact_wald_quadratic_form
 
 N_ENTITIES = 60
 N_PERIODS = 8
@@ -146,37 +144,9 @@ def test_one_column_in_other_units_gives_the_same_statistics(name, scale):
 
 # ── 単位を揃えても悪条件のとき ──────────────────────────────────────────
 #
-# OLS・WLS・IV 2SLS・FE・RE・FE-IVは、共分散と全体のWald/F統計量を直交座標（QR）で求めるため、
-# 傾きの相関が極端に高い（`1 - 5e-15`）hc1・clusterでも止まらない。統計量は、データから有理数で
-# 厳密に求めた値と一致する（`tests/support/_exact_wald.py`）。止まるのは、共分散が実際に特異な
-# とき（クラスター数が`q + 1`でクラスターのスコアが線形従属など）と、設計行列がランク落ちのとき。
-
-
-def _near_collinear_ols(eps: float, groups: int = 8) -> pl.DataFrame:
-    """`x2 = x1 + eps * noise`（相関は`1 - O(eps²)`）の小さなデータ。"""
-    n = 40
-    i = np.arange(n)
-    x1 = ((i * 7) % 13) - 6.0
-    x2 = x1 + eps * (((i * 5) % 11) - 5.0)
-    noise = np.where(i % 2 == 0, 0.7, -0.4) + 0.1 * (i % 5)
-    return pl.DataFrame(
-        {
-            "y": 1.0 + 2.0 * x1 + 3.0 * x2 + noise,
-            "x1": x1,
-            "x2": x2,
-            "g": [f"g{k % groups}" for k in i],
-        }
-    )
-
-
-def _near_collinear_panel(eps: float) -> pl.DataFrame:
-    rng = np.random.default_rng(1)
-    entity = np.repeat(np.arange(N_ENTITIES), N_PERIODS)
-    x1, x2 = rng.normal(size=N), rng.normal(size=N)
-    alpha = np.repeat(rng.normal(size=N_ENTITIES), N_PERIODS)
-    y = 1 + x1 + 0.5 * x2 + alpha + rng.normal(size=N)
-    x3 = x1 + eps * rng.normal(size=N)
-    return pl.DataFrame({"entity": entity, "y": y, "x1": x1, "x3": x3})
+# ほぼ共線な傾きでの統計量・係数・標準誤差の厳密値との照合は`test_near_collinear_exact.py`、
+# 受け入れ境界は`test_collinearity_boundary.py`。ここには、共分散が実際に特異なときに
+# 止まることだけを置く。
 
 
 def test_a_singular_cluster_meat_raises_near_singular_matrix():
@@ -205,72 +175,3 @@ def test_a_singular_cluster_meat_raises_near_singular_matrix():
         ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
     ):
         OLS(df, "y", ["x1", "x2", "x3"], options=options).fit()
-
-
-def test_highly_correlated_slopes_with_the_classical_covariance_match_the_exact_value():
-    """相関が`1 - 5e-11`（`eps=1e-5`）でも、classicalの共分散は桁落ちしにくく、全体のF統計量は
-    返った`cov_params`と係数から有理数で厳密に求めた値と一致する（通るが桁違いの値を返さない）。
-    二次形式は逆行列を取るため、精度は相関行列の条件数×機械イプシロン（ここで約2e10×2e-16、
-    実測の相対差は数e-6）に限られる。`eps=1e-6`では条件数が約2e12になり相対8e-4まで悪化する。"""
-    res = OLS(_near_collinear_ols(1e-5), "y", ["x1", "x2"]).fit()
-    n_slopes = len(res.param_names) - 1
-    exact = _exact_wald_quadratic_form(res) / n_slopes
-    assert res.f_statistic == pytest.approx(exact, rel=1e-4)
-
-
-@pytest.mark.parametrize("eps", [1e-6, 1e-7])
-@pytest.mark.parametrize("cov_type", ["hc1", "cluster"])
-def test_ols_near_collinear_slopes_with_a_sandwich_covariance_match_the_exact_value(
-    cov_type, eps
-):
-    """傾きの相関が`1 - 5e-13`・`1 - 5e-15`でも、hc1・clusterの全体F統計量は、データから
-    有理数で厳密に求めた値と一致する。直交座標（QR）でミートを作るため、サンドイッチ共分散の
-    桁落ちの影響を受けない（以前は`MATRIX_NEAR_SINGULAR`で止まっていた）。"""
-    df = _near_collinear_ols(eps)
-    options = OLSOptions(
-        cov_type=cov_type, cluster="g" if cov_type == "cluster" else None
-    )
-    res = OLS(df, "y", ["x1", "x2"], options=options).fit()
-
-    x = [[1.0, a, b] for a, b in zip(df["x1"], df["x2"])]
-    exact = exact_slope_wald(
-        x, df["y"].to_list(), cov_type=cov_type, groups=df["g"].to_list()
-    )
-    assert res.f_statistic * 2 == pytest.approx(exact, rel=1e-6)
-
-
-@pytest.mark.parametrize("eps", [1e-6, 1e-7])
-@pytest.mark.parametrize("cov_type", ["hc1", "cluster"])
-def test_fe_near_collinear_slopes_with_a_sandwich_covariance_match_the_exact_value(
-    cov_type, eps
-):
-    """傾きの相関が`1 - 5e-13`・`1 - 5e-15`でも、FEのhc1・clusterの全体F統計量は、within変換した
-    データから有理数で厳密に求めた値と一致する（以前はサンドイッチ共分散の桁落ちで
-    `MATRIX_NEAR_SINGULAR`で止まっていた）。within変換の丸めの差（1e-16程度）が、ほぼ共線な
-    方向（`eps`）に与える影響の分だけ、相対許容誤差を緩める。"""
-    df = _near_collinear_panel(eps)
-    res = FE(
-        df,
-        y="y",
-        x=["x1", "x3"],
-        effects=["entity"],
-        options=FEOptions(cov_type=cov_type),
-    ).fit()
-
-    def within(column: str) -> list[float]:
-        return (
-            df.select(pl.col(column) - pl.col(column).mean().over("entity"))
-            .to_series()
-            .to_list()
-        )
-
-    exact = exact_slope_wald(
-        list(zip(within("x1"), within("x3"))),
-        within("y"),
-        cov_type=cov_type,
-        groups=df["entity"].to_list(),
-        n_constants=0,
-        df_resid=df.height - 2 - N_ENTITIES,
-        cluster_k=3,  # 個体でクラスターすると固定効果がネストされ、K = k + 1
-    )
-    assert res.f_statistic * 2 == pytest.approx(exact, rel=1e-4)

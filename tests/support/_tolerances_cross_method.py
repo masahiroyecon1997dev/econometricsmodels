@@ -14,4 +14,13 @@ CROSS_METHOD_TOLERANCES: dict[str, dict[str, float]] = {
     # 有効数字が5桁以下に劣化すると上限が5e-5以上になり、検出できる。
     # 整形は値を丸めるだけで0近傍の扱いは変わらないため、絶対誤差のフロアは置かない。
     "results_repr": {"rtol": 5.5e-6, "atol": 0.0},
+    # ほぼ共線な傾き（`eps = 1e-5, 1e-6, 1e-7`。列を揃えた条件数は約2.8e5〜2.8e7で、受け入れる
+    # 上限5e7の内側）の全体Wald統計量を、有理数の厳密値と比べる。OLS・WLS・IV・FE・FE-IVの
+    # 全`cov_type`（classical・hc0〜hc3・cluster）の実測の最大相対差は2.6e-9（IVの`eps = 1e-7`）。
+    # 差は`eps`が小さいほど大きく、条件数×機械イプシロン（2.8e7×1.1e-16 ≈ 3e-9）の程度。実測の約10倍。
+    "near_collinear_wald": {"rtol": 3e-8, "atol": 0.0},
+    # 同じ設計での係数と標準誤差（OLS・FE）。係数の誤差は標準誤差を単位にして測り（0との比較なので
+    # `atol`）、実測の最大は4.7e-9（OLSの`eps = 1e-7`）。標準誤差は厳密値との比（1との比較なので
+    # `rtol`）で、実測の最大の差は8.2e-10。どちらも実測の約10倍。
+    "near_collinear_coefficient": {"rtol": 1e-8, "atol": 5e-8},
 }

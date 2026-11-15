@@ -331,14 +331,44 @@ mod tests {
     }
 
     #[test]
+    fn coefficient_covariance_matches_the_sandwich_for_every_hc_variant() {
+        // HC0〜HC3（HC2・HC3のレバレッジは直交座標で`‖q_i‖²`になる）でも、旧経路`B M B`と新経路
+        // `R⁻¹M̃R⁻ᵀ`が、悪条件でなければ丸めの範囲で一致する。
+        let (x, y, _) = near_collinear(1e-1);
+        let design = OrthonormalDesign::new(&x).unwrap();
+        let residuals = design.residuals(&y, &design.coordinates(&y));
+        let xtx_inv = xtx_inverse(&x).unwrap();
+        for variant in [
+            HcVariant::Hc0,
+            HcVariant::Hc1,
+            HcVariant::Hc2,
+            HcVariant::Hc3,
+        ] {
+            let m_tilde = hc_cov_params(design.q(), &residuals, &design.identity(), variant);
+            let new = design.coefficient_covariance(&m_tilde);
+            let old = hc_cov_params(&x, &residuals, &xtx_inv, variant);
+            for i in 0..3 {
+                for j in 0..3 {
+                    let scale = (*old.get(i, i) * *old.get(j, j)).sqrt();
+                    assert!(
+                        (*new.get(i, j) - *old.get(i, j)).abs() <= 1e-9 * scale,
+                        "{variant:?} [{i},{j}]"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn slope_wald_from_orthonormal_coordinates_matches_exact_arithmetic() {
         // 厳密値は有理数演算（Python`fractions`）。傾きの相関が`1 - 5e-13`（eps=1e-6）・
         // `1 - 5e-17`（eps=1e-8）の準共線。旧経路（`V`を作って反転）はeps=1e-6で
         // 非正定値になり`NearSingularMatrix`、eps=1e-8でも誤差が1を超える。
         // 誤差の目安は相関行列の条件数×ε（実測: eps=1e-6で7e-11、eps=1e-8で2e-9）。
-        for (eps, cluster_exact, hc1_exact) in [
-            (1e-6, 85942.08422275676, 44541.013916605865),
-            (1e-8, 85942.15366005209, 44541.039983000206),
+        // 許容誤差は実測の約10倍（eps=1e-6で1e-9、eps=1e-8で3e-8）。
+        for (eps, rtol, cluster_exact, hc1_exact) in [
+            (1e-6, 1e-9, 85942.08422275676, 44541.013916605865),
+            (1e-8, 3e-8, 85942.15366005209, 44541.039983000206),
         ] {
             let (x, y, groups) = near_collinear(eps);
             let cluster = slope_wald(&x, &y, |d, e| {
@@ -347,8 +377,8 @@ mod tests {
             let hc1 = slope_wald(&x, &y, |d, e| {
                 hc_cov_params(d.q(), e, &d.identity(), HcVariant::Hc1)
             });
-            assert_relative(cluster, cluster_exact, 1e-7);
-            assert_relative(hc1, hc1_exact, 1e-7);
+            assert_relative(cluster, cluster_exact, rtol);
+            assert_relative(hc1, hc1_exact, rtol);
         }
     }
 

@@ -127,8 +127,9 @@ MIGRATED_CODES: frozenset[str] = frozenset(
 # どちらかに入っていなければならない（`tests/cross_method/test_error_catalog.py`が検査する）。
 # 文面・形式はカタログ全体の検査（`_lib.raise_error_for_test`）とRustの単体テストが固定する。
 # `MATRIX_NEAR_SINGULAR`の`matrix`のうち、Pythonから構成できているのは
-# `COEFFICIENT_COVARIANCE`だけ（`DESIGN_GRAM`・`HESSIAN`・`OPG`・`GMM_WEIGHT`は、前段の
-# 検査や分解が先に失敗するため、極端なスケール差のデータでも構成できていない）。
+# `COEFFICIENT_COVARIANCE`と`DESIGN_GRAM`（列を揃えた条件数が上限を超える設計。
+# `tests/cross_method/test_collinearity_boundary.py`）。`HESSIAN`・`OPG`・`GMM_WEIGHT`は、
+# 前段の検査や分解が先に失敗するため、極端なスケール差のデータでも構成できていない。
 UNREACHABLE_CODES: dict[str, str] = {
     ErrorCode.BREUSCH_GODFREY_MATRIX_TOO_LARGE: (
         "補助回帰の行列を確保できない大きさのときだけ。`n <= k_aux`の検査が先に"

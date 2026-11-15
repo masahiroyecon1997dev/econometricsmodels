@@ -437,12 +437,14 @@ impl FeEstimator {
         &self.std_errors
     }
 
-    /// `cov_type`別に計算し直した係数の分散共分散行列（`(k, k)`、`params()`と対応）。
-    /// 固定効果（entity・timeダミー）の係数は含まない。
+    /// 全体Wald検定と、FE-IVのWu-Hausman検定が使う直交座標の組（`b̃`と`M̃`）。説明変数が無い
+    /// （`k = 0`）モデルは`None`。
     pub(crate) fn wald_coordinates(&self) -> Option<&WaldCoordinates> {
         self.wald.as_ref()
     }
 
+    /// `cov_type`別に計算し直した係数の分散共分散行列（`(k, k)`、`params()`と対応）。
+    /// 固定効果（entity・timeダミー）の係数は含まない。
     pub fn cov_params(&self) -> &Mat<f64> {
         &self.cov_params
     }

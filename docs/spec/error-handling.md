@@ -132,4 +132,4 @@
 
 ## 8. 既知の制限
 
-- `UNREACHABLE_CODES`の`code`（`BREUSCH_GODFREY_MATRIX_TOO_LARGE`・`VARIANCE_COMPONENTS_MOMENTS_SINGULAR`・`LINE_SEARCH_FAILED`・`SEPARATION_CHECK_FAILED`）と、`MATRIX_NEAR_SINGULAR`の`matrix`のうち`DESIGN_GRAM`・`HESSIAN`・`OPG`・`GMM_WEIGHT`は、実データから再現できていない（防御として残している）。再現できる入力が見つかったら`MIGRATED_CODES`へ移す。
+- `UNREACHABLE_CODES`の`code`（`BREUSCH_GODFREY_MATRIX_TOO_LARGE`・`VARIANCE_COMPONENTS_MOMENTS_SINGULAR`・`LINE_SEARCH_FAILED`・`SEPARATION_CHECK_FAILED`）と、`MATRIX_NEAR_SINGULAR`の`matrix`のうち`HESSIAN`・`OPG`・`GMM_WEIGHT`は、実データから再現できていない（防御として残している）。`DESIGN_GRAM`は、設計行列のQR（`OrthonormalDesign::new_checked`）が、列を揃えた条件数の上限（5e7）を超える設計を弾くときに出る（`tests/cross_method/test_collinearity_boundary.py`）。再現できる入力が見つかったら`MIGRATED_CODES`へ移す。

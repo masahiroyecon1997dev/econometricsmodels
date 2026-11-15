@@ -14,15 +14,6 @@ use crate::shared::wald::wald_f_test;
 use statrs::distribution::ChiSquared;
 use statrs::distribution::ContinuousCDF;
 
-/// 統計量・p値を相対1e-9で比べる（直交座標の経路と共分散を反転する経路は丸めの分だけ異なる）。
-fn assert_close(got: Option<f64>, expected: Option<f64>, label: &str) {
-    let (got, expected) = (got.unwrap(), expected.unwrap());
-    assert!(
-        (got - expected).abs() <= 1e-9 * expected.abs(),
-        "{label}: {got} vs {expected}"
-    );
-}
-
 #[test]
 fn re_estimator_fit_hausman_classical_is_invariant_to_time() {
     // 1-wayでは`ReInput`の`time`の有無はハウスマン検定の結果を変えない（`time`は2-wayの時間次元で、DKの時点列は`Dk.time`）。
@@ -81,13 +72,12 @@ fn re_estimator_fit_hausman_follows_cov_type_for_ols_covariances() {
         let expected_stat = 2.0 * f_stat;
         let expected_p = ChiSquared::new(2.0).unwrap().sf(expected_stat);
 
-        // `OlsEstimator`経由の補助回帰と一致する（Clusterは`OlsEstimator`の`String`列
-        // グループ化ではなく整数コードの`panel_cluster_cov_params`を使うが、補正式は同じ）。
-        // `OlsEstimator`は直交座標（QR）で統計量を求め、パネルのcluster共分散は`V`を作って
-        // 反転するため、丸めの範囲（相対1e-9）で比べる。
+        // `OlsEstimator`経由の補助回帰とビット単位で一致する（Clusterは`OlsEstimator`の
+        // `String`列グループ化ではなく整数コードの`panel_cluster_cov_params`を使うが、
+        // 補正式・加算順は同じ）。
         assert_eq!(re.hausman_df(), Some(2), "{label}");
-        assert_close(re.hausman_statistic(), Some(expected_stat), &label);
-        assert_close(re.hausman_p_value(), Some(expected_p), &label);
+        assert_eq!(re.hausman_statistic(), Some(expected_stat), "{label}");
+        assert_eq!(re.hausman_p_value(), Some(expected_p), "{label}");
         assert_ne!(
             re.hausman_statistic(),
             classical.hausman_statistic(),
@@ -128,7 +118,7 @@ fn re_estimator_fit_hausman_cluster_uses_explicit_groups() {
         },
     );
     let expected = 2.0 * aux.wald_test_last_columns(2).unwrap().0;
-    assert_close(re.hausman_statistic(), Some(expected), "explicit groups");
+    assert_eq!(re.hausman_statistic(), Some(expected));
     assert_ne!(re.hausman_statistic(), by_entity.hausman_statistic());
 }
 

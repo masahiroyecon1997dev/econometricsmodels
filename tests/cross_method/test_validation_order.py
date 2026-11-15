@@ -36,14 +36,12 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
-    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -270,10 +268,11 @@ METHODS = [
         x_role="x_exog",
     ),
     Method(
-        "fegmm",
-        _simple(FEGMM, FEGMMOptions),
+        "feiv_gmm",
+        _simple(FEIV, FEIVOptions),
         _FE_IV_ARGS,
         _FE_GMM_FAULTS,
+        base_opts={"estimator": "gmm"},
         time_cov_type="dk",
         time_option="dk_time",
         x_role="x_exog",
@@ -508,7 +507,7 @@ FAULTS = {
             (4, 0),
             code=ErrorCode.EFFECTS_TOO_MANY,
             params=lambda m: {
-                "model": m.name.upper(),
+                "model": m.name.removesuffix("_gmm").upper(),
                 "n_columns": 6,
                 "max_columns": 2 if m.name == "re" else 5,
             },
@@ -662,8 +661,8 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "unused_cluster":
             # FE/REの既定の`cov_type`は`cluster`なので、`cluster`が使われなくなるよう
             # `classical`にする。
-            if method.name == "fegmm":
-                # FEGMMの既定の重み`cluster`も`cluster`を使うので、重みも使わない種類にする。
+            if method.name == "feiv_gmm":
+                # FEIVの既定の重み`cluster`も`cluster`を使うので、重みも使わない種類にする。
                 return {}, {
                     "cov_type": "classical",
                     "cluster": "cluster",
@@ -781,7 +780,9 @@ def compose(
             **l_opts,
             "cluster": "cluster",
             **(
-                {"gmm_weight_type": "robust"} if method.name == "fegmm" else {}
+                {"gmm_weight_type": "robust"}
+                if method.name == "feiv_gmm"
+                else {}
             ),
         }
     conflicts = {k for k in e_args if k in l_args and e_args[k] != l_args[k]}

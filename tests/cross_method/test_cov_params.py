@@ -13,13 +13,11 @@ import math
 import pytest
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
-    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -86,12 +84,12 @@ def _fe_iv(df, *, two_way=False, **options):
     ).fit()
 
 
-def _fe_gmm(df, *, two_way=False, **options):
+def _fe_iv_gmm(df, *, two_way=False, **options):
     effects = ["entity", "time"] if two_way else ["entity"]
-    return FEGMM(
+    return FEIV(
         df,
         effects=effects,
-        options=FEGMMOptions(**options),
+        options=FEIVOptions(estimator="gmm", **options),
         **IV_ARGS,
     ).fit()
 
@@ -147,8 +145,8 @@ METHOD_OPTIONS = {
     "fe-two-way": (_fe, {"two_way": True}),
     "fe-iv": (_fe_iv, {}),
     "fe-iv-two-way": (_fe_iv, {"two_way": True}),
-    "fe-gmm": (_fe_gmm, {}),
-    "fe-gmm-two-way": (_fe_gmm, {"two_way": True}),
+    "fe-gmm": (_fe_iv_gmm, {}),
+    "fe-gmm-two-way": (_fe_iv_gmm, {"two_way": True}),
     "re": (_re, {}),
     "re-two-way": (_re, {"two_way": True}),
 }

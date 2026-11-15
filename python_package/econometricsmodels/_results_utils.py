@@ -6,7 +6,7 @@ row-oriented tables. Keeping that zip in one place means a fix (such as
 guarding against duplicate coefficient names) applies to every method at
 once. Property docstrings stay on each result class, since they differ
 per method. The same goes for wrapping the weak-instrument diagnostics of
-`IV` and `FEIV`, and the C statistic of `IV` and `FEGMM`, into their
+`IV` and `FEIV`, and the C statistic of `IV` and `FEIV`, into their
 `dataclass` results.
 """
 
@@ -320,7 +320,7 @@ def effective_f_result(raw: Any) -> EffectiveFResult:
 
 
 def c_statistic_result(raw: Any) -> CStatisticResult:
-    """Wrap the `_lib` C statistic output of `IV` or `FEGMM`."""
+    """Wrap the `_lib` C statistic output of `IV` or `FEIV`."""
     return CStatisticResult(
         statistic=raw.statistic,
         p_value=raw.p_value,

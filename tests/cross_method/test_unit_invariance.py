@@ -17,7 +17,6 @@ from _errors import raises_error
 from _helpers import assert_unit_change_invariant
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
@@ -127,8 +126,8 @@ CASES = {
         lambda d: FEIV(d, y="iv_y", **_IV_COLUMNS, effects=["entity"]).fit(),
         (*_WALD, *_WU_HAUSMAN),
     ),
-    "fe_gmm": (
-        lambda d: FEGMM(d, y="iv_y", **_IV_COLUMNS, effects=["entity"]).fit(),
+    "fe_iv_gmm": (
+        lambda d: FEIV(d, y="iv_y", **_IV_COLUMNS, effects=["entity"]).fit(),
         _WALD,
     ),
 }

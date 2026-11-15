@@ -9,7 +9,8 @@
 
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeCovType, FeEffects};
-use crate::panel::fe_iv::{FeGmmEstimator, FeGmmType, FeIvInput, FeWeightType};
+use crate::panel::fe_iv::common::FeIvInput;
+use crate::panel::fe_iv::gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
 use crate::shared::group_codes::GroupCodes;
 
 mod basic;
@@ -19,7 +20,7 @@ mod hansen_j;
 mod reference;
 mod validation;
 
-pub(super) use crate::panel::fe_iv::test_support::{
+pub(super) use crate::panel::fe_iv::common::test_support::{
     N_ENTITIES, N_PERIODS, all_rows, dummies, entity_labels, input_spec, input_with, one_way_input,
     third_labels, time_labels, two_way_input,
 };

@@ -3,7 +3,7 @@
 //! 固定効果を除いた（within変換した）データへのGMMで、構造式
 //! `y = X_exog β_exog + X_endog β_endog + 固定効果 + ε`を推定する。モーメント条件は
 //! `E[z̃_it ε̃_it] = 0`（`Z̃ = [x̃_exog, z̃]`、`z̃`は変換後の操作変数）。入力（`FeIvInput`）・固定効果の方向
-//! （`FeEffects`）・within変換は`FeIvEstimator`と共有する（`prepare.rs`）。定数項は持たない。
+//! （`FeEffects`）・within変換は`FeTwoSlsEstimator`と共有する（`prepare.rs`）。定数項は持たない。
 //!
 //! # 範囲
 //!
@@ -15,7 +15,7 @@
 //! # `fit`のパイプライン
 //!
 //! 1. `gmm_type`を共有の`GmmType`に直し、`max_iter`・`tol`の範囲を検証する（`GmmType::validate`）。
-//! 2. `FeIvEstimator`と同じ前段（`prepare_within`）: 操作変数の数・singleton・定数列の検査、全列の
+//! 2. `FeTwoSlsEstimator`と同じ前段（`prepare_within`）: 操作変数の数・singleton・定数列の検査、全列の
 //!    within変換（1回だけ）、自由度の検証（`n > k + neffects`、`n > l + neffects`）、変換後に分散が
 //!    残らない列の検査。
 //! 3. 重み行列の検証（`weight_type`が`Cluster`のとき、クラスター数`G`と操作変数の数`l`の関係。
@@ -33,14 +33,14 @@
 //!
 //! # `cov_type`と自由度
 //!
-//! `cov_type`は`FeIvEstimator`と同じ`FeCovType`（Classical・HC1〜HC3・Cluster・Dk）。`Ω̂`の小標本補正も
+//! `cov_type`は`FeTwoSlsEstimator`と同じ`FeCovType`（Classical・HC1〜HC3・Cluster・Dk）。`Ω̂`の小標本補正も
 //! FE-2SLSと同じ（`df_resid = n − k − neffects`、クラスターの`K`は`fe_cluster_k_correction`、
 //! DKは`T/(T−1)`と`K = df_model`）だが、`Ω̂`は変換後の操作変数`Z̃`のスコアに掛ける。HC2・HC3のレバレッジは
 //! `Z̃`の素のレバレッジに吸収した効果のレバレッジを足したもの（ダミーを操作変数に入れたときのハット行列の
 //! 対角と一致する）。推論は正規分布・χ²（`iv::gmm`と同じ。FE-2SLSのt・Fとは違う）で、クラスター数・時点数が
-//! `k`以下ならWald検定が定義できないので`FeIvEstimator`と同じ検証で弾く。
+//! `k`以下ならWald検定が定義できないので`FeTwoSlsEstimator`と同じ検証で弾く。
 //! `OneStep`と`Classical`重みの2段階・反復は2SLSと同じ係数で、`Classical`・`Hc1`・`Cluster`・`Dk`の共分散も
-//! `FeIvEstimator`と一致する（`Hc2`・`Hc3`は、`X̂`と`Z̃`でレバレッジが違うので一致しない）。
+//! `FeTwoSlsEstimator`と一致する（`Hc2`・`Hc3`は、`X̂`と`Z̃`でレバレッジが違うので一致しない）。
 //!
 //! # `Robust`重みの限界
 //!
@@ -71,7 +71,7 @@
 
 use faer::Mat;
 
-use super::input::FeIvInput;
+use super::common::FeIvInput;
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects};
 
@@ -80,6 +80,7 @@ mod fit;
 mod gmm_type;
 mod hansen_j;
 
+pub use crate::shared::gmm_c_statistic::{CStatistic, CStatisticTarget};
 pub use c_statistic::fe_gmm_c_statistic;
 pub use gmm_type::{FeGmmType, FeWeightType};
 
@@ -141,8 +142,8 @@ impl FeGmmEstimator {
     ///   `CommonError::ClusterDimensionMismatch`・`InsufficientClusters`・
     ///   `InsufficientClustersForWeightMatrix`（過剰識別は`G < l`、丁度識別は`G <= l`）
     /// - 重み行列・`X̃'Z̃W Z̃'X̃`が数値的に特異なら`CommonError::NearSingularMatrix`
-    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（`FeIvEstimator`と同じ）
-    /// - `cov_type`の検証は`FeIvEstimator::fit`と同じ（クラスター数・時点数が`k`以下、2グループ退化、
+    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（`FeTwoSlsEstimator`と同じ）
+    /// - `cov_type`の検証は`FeTwoSlsEstimator::fit`と同じ（クラスター数・時点数が`k`以下、2グループ退化、
     ///   DKのバンド幅など）。Wald χ²検定が数値的に定義できなければ`PanelError::WaldTestFailed`（`stage=OVERALL_WALD_TEST`。DKの`T <= k`も同じ段階）
     /// - Hansen Jの`S`が数値的に特異なら`CommonError::NearSingularMatrix`（点推定で反転成功済みなので到達しない）
     /// - 構造残差が丸め誤差の範囲で0なら`CommonError::PerfectFit`（完全適合。GMMに第二段階は無いので`stage`は付けない。`iv::gmm`と同じ）
@@ -217,7 +218,7 @@ impl FeGmmEstimator {
         &self.params
     }
 
-    /// 構造残差`ỹ − X̃β̂` (n, 1)。within変換した空間の値（`FeIvEstimator::residuals`と同じ）。
+    /// 構造残差`ỹ − X̃β̂` (n, 1)。within変換した空間の値（`FeTwoSlsEstimator::residuals`と同じ）。
     pub fn residuals(&self) -> &Mat<f64> {
         &self.residuals
     }

@@ -3,7 +3,7 @@
 //! 独立な確かめ方は3つ:
 //! - **FE-2SLSへの還元**: `OneStep`と`Classical`重みの2段階は係数が2SLSと同じで、サンドイッチ
 //!   `B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`は2SLSの`X̂`のサンドイッチになる。`Classical`・`Hc1`・`Cluster`・`Dk`の共分散は
-//!   `FeIvEstimator`と一致する（`Hc2`・`Hc3`は`X̂`と`Z̃`でレバレッジが違うので一致しない）。
+//!   `FeTwoSlsEstimator`と一致する（`Hc2`・`Hc3`は`X̂`と`Z̃`でレバレッジが違うので一致しない）。
 //! - **ダミー変数を明示したGMM**: 同じ重みでダミーを外生変数に加えた`iv::gmm::GmmEstimator`は、`OneStep`と
 //!   `Classical`重みの2段階では残差がwithin残差と同じなので（FWL）、`Classical`・`Hc1`・`Hc2`・`Hc3`の
 //!   共分散がwithin変換した固定効果つきGMMと一致する（レバレッジはダミーのレバレッジを足したもの）。
@@ -28,7 +28,9 @@ use crate::iv::gmm::GmmEstimator;
 use crate::linear::ols::CovType;
 use crate::panel::common::{PanelError, TimeKeys};
 use crate::panel::fe::{FeCovType, FeEffects};
-use crate::panel::fe_iv::{FeGmmEstimator, FeGmmType, FeIvEstimator, FeIvInput, FeWeightType};
+use crate::panel::fe_iv::common::FeIvInput;
+use crate::panel::fe_iv::gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
+use crate::panel::fe_iv::two_sls::FeTwoSlsEstimator;
 use crate::shared::error::{CommonError, ErrorInfo};
 use crate::shared::error_catalog::{ErrorCode, Stage};
 use crate::shared::group_codes::GroupCodes;
@@ -101,7 +103,8 @@ fn covariance_reduces_to_fe_2sls_for_classical_weight() {
                 dk(None, &rows),
             ];
             for cov_type in cov_types {
-                let expected = FeIvEstimator::fit(make(), effects, cov_type.clone(), 0.95).unwrap();
+                let expected =
+                    FeTwoSlsEstimator::fit(make(), effects, cov_type.clone(), 0.95).unwrap();
                 for gmm_type in [
                     FeGmmType::OneStep,
                     two_step(FeWeightType::Classical),
@@ -135,7 +138,7 @@ fn just_identified_covariance_equals_fe_2sls_for_any_weight() {
     let make = || input_spec(&rows, &[entity_labels(), time_labels()], 1, 1, 1);
     for cov_type in [FeCovType::Hc1, entity_cluster(), dk(Some(1), &rows)] {
         let expected =
-            FeIvEstimator::fit(make(), FeEffects::TwoWay, cov_type.clone(), 0.95).unwrap();
+            FeTwoSlsEstimator::fit(make(), FeEffects::TwoWay, cov_type.clone(), 0.95).unwrap();
         for weight in [FeWeightType::Robust, super::entity_cluster_weight()] {
             let estimator = fit_with(
                 make(),
@@ -471,7 +474,7 @@ fn r_squared_matches_fe_2sls_for_one_step() {
     } in structures()
     {
         let make = || input_spec(&rows, &dimensions, 1, 1, 2);
-        let expected = FeIvEstimator::fit(make(), effects, FeCovType::Hc1, 0.95).unwrap();
+        let expected = FeTwoSlsEstimator::fit(make(), effects, FeCovType::Hc1, 0.95).unwrap();
         let estimator = fit_with(make(), effects, FeGmmType::OneStep, FeCovType::Hc1).unwrap();
         for (got, want, what) in [
             (

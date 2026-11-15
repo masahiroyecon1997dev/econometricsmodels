@@ -225,8 +225,8 @@ Currently implemented:
 - OLS, WLS
 - Logit, Probit, Tobit
 - IV (2SLS, GMM)
-- FE (fixed effects), FEIV (fixed effects two-stage least squares), FEGMM
-  (fixed effects GMM), RE (random effects)
+- FE (fixed effects), FEIV (fixed effects two-stage least squares or GMM),
+  RE (random effects)
 
 More methods are planned, including further discrete-choice models and
 causal inference designs. What is planned or in progress, and in what
@@ -257,7 +257,7 @@ model tests — for each supported covariance type.
 | IV (GMM) | linearmodels `IVGMM` | R `momentfit` | 1e-8 / 1e-8 |
 | FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
 | FEIV<sup>3</sup> | R `fixest` (`feols` with instruments) | linearmodels `IV2SLS` with dummy variables, R `plm`, R `ivDiag` | 1e-8 / 1e-8 |
-| FEGMM<sup>4</sup> | linearmodels `IVGMM` on within-transformed data | R `momentfit` on within-transformed data, FE-2SLS references (`fixest`, `plm`) | 1e-8 / 1e-8 |
+| FEIV (`estimator="gmm"`)<sup>4</sup> | linearmodels `IVGMM` on within-transformed data | R `momentfit` on within-transformed data, FE-2SLS references (`fixest`, `plm`) | 1e-8 / 1e-8 |
 | RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
 
 <sup>1</sup> For FE and RE, linearmodels covers only classical and HC1

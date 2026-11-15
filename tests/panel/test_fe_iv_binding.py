@@ -749,8 +749,11 @@ def test_options_are_snapshotted_by_fit() -> None:
 def test_options_repr_setters_and_copies() -> None:
     options = _lib.FEIVOptions(cov_type="dk", dk_time="time", dk_bandwidth=1)
     assert repr(options) == (
-        'FEIVOptions(cov_type="dk", confidence_level=0.95, cluster=None, '
-        'dk_time="time", dk_bandwidth=1, tol=1e-12, max_iter=10000)'
+        'FEIVOptions(estimator="2sls", cov_type="dk", '
+        "confidence_level=0.95, cluster=None, "
+        'dk_time="time", dk_bandwidth=1, gmm_type=None, '
+        "gmm_weight_type=None, gmm_max_iter=None, gmm_tol=None, "
+        "raise_on_non_convergence=None, tol=1e-12, max_iter=10000)"
     )
     for value in (copy.copy(options), copy.deepcopy(options)):
         assert repr(value) == repr(options)

@@ -24,7 +24,8 @@ use super::{
 use crate::iv::gmm::compute_c_statistic;
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeAbsorption, FeEffects};
-use crate::panel::fe_iv::{FeGmmType, FeIvInput, FeWeightType, RoleColumns, fe_gmm_c_statistic};
+use crate::panel::fe_iv::common::{FeIvInput, RoleColumns};
+use crate::panel::fe_iv::gmm::{FeGmmType, FeWeightType, fe_gmm_c_statistic};
 use crate::shared::error::{CommonError, ErrorInfo};
 use crate::shared::error_catalog::ErrorCode;
 use crate::shared::gmm_c_statistic::{CStatistic, CStatisticTarget};

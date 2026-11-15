@@ -1,6 +1,6 @@
-"""FE-GMM（`FEGMM`）の主リファレンス: within変換後のデータに`linearmodels.iv.IVGMM`を当てる。
+"""FE-GMM（`FEIV`）の主リファレンス: within変換後のデータに`linearmodels.iv.IVGMM`を当てる。
 
-`FEGMM`は、固定効果をwithin変換で除いた列に、定数項なしの線形GMMを当てる。このモジュールは、同じ
+`FEIV`は、固定効果をwithin変換で除いた列に、定数項なしの線形GMMを当てる。このモジュールは、同じ
 within変換をこの関数の中で別の方法（1-wayは群の平均、2-way以上はダミー変数行列への最小二乗射影を
 `numpy.linalg.lstsq`で）で行い、`IVGMM`の係数・重み行列・Hansen J・反復回数を比べる。本実装の交互射影・
 閉形式とは独立な変換で、`IVGMM`は自由度の数え方（`n_absorbed`）に依らない量を計算する。
@@ -34,7 +34,7 @@ from scipy import stats
 
 from benchmark.common import hac_auto_lag
 from benchmark.common.reference.extract import cov_frame_to_dict
-from benchmark.panel.fe_gmm_cases import ITERATED_TOL, GmmCase
+from benchmark.panel.fe_iv_gmm_cases import ITERATED_TOL, GmmCase
 from benchmark.panel.references.dummy_2sls_ref import (
     _r_squared,
     dummy_matrix,

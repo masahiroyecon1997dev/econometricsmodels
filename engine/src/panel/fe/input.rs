@@ -333,7 +333,7 @@ pub enum FeEffects {
 
 impl FeEffects {
     /// この方向で固定効果が吸収する次元（`groups`は効果の各次元のコード、`effects`の順）。個体、2-wayなら
-    /// 時点、`MultiWay`は全ての次元。`FeEstimator::fit`と`FeIvEstimator::fit`が最初に呼び、以降の
+    /// 時点、`MultiWay`は全ての次元。`FeEstimator::fit`と`FeTwoSlsEstimator::fit`が最初に呼び、以降の
     /// 1-way/2-way/高次元の分岐は`self`ではなく戻り値の長さで区別する。
     ///
     /// # Errors

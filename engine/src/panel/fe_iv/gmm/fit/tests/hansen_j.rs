@@ -18,9 +18,9 @@ use super::{entity_cluster_weight, entity_labels, fit, fit_with, input_spec, two
 use crate::iv::gmm::GmmEstimator;
 use crate::linear::ols::CovType;
 use crate::panel::fe::{FeCovType, FeEffects};
-use crate::panel::fe_iv::{
-    FeGmmEstimator, FeGmmType, FeIvEstimator, FeIvInput, FeWeightType, RoleColumns,
-};
+use crate::panel::fe_iv::common::{FeIvInput, RoleColumns};
+use crate::panel::fe_iv::gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
+use crate::panel::fe_iv::two_sls::FeTwoSlsEstimator;
 use crate::shared::group_codes::GroupCodes;
 
 const RTOL: f64 = 1e-8;
@@ -60,7 +60,8 @@ fn classical_weight_equals_fe_2sls_sargan() {
     {
         for (k_exog, k_endog, k_inst) in OVER_IDENTIFIED {
             let make = || input_spec(&rows, &dimensions, k_exog, k_endog, k_inst);
-            let sargan = FeIvEstimator::fit(make(), effects, FeCovType::Classical, 0.95).unwrap();
+            let sargan =
+                FeTwoSlsEstimator::fit(make(), effects, FeCovType::Classical, 0.95).unwrap();
             for gmm_type in classical_types() {
                 let label = format!("{name} {k_exog}/{k_endog}/{k_inst} {gmm_type:?}");
                 let estimator = fit(make(), effects, gmm_type).unwrap();

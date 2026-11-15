@@ -12,13 +12,11 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     ErrorCode,
-    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -80,11 +78,11 @@ def test_fe_iv_hc0_and_unknown_cov_type_keep_the_case_given(
         fit(FEIVOptions(cov_type="HAC"))
 
 
-def test_fe_gmm_hc0_and_unknown_values_keep_the_case_given(
+def test_fe_iv_gmm_hc0_and_unknown_values_keep_the_case_given(
     frame: pl.DataFrame,
 ) -> None:
-    def fit(options: FEGMMOptions) -> None:
-        FEGMM(
+    def fit(options: FEIVOptions) -> None:
+        FEIV(
             frame,
             "y",
             ["x2"],
@@ -97,13 +95,13 @@ def test_fe_gmm_hc0_and_unknown_values_keep_the_case_given(
     with raises_error(
         ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL,
         value="HC0",
-        model="FEGMM",
+        model="FEIV",
     ):
-        fit(FEGMMOptions(cov_type="HC0"))
+        fit(FEIVOptions(estimator="gmm", cov_type="HC0"))
     with raises_error(
         ErrorCode.OPTION_UNKNOWN_VALUE, option="gmm_weight_type", value="HAC"
     ):
-        fit(FEGMMOptions(gmm_weight_type="HAC"))
+        fit(FEIVOptions(estimator="gmm", gmm_weight_type="HAC"))
 
 
 def test_variance_method_keeps_the_case_given(frame: pl.DataFrame) -> None:

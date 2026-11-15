@@ -190,9 +190,9 @@ FEIV is verified against `fixest` 0.14.2 (the primary reference) and against thr
   - There is no real-data example for FEIV.
 - **Cluster with several effects.** With effects nested in the clusters, the number of absorbed parameters follows `fixest` (`K.fixef = "nonnested"`); for panels whose groups form several disconnected sets, the number of parameters in the partial F is one larger than the rank of the dummy-variable matrix, as in `fixest` (checked once by hand, not in the automated tests).
 
-### FEGMM
+### FEIV with GMM
 
-FEGMM has no single clean reference: `fixest` and `linearmodels.PanelOLS` have no fixed effects GMM, and `plm` has GMM only for dynamic panel models (`pgmm`). Linearmodels `IVGMM` (the primary reference) and R `momentfit` (the independent cross-check) are therefore applied to the **within-transformed data without a constant**: the generator removes the effects by group means for one-way effects, and by a least-squares projection on the dummy variables (`numpy.linalg.lstsq`) for two or more effects, which is not the engine's closed form or alternating projections. The notes below list what each reference covers and where the checks are weaker than for the other methods.
+FE-GMM has no single clean reference: `fixest` and `linearmodels.PanelOLS` have no fixed effects GMM, and `plm` has GMM only for dynamic panel models (`pgmm`). Linearmodels `IVGMM` (the primary reference) and R `momentfit` (the independent cross-check) are therefore applied to the **within-transformed data without a constant**: the generator removes the effects by group means for one-way effects, and by a least-squares projection on the dummy variables (`numpy.linalg.lstsq`) for two or more effects, which is not the engine's closed form or alternating projections. The notes below list what each reference covers and where the checks are weaker than for the other methods.
 
 - **What each reference covers.**
   - linearmodels `IVGMM` (the primary reference): the coefficients, the Hansen J statistic and the number of estimations, for one-step, two-step and iterated (three estimations) GMM with the classical, robust and cluster weights (iterated only with the robust and cluster weights, because iterating the classical weight returns the two-stage least squares estimate). The default estimate (two-step, cluster weight) is compared on the 20 FEIV scenarios, and the other estimates and weights on six panel structures: the baseline, two endogenous variables, an unbalanced panel, two-way effects, an unbalanced two-way panel and three effects. The standard errors are the asymptotic covariance of `IVGMM` (`debiased=False`) times the small-sample factor of this package.
@@ -216,7 +216,7 @@ FEGMM has no single clean reference: `fixest` and `linearmodels.PanelOLS` have n
   - HC2 and HC3, for the reason above.
   - Driscoll-Kraay and the period, region and sector clusters with an overidentified robust or cluster weight (`momentfit` is run with the classical, HC1 and entity cluster standard errors only).
   - The R², and `df_resid`, `df_model`, `n_absorbed` and the number of estimations, which come from `IVGMM` and the reference scripts only.
-  - There is no real-data example for FEGMM.
+  - There is no real-data example for FEIV with GMM.
 - **Not compared at all.** HC2 and HC3 on the panel of 4 entities and 2 periods, where the leverage is close to one and the rounding error of `1/(1-h)^2` reaches `2e-7` in the Wald statistic (the standard errors agree to `3e-11`).
 
 ### RE

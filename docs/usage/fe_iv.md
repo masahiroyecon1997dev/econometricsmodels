@@ -2,7 +2,7 @@
 
 **FEIV**: **Usage** · [Options and results](../api/fe_iv.md) · [Definitions](../methods/fe_iv.md)
 
-`FEIV` estimates a panel regression with fixed effects in which some regressors are endogenous (fixed effects two-stage least squares, FE-2SLS). It removes the fixed effects as [FE](fe.md) does and then applies two-stage least squares to the within-transformed data, so it fits a model such as the effect of `endog` on `y` within a firm, where `endog` is instrumented. The arguments combine those of [IV](iv.md) and [FE](fe.md):
+`FEIV` estimates a panel regression with fixed effects in which some regressors are endogenous. It removes the fixed effects as [FE](fe.md) does and then applies two-stage least squares (FE-2SLS, the default) or the generalized method of moments (FE-GMM, `estimator="gmm"`) to the within-transformed data, so it fits a model such as the effect of `endog` on `y` within a firm, where `endog` is instrumented. As in [IV](iv.md), `estimator` in `FEIVOptions` selects the estimator and the arguments are the same for both. The arguments combine those of [IV](iv.md) and [FE](fe.md):
 
 - `x_exog`: exogenous regressors. May be empty.
 - `x_endog`: endogenous regressors. At least one.
@@ -69,7 +69,7 @@ print(result.n_groups)  # {"firm": 8}
 There is no intercept, since the fixed effects absorb it. Two more things differ from the other estimators:
 
 - **Standard errors.** `FEIVOptions.cov_type` defaults to `"cluster"` on the first column of `effects`, which is the usual choice when each entity is observed over several periods. Use `"dk"` for dependence across entities in the same period. The choices are explained in [FE: choosing the type of standard error](fe.md#choosing-the-type-of-standard-error); `"hc0"` is not available.
-- **Scope.** `FEIV` is two-stage least squares only. Unlike `IV`, it has no GMM estimator, no `"hac"` covariance and no `c_stat()` (use [FEGMM](fe_gmm.md) for GMM with the Hansen J test and a C statistic), and like `FE` it has no `predict()`, `augment()` or `summary()`. Use `FE` when every regressor is exogenous once the effects are removed, and `FEIV` when a regressor is still correlated with the error within the entities.
+- **Scope.** Unlike `IV`, `FEIV` has no `"hac"` covariance (use `"dk"`), and like `FE` it has no `predict()`, `augment()` or `summary()`. Use `FE` when every regressor is exogenous once the effects are removed, and `FEIV` when a regressor is still correlated with the error within the entities. [GMM](#gmm-estimator) is chosen with `estimator="gmm"`.
 
 See [Options and results](../api/fe_iv.md) for the full list of options.
 
@@ -136,10 +136,92 @@ Which one to use, and how to read the critical values, is the same as in [IV](iv
 
 If a statistic cannot be computed for your data, the method raises a `ComputationError`; see [Validation and errors](../guide/validation.md).
 
+## GMM estimator
+
+`FEIVOptions(estimator="gmm")` applies the generalized method of moments to the within-transformed data, weighting the moment conditions by an estimate of their covariance. Use it when you have more instruments than endogenous regressors and want a Hansen J test and a C statistic that allow for correlation within the clusters. With more instruments than endogenous regressors the GMM estimate is asymptotically more efficient than two-stage least squares, under heteroskedasticity or correlation within the clusters, but with few clusters the estimated weight matrix can be unstable. When the model is just identified, the two estimators give the same coefficients.
+
+```python
+gmm = FEIV(
+    panel,
+    y="y",
+    x_exog=["x1"],
+    x_endog=["endog"],
+    instruments=["z1", "z2"],
+    effects=["firm"],
+    options=FEIVOptions(estimator="gmm"),
+).fit()
+
+print(gmm.params)  # {"x1": ..., "endog": ...}: no intercept
+print(gmm.std_errors)
+print(gmm.estimator, gmm.gmm_type, gmm.gmm_weight_type)  # gmm two_step cluster
+print(gmm.overid_statistic, gmm.overid_p_value)  # Hansen J
+```
+
+The options are those of `IVOptions` (`gmm_type`, `gmm_weight_type`, `gmm_max_iter`, `gmm_tol`, `raise_on_non_convergence`), and they are accepted only with `estimator="gmm"`. The defaults of the weight and of the standard errors differ from `IV`:
+
+- **Weight matrix.** `gmm_weight_type` defaults to `"cluster"`, with the clusters of `cluster` (by default the first column of `effects`). The cluster weight allows the errors of an entity to be correlated over time, which is the usual situation in a panel: the within transformation even makes the errors of an entity sum to zero. Keep it unless you have a reason not to, and prefer it when the panel is short. `"robust"` assumes the errors are uncorrelated and `"classical"` that they are also homoskedastic; there is no `"hac"` weight.
+- **`gmm_type`.** `"one_step"` uses the fixed weight \((\tilde Z'\tilde Z)^{-1}\) and has no weight type; it gives the two-stage least squares point estimate. `"two_step"` (the default) re-estimates once with the estimated weight, and `"iterated"` repeats that until the coefficients converge.
+- **Standard errors.** `cov_type` defaults to `"cluster"` as for two-stage least squares and is chosen independently of the weight. `"hc0"` is not available. The tests use the normal distribution and the overall Wald test the chi-squared distribution, not the t and F distributions of two-stage least squares: `stat_dist` is `"normal"` and `wald_dist` is `"chi2"`.
+
+To iterate the weight until the coefficients converge, and use heteroskedasticity-robust standard errors:
+
+```python
+options = FEIVOptions(estimator="gmm", gmm_type="iterated", cov_type="hc1")
+iterated = FEIV(
+    panel,
+    y="y",
+    x_exog=["x1"],
+    x_endog=["endog"],
+    instruments=["z1", "z2"],
+    effects=["firm"],
+    options=options,
+).fit()
+print(iterated.gmm_type, iterated.gmm_weight_type, iterated.cov_type)  # iterated cluster hc1
+print(iterated.n_iter, iterated.converged)
+```
+
+### Overidentification: the Hansen J test
+
+When there are more instruments than endogenous regressors, `fit()` computes Hansen's J statistic of the overidentifying restrictions, in `overid_statistic`, `overid_p_value` and `overid_df` (the Sargan statistic with two-stage least squares). A small p-value signals an invalid instrument or a misspecified model. It is `None` when the model is just identified.
+
+The covariance of the moment conditions in J is the one of the weight used for the point estimate, so J follows `gmm_weight_type`, and with the cluster weight it is robust to correlation within the clusters. With `gmm_weight_type="classical"` it equals the Sargan statistic of two-stage least squares. With the `"robust"` weight on a short panel J rejects too often, because the within-transformed errors are correlated over time (see [Definitions: FEIV](../methods/fe_iv.md#hansen-j-statistic)).
+
+### Exogeneity and instrument validity, post-estimation
+
+`c_stat()` is a method, not a field: `fit()` never computes it. It tests whether endogenous regressors in `variables` are in fact exogenous and whether excluded instruments in `instruments` are valid, as the difference of two Hansen J statistics. It re-reads the data passed to `fit()` and estimates the model twice, so it costs about as much as `fit()`. Keep that data unchanged.
+
+```python
+exogeneity = gmm.c_stat(variables=["endog"])
+print(exogeneity.statistic, exogeneity.p_value, exogeneity.df)
+
+validity = gmm.c_stat(instruments=["z2"])
+print(validity.statistic, validity.p_value)
+print(validity.j_with_tested, validity.j_without_tested)
+```
+
+A small p-value rejects the null that the tested moment conditions are valid: for `variables` that the tested regressors are exogenous, for `instruments` that the tested instruments are uncorrelated with the error (given that the remaining instruments are valid). `df` is the number of tested variables plus the number of tested instruments.
+
+It returns a `CStatisticResult`, the same type as [`IVResults.c_stat()`](iv.md#exogeneity-and-instrument-validity-post-estimation), and is read in the same way. Two things are specific to FE-GMM. First, the covariance of the moment conditions follows `gmm_weight_type` (the classical one for `gmm_type="one_step"`), not `cov_type`. Second, with the cluster weight the statistic needs at least as many clusters as the columns of the full instrument set (the exogenous regressors, the tested endogenous variables and all excluded instruments). `fit()` checks the clusters needed for the weight of the fit, and a shortfall raises a `ValidationError`. `c_stat()` can only find out while computing, and raises a `ComputationError`.
+
+### What each estimator provides
+
+Not every result is available for both estimators. A method that the estimator does not support raises a `ValidationError` (`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`), and a field that it does not support is `None`.
+
+| | `estimator="2sls"` | `estimator="gmm"` |
+|---|---|---|
+| `first_stage()`, `fixed_effects()` | yes | no |
+| `weak_instrument_f_statistics`, `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | no |
+| `wu_hausman_statistic` and its p-value | yes | no |
+| `overid_statistic` | Sargan | Hansen J |
+| `c_stat()` | no | yes |
+| `stat_dist`, `wald_dist` | `"t"`, `"f"` | `"normal"`, `"chi2"` |
+
+To see the first stage and the weak-instrument diagnostics of the same model, fit it with `estimator="2sls"` and the same `x_exog`, `x_endog`, `instruments` and `effects`: the first-stage coefficients are the same, because both estimators use the same within-transformed variables. The structural R² statistics are computed from the structural residuals with both estimators.
+
 ## Covariance matrix of the coefficients
 
 `result.cov_params` is the covariance matrix of the coefficients under your `cov_type`, as a dictionary of dictionaries keyed by coefficient name, in the order of `param_names` (`x_exog` first, then `x_endog`). It holds the slope coefficients only: there is no `"const"` and no fixed effect. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients) for an example that builds a standard error from it.
 
 ## See also
 
-[IV](iv.md), [FE](fe.md), [FEGMM](fe_gmm.md), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).
+[IV](iv.md), [FE](fe.md), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).

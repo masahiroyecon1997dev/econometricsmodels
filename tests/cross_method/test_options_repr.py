@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 from econometricsmodels import (
-    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -62,15 +61,7 @@ NON_DEFAULT_KWARGS: dict[type, dict[str, Any]] = {
         "max_iter": 500,
     },
     FEIVOptions: {
-        "cov_type": "dk",
-        "confidence_level": 0.9,
-        "cluster": "g",
-        "dk_time": "t",
-        "dk_bandwidth": 2,
-        "tol": 1e-8,
-        "max_iter": 500,
-    },
-    FEGMMOptions: {
+        "estimator": "gmm",
         "cov_type": "dk",
         "confidence_level": 0.9,
         "cluster": "g",

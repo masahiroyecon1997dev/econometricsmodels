@@ -5,8 +5,8 @@ use super::{
     two_step, two_way_input,
 };
 use crate::panel::fe::{FeCovType, FeEffects};
-use crate::panel::fe_iv::FeGmmEstimator;
-use crate::panel::fe_iv::{FeGmmType, FeWeightType};
+use crate::panel::fe_iv::gmm::FeGmmEstimator;
+use crate::panel::fe_iv::gmm::{FeGmmType, FeWeightType};
 
 #[test]
 fn getters_report_the_model() {

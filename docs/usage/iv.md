@@ -8,7 +8,7 @@
 - `x_endog`: endogenous regressors, the ones you are worried about.
 - `instruments`: the excluded instruments, variables that are not in the model for `y`, are correlated with the endogenous regressors and are uncorrelated with the error. There must be at least one per endogenous variable; with more, the model is over-identified and can be tested (below).
 
-For panel data with fixed effects and an endogenous regressor, see [FEIV](fe_iv.md) (two-stage least squares) and [FEGMM](fe_gmm.md) (GMM).
+For panel data with fixed effects and an endogenous regressor, see [FEIV](fe_iv.md) (two-stage least squares or GMM).
 
 Why these names rather than a single `x`: see [Why `IV` has `x_exog` and `x_endog` instead of `x`](../guide/api-conventions.md#why-iv-has-x_exog-and-x_endog-instead-of-x).
 
@@ -154,4 +154,4 @@ The definition is in [Definitions: IV](../methods/iv.md#exogeneity-and-instrumen
 
 ## See also
 
-[OLS](ols.md), [FEIV](fe_iv.md) and [FEGMM](fe_gmm.md) (for panel data with fixed effects), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).
+[OLS](ols.md), [FEIV](fe_iv.md) (for panel data with fixed effects), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).

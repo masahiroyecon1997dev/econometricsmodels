@@ -85,7 +85,7 @@ cov_type <- tolower(args[4])
 cluster_col <- if (args[5] == "NA") NA_character_ else args[5]
 hac_lag <- if (args[6] == "NA") NA_integer_ else as.integer(args[6])
 # 7番目の引数（省略可）: 推定方式。`twostep`（既定。省略時と同じ）・`onestep`・`iterated:<回数>`
-# （初期推定を数えた推定の回数）。1段階・反復は固定効果つきGMM（`FEGMM`）のクロスチェックで使う。
+# （初期推定を数えた推定の回数）。1段階・反復は固定効果つきGMM（`FEIV`）のクロスチェックで使う。
 gmm_type <- if (length(args) >= 7) tolower(args[7]) else "twostep"
 
 # check.names=FALSE: Python側で書き出した列名をそのまま使う（run_ivreg.Rと同じ理由）。

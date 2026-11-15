@@ -8,9 +8,8 @@ use crate::panel::common::{PanelError, PanelMoment, PanelMomentInput, panel_mome
 use crate::panel::fe::{
     FeAbsorption, FeCovType, FeEffects, fe_r_squared_between, fe_r_squared_overall,
 };
-use crate::panel::fe_iv::input::FeIvInput;
-use crate::panel::fe_iv::prepare::{
-    WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
+use crate::panel::fe_iv::common::{
+    FeIvInput, WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
 };
 use crate::shared::error::CommonError;
 use crate::shared::gmm::gmm_sandwich_covariance;
@@ -148,7 +147,7 @@ pub(super) fn fit_fe_gmm(
         None
     };
 
-    // 標準誤差。`Ω̂`は`cov_type`ごとの小標本補正込み（`FeIvEstimator`と同じ`df_resid`・`K`）。
+    // 標準誤差。`Ω̂`は`cov_type`ごとの小標本補正込み（`FeTwoSlsEstimator`と同じ`df_resid`・`K`）。
     let df_resid = n - df_model;
     let residual_values: Vec<f64> = (0..n).map(|i| *residuals.get(i, 0)).collect();
     let groups = input.index().effect_codes();

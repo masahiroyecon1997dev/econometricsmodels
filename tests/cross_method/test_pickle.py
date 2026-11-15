@@ -29,12 +29,12 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -171,14 +171,7 @@ SAMPLES = {
         dk_bandwidth=1,
     ),
     "FEIVOptions": lambda: _lib.FEIVOptions(
-        cov_type="dk",
-        confidence_level=0.85,
-        cluster="entity",
-        dk_time="t",
-        dk_bandwidth=1,
-        max_iter=500,
-    ),
-    "FEGMMOptions": lambda: _lib.FEGMMOptions(
+        estimator="gmm",
         cov_type="dk",
         confidence_level=0.85,
         cluster="entity",
@@ -218,20 +211,6 @@ SAMPLES = {
         ["z", "z2"],
         ["entity", "t"],
         _lib.FEIVOptions(cov_type="dk", dk_time="t", dk_bandwidth=1),
-    ),
-    "FEGMMResult": lambda: _lib.fit_fe_gmm(
-        _frame(),
-        "y",
-        ["x2"],
-        ["x1"],
-        ["z", "z2"],
-        ["entity", "t"],
-        _lib.FEGMMOptions(
-            cov_type="dk",
-            dk_time="t",
-            dk_bandwidth=1,
-            gmm_weight_type="classical",
-        ),
     ),
     "LogitResult": _logit_raw,
     "TobitResult": _tobit_raw,
@@ -831,15 +810,16 @@ def test_fe_iv_results_wrapper_round_trips_with_the_endogenous_order() -> None:
         assert clone.fixed_effects() == result.fixed_effects()
 
 
-def test_fe_gmm_results_wrapper_round_trips_and_computes_c_stat() -> None:
-    """`FEGMMResults`は往復の後も、元のデータから`c_stat()`を計算できる。"""
-    result = FEGMM(
+def test_fe_iv_gmm_results_wrapper_round_trips_and_computes_c_stat() -> None:
+    """`FEIVResults`は往復の後も、元のデータから`c_stat()`を計算できる。"""
+    result = FEIV(
         _frame(),
         y="y",
         x_exog=["x2"],
         x_endog=["x1"],
         instruments=["z", "z2"],
         effects=["entity"],
+        options=FEIVOptions(estimator="gmm"),
     ).fit()
     expected = result.c_stat(variables=["x1"])
     for clone in (pickle.loads(pickle.dumps(result)), copy.deepcopy(result)):

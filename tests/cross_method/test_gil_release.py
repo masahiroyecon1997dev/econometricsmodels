@@ -30,12 +30,12 @@ import polars as pl
 import pytest
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
+    FEIVOptions,
     Logit,
     Probit,
     Tobit,
@@ -43,6 +43,19 @@ from econometricsmodels import (
 
 X_NAMES = ["x1", "x2", "x3", "x4", "x5"]
 PERIODS = 10
+
+
+def _fe_iv_gmm_fit(d: pl.DataFrame) -> object:
+    return FEIV(
+        d,
+        y="y",
+        x_exog=X_NAMES,
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+        options=FEIVOptions(estimator="gmm"),
+    ).fit()
+
 
 FITS: dict[str, Callable[[pl.DataFrame], object]] = {
     "OLS": lambda d: OLS(d, y="y", x=X_NAMES).fit(),
@@ -55,14 +68,6 @@ FITS: dict[str, Callable[[pl.DataFrame], object]] = {
     ).fit(),
     "FE": lambda d: FE(d, y="y", x=X_NAMES, effects=["entity"]).fit(),
     "FEIV": lambda d: FEIV(
-        d,
-        y="y",
-        x_exog=X_NAMES,
-        x_endog=["endog"],
-        instruments=["z1", "z2"],
-        effects=["entity"],
-    ).fit(),
-    "FEGMM": lambda d: FEGMM(
         d,
         y="y",
         x_exog=X_NAMES,
@@ -84,7 +89,7 @@ ROWS = {
     "IV": 50_000,
     "FE": 200_000,
     "FEIV": 50_000,
-    "FEGMM": 50_000,
+    "FEIV.fit_gmm": 50_000,
     "RE": 50_000,
     # 推定後のメソッド。White検定は補助回帰の項数が多く、同じ行数でも遅い。
     # `marginal_effects`は`fit()`より桁違いに速いので、`fit()`（測定の外）に時間がかかり
@@ -103,7 +108,7 @@ ROWS = {
     "FEIV.kleibergen_paap": 50_000,
     "FEIV.effective_f": 50_000,
     "FEIV.fixed_effects": 50_000,
-    "FEGMM.c_stat": 50_000,
+    "FEIV.c_stat": 50_000,
 }
 
 
@@ -145,8 +150,9 @@ CASES: dict[str, Callable[[pl.DataFrame], Callable[[], object]]] = {
     "FEIV.kleibergen_paap": _post_case("FEIV", lambda r: r.kleibergen_paap()),
     "FEIV.effective_f": _post_case("FEIV", lambda r: r.effective_f()),
     "FEIV.fixed_effects": _post_case("FEIV", lambda r: r.fixed_effects()),
-    "FEGMM.c_stat": _post_case(
-        "FEGMM", lambda r: r.c_stat(variables=["endog"])
+    "FEIV.fit_gmm": _fit_case(_fe_iv_gmm_fit),
+    "FEIV.c_stat": lambda data: partial(
+        _fe_iv_gmm_fit(data).c_stat, variables=["endog"]
     ),
 }
 

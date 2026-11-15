@@ -1,19 +1,20 @@
-# FEIV / FEGMM 見送り・未実装・未決事項（Issue化の判断待ち）
+# FEIV（2SLS・GMM）見送り・未実装・未決事項（Issue化の判断待ち）
 
-FEIV（FE-2SLS）・FEGMMの実装・テスト・公開docsが一通り終わったので、確定した設計・実装結果・決定の理由は[`docs/spec/fe-iv-spec.md`](../../spec/fe-iv-spec.md)へ集約した
+FEIV（FE-2SLS・FE-GMM。`estimator`で切り替え）の実装・テスト・公開docsが一通り終わったので、確定した設計・実装結果・決定の理由は[`docs/spec/fe-iv-spec.md`](../../spec/fe-iv-spec.md)へ集約した
 （CLAUDE.md 13章）。このファイルには、**実装されていないもの・見送ったもの・判断が未決のもの**だけを残す。各項目は、Issueにするか・やらないと決めるか・
 既存Issueに追記するかを利用者が決める（5章。承認後に英語でIssueへ起票。関連する項目は1つにまとめる）。決まった項目は削除し、全て片付いたらこのファイルを削除する。
 
-状態（2026-11-15）: `release/v0.10.0`。実装範囲のIssue（#373〜#388）は**未close**（CIが通ってから、英語コメントつきで承認を得てclose）。PR #635は未マージ。CHANGELOGにFEIV・FEGMMは未記載
+状態（2026-11-15）: `release/v0.10.0`。#381〜#387はclose済み（2026-11-15）。#373〜#380・#388は**未close**（CIが通ってから、英語コメントつきで承認を得てclose。#380はCIでの性能計測が残る）。PR #635は未マージ。CHANGELOGにFEIVは未記載
 （リリース時にまとめる）。
 
 ## A. 実装されていない機能（後続Issueの候補）
 
-- **FEGMMへの`first_stage()`・弱操作変数診断（`weak_instrument_f_*`・`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）・Wu-Hausman・`fixed_effects()`の追加**。engine側の追加が要る
-  （GMMの係数での固定効果の復元、第一段階の共有）。現状は`usage/fe_gmm.md`で「同じ引数でFEIVを推定する」案内にとどめている。
+- **`estimator="gmm"`への`first_stage()`・弱操作変数診断（`weak_instrument_f_*`・`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）・Wu-Hausman・`fixed_effects()`の追加**。
+  engine側の追加が要る（GMMの係数での固定効果の復元、第一段階の共有）。現状は、GMMでこれらのメソッドを呼ぶと`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`、プロパティは`None`
+  （IVでは両推定量で使えるので、IVとの差は残る。`usage/fe_iv.md`の「What each estimator provides」の表）。
+- **`estimator="2sls"`への`c_stat()`**（IVは両推定量で使える。FEIVの2SLSでは`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`）。重みを`cov_type`から決める規則（IVの`weight_type_for_cov_type`）が要る。
 - **FEIVへの頑健な過剰識別検定**（IV本体の2SLSへの頑健なHansen J（#636）にFE-2SLSを含めるか）。FEIVのSarganは等分散前提で`cov_type`に依らない。
-- **FEIVのGMM**: 別クラス`FEGMM`にしたので、`FEIVOptions.estimator`は足さない（決定済み）。必要なのは上の機能追加だけ。
-- 公開docsの`docs/guide/performance*.md`・`README.md`「Performance」へのFE-IV・FE-GMMの行（リリース準備時にCIの計測値から再生成。`compare_fe_iv.py`の`extra_methods`にFEGMMを足す件を含む）。
+- 公開docsの`docs/guide/performance*.md`・`README.md`「Performance」へのFE-IV・FE-GMMの行（リリース準備時にCIの計測値から再生成。`compare_fe_iv.py`の`extra_methods`にGMMを足す件を含む）。
 
 ## B. 判断が未決の設計上の論点
 
@@ -26,34 +27,34 @@ FEIV（FE-2SLS）・FEGMMの実装・テスト・公開docsが一通り終わっ
 - **DKのKP・有効Fで`T_d ≤ r`**（`r = 除外操作変数の数 − 内生変数の数 + 1`）: rk LMには明示ガードがあるが、rk Wald Fはランク判定任せで、丸め誤差で値を返す余地がある（公開側は実測の
   `ComputationError`に合わせてある）。明示ガードを足すか。
 - **IV本体のクラスターで`G ≤ d`のrk LMが、ちょうど`G`になる既存の性質**（rk Wald Fは`None`）。未定義にするとIV本体の挙動が変わる。
-- **C統計量（FEGMM）の検査の順**: 今は`fit`と同じで`prepare_within`（全列のwithin変換）が先、`target`・`weight`だけで判定できる検査が後なので、大きい不均衡パネルで無効な`target`を渡すと
+- **C統計量（`estimator="gmm"`）の検査の順**: 今は`fit`と同じで`prepare_within`（全列のwithin変換）が先、`target`・`weight`だけで判定できる検査が後なので、大きい不均衡パネルで無効な`target`を渡すと
   変換のコストを払ってから失敗する。変えるなら核の検査部分を切り出してFE側が先に呼ぶが、エラーの優先順位（`InsufficientInstruments`と`CStatisticNothingToTest`が同時に成り立つ入力など）が`fit`と変わる。
-- **Stataの`ivreg2`・`xtivreg2`が吸収分の自由度を`Robust`・`Cluster`の`S`に入れるか**（`N/(N−dofminus)`型）。入れるなら、FEGMMのHansen J・C統計量の「`Robust`・`Cluster`は補正しない」判断をやり直す
+- **Stataの`ivreg2`・`xtivreg2`が吸収分の自由度を`Robust`・`Cluster`の`S`に入れるか**（`N/(N−dofminus)`型）。入れるなら、GMMのHansen J・C統計量の「`Robust`・`Cluster`は補正しない」判断をやり直す
   （確認にはWeb検索の許可が要る）。
 - **時間不変の内生変数＋時間不変の操作変数**（Hausman-Taylorが扱う型）: 「固定効果を除くと一定」のエラーになる。hintで「Hausman-Taylorは対象外」と書くか（現状、コード・hint・公開docsのどこにもHausman-Taylorへの言及は無い）。
 - Waldが`NaN`のとき`None`にするか（Sargan・IV本体と合わせる）。`{endog}_first_stage_resid`が利用者の列名と衝突した場合の扱い（Wu-Hausmanの補助回帰の列名）。
 
 ## C. 挙動に関する指摘（実装の誤りの疑い。先に確認が要る）
 
-- 完全に共線な設計（`x_endog`が`x_exog`の2倍）で、FEGMMの共分散の段階が`MATRIX_NEAR_SINGULAR`（行列`COEFFICIENT_COVARIANCE`・段階`OVERALL_F_TEST`）になる。FEGMMはχ²のWald検定なので、
+- 完全に共線な設計（`x_endog`が`x_exog`の2倍）で、`estimator="gmm"`の共分散の段階が`MATRIX_NEAR_SINGULAR`（行列`COEFFICIENT_COVARIANCE`・段階`OVERALL_F_TEST`）になる。GMMはχ²のWald検定なので、
   他のGMM経路の`OVERALL_WALD_TEST`と食い違う可能性（再現は1件・nice to have）。起票するか会話内の報告にとどめるかは未決。
-- `FEGMMResults.wald_df_num`の型注釈が`int | None`だが実装は常に`k`（`FEIVResults`は`int`）。
+- `FEIVResults.wald_df_num`の型注釈は`int | None`だが、実装は常に`k`（GMMの`wald_df_denom`が`None`のため、型を揃えて`int | None`にした）。
 - `tests/support/_tolerances_panel.py`の`fe_gmm_reduction`のコメントに、還元の範囲を「just_identifiedの1-wayだけ」とする古い記述が残っている（非公開）。
 
 ## D. 検証・テストの見送り
 
-- **独立な参照が無い統計量**: DKのrk LM・有効F、複数内生変数のKP・有効F、HC2・HC3（FEIV・FEGMM。numpyの手計算だけ。`plm`のHC2・HC3は定義が違う）、FEGMMの過剰識別のrobust・cluster重みと
-  小標本補正・`K`の組合せ（還元はclassical重みの経路まで）、FEGMMのR²・`df_*`。FE-2SLSの3次元の固定効果は`fixest`との比較が無い（ダミー変数2SLSのみ）。
+- **独立な参照が無い統計量**: DKのrk LM・有効F、複数内生変数のKP・有効F、HC2・HC3（FEIV・GMM。numpyの手計算だけ。`plm`のHC2・HC3は定義が違う）、FEGMMの過剰識別のrobust・cluster重みと
+  小標本補正・`K`の組合せ（還元はclassical重みの経路まで）、GMMのR²・`df_*`。FE-2SLSの3次元の固定効果は`fixest`との比較が無い（ダミー変数2SLSのみ）。
 - **実データのフィクスチャ**: FEIV・FEGMMとも合成データだけ（`jtrain`等は変数の定義の確認が要る）。
 - **起票済みの候補**: HC2/HC3のrk Wald Fを`fixest`の第一段階で独立に確かめる（#655）、`ivDiag`の2-wayクラスター頑健Fが本実装・`fixest`の第一段階Wald Fと一致しない原因（#656。baselineの
   個体クラスターで160.9対157.5）。
 - **`fixest`の`cd`が本実装と一致しない原因**（baselineで206.9対172.7）は追っていない。
 - **FEGMMの`gmm_tol`**: 小さくしても絶対下限`1e-8`が残る（参照ケースでは早く停止しないので影響なし）。
-- **cross_methodへの追加**: `test_perfect_fit`・`test_collinear_columns`・`test_column_error_context`・`test_wald_ill_conditioned`にFEIV・FEGMMを足す（`test_fe_iv_validation.py`・`test_fe_gmm_validation.py`で
+- **cross_methodへの追加**: `test_perfect_fit`・`test_collinear_columns`・`test_column_error_context`・`test_wald_ill_conditioned`にFEIV（両推定量）を足す（`test_fe_iv_validation.py`・`test_fe_gmm_validation.py`で
   同じ`code`・`params`は確認済み）。クラスター不均衡の組合せ（2-way・`unbalanced`・`long_panel`）。連結成分が複数ある不均衡な2-wayと`n − neffects`が小さい境界のSarganのテスト。
   FEIVの`cragg_donald()`等が未定義になる経路のPythonテスト（`fit()`が通る入力では作れない。Rustの単体テストで担保）。
 - **テスト構成の細部**: テストファイル名（`lsdv`・`structure`は標準のテーマ名に無い）、`test_validation_order.py`の`INSUFFICIENT_INSTRUMENTS`の順位、C統計量のnumpyとmomentfitのファイル分割、
-  `x_exog_empty`・`confidence_level`をオプション節に分ける件、`test_fe_gmm_api.py`の見出し順、FEGMMの`test_perfect_fit`等への追加、テスト名・見出し規約の細部。
+  `x_exog_empty`・`confidence_level`をオプション節に分ける件、`test_fe_iv_gmm_api.py`の見出し順、GMMの`test_perfect_fit`等への追加、テスト名・見出し規約の細部。
 - **FE（3列以上の固定効果）の見送り**: 3次元の実データ、悪条件・高次元`k`・`G = q+1`の境界、`absorption_tol`の検証、`fe_multi_way_true_beta.json`を使うテスト、`fixed_effects()`の`fixest`の`fixef`との比較（和`α_i+γ_t`で比べる案）。
 - **Stock-Yogoの表**: 第二の独立な出典で全セルを照合していない（NBER原稿のTable 1・2との一致は確認、2005年の章との一致は未確認）。
 

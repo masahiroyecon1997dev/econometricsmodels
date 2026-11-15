@@ -16,14 +16,12 @@ from _dtype_helpers import make_frame, unused_column
 from _errors import raises_error
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
-    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -94,14 +92,14 @@ CLUSTER_FITS = {
         ["entity"],
         options=FEIVOptions(**CLUSTER),
     ).fit(),
-    "FEGMM": lambda d: FEGMM(
+    "FEIV_GMM": lambda d: FEIV(
         d,
         "y",
         ["x2"],
         ["x1"],
         ["z", "z2"],
         ["entity"],
-        options=FEGMMOptions(**CLUSTER),
+        options=FEIVOptions(estimator="gmm", **CLUSTER),
     ).fit(),
     "RE": lambda d: RE(
         d, "y", ["x1"], ["entity"], options=REOptions(**CLUSTER)
@@ -117,8 +115,14 @@ ENTITY_FITS = {
     "FEIV": lambda d: FEIV(
         d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
     ).fit(),
-    "FEGMM": lambda d: FEGMM(
-        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    "FEIV_GMM": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(estimator="gmm"),
     ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
@@ -144,17 +148,23 @@ TIME_FITS = {
         ["entity"],
         options=FEIVOptions(cov_type="dk", dk_time="t"),
     ).fit(),
-    "FEGMM.effects_time": lambda d: FEGMM(
-        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity", "t"]
+    "FEIV_GMM.effects_time": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity", "t"],
+        options=FEIVOptions(estimator="gmm"),
     ).fit(),
-    "FEGMM.dk_time": lambda d: FEGMM(
+    "FEIV_GMM.dk_time": lambda d: FEIV(
         d,
         "y",
         ["x2"],
         ["x1"],
         ["z", "z2"],
         ["entity"],
-        options=FEGMMOptions(cov_type="dk", dk_time="t"),
+        options=FEIVOptions(estimator="gmm", cov_type="dk", dk_time="t"),
     ).fit(),
     "RE.effects_time": lambda d: RE(d, "y", ["x1"], ["entity", "t"]).fit(),
     "RE.dk_time": lambda d: RE(

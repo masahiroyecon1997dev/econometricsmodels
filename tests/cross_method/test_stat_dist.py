@@ -24,13 +24,11 @@ from _cross_method_helpers import (
 )
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
-    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -183,12 +181,14 @@ def test_fe_iv_dk_uses_t_minus_one_df(panel_df):
 
 
 @pytest.mark.parametrize("cov_type", ["classical", "cluster", "dk"])
-def test_fe_gmm_uses_normal_and_chi2(panel_df, cov_type):
-    """FEGMMは`cov_type`によらず、係数のzとWaldのχ²を使う（自由度は持たない）。"""
-    options = FEGMMOptions(
-        cov_type=cov_type, dk_time="time" if cov_type == "dk" else None
+def test_fe_iv_gmm_uses_normal_and_chi2(panel_df, cov_type):
+    """FEIVは`cov_type`によらず、係数のzとWaldのχ²を使う（自由度は持たない）。"""
+    options = FEIVOptions(
+        estimator="gmm",
+        cov_type=cov_type,
+        dk_time="time" if cov_type == "dk" else None,
     )
-    res = FEGMM(
+    res = FEIV(
         panel_df,
         y="y",
         x_exog=["x1"],

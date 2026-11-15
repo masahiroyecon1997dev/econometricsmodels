@@ -1,4 +1,4 @@
-"""FE-GMM（`FEGMM`）の独立クロスチェック: within変換後のデータにR `momentfit`を当てる。
+"""FE-GMM（`FEIV`）の独立クロスチェック: within変換後のデータにR `momentfit`を当てる。
 
 主リファレンス（`within_gmm_ref.py`）と同じwithin変換（群の平均・ダミー変数行列への射影）で固定効果を
 除いた列を、定数項なしの式で`momentfit`（`benchmark/iv/references/run_momentfit.R`）に渡す。
@@ -22,7 +22,7 @@ import pandas as pd
 from scipy import stats
 
 from benchmark.iv.references.r import run_momentfit_r
-from benchmark.panel.fe_gmm_cases import GmmCase
+from benchmark.panel.fe_iv_gmm_cases import GmmCase
 from benchmark.panel.references.within_gmm_ref import (
     _inference,
     cluster_k,

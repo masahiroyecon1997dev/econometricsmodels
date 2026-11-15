@@ -66,6 +66,7 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.HAC_TIME_REQUIRED,
         ErrorCode.DK_TIME_REQUIRED,
         ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL,
+        ErrorCode.METHOD_NOT_AVAILABLE_FOR_ESTIMATOR,
         ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE,
         ErrorCode.HAC_LAGS_OUT_OF_RANGE,
         ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,

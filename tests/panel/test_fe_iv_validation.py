@@ -440,6 +440,35 @@ def test_an_unknown_cov_type_raises(df):
         _fit(df, cov_type="nonrobust")
 
 
+def test_an_unknown_estimator_raises(df):
+    with raises_error(ErrorCode.OPTION_UNKNOWN_VALUE, option="estimator"):
+        _fit(df, estimator="tsls")
+
+
+_WEIGHTED = 'estimator="gmm" and gmm_type in ("two_step", "iterated")'
+_ITERATED = 'estimator="gmm" and gmm_type="iterated"'
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "condition"),
+    [
+        ("gmm_type", "two_step", 'estimator="gmm"'),
+        ("gmm_weight_type", "robust", _WEIGHTED),
+        ("gmm_max_iter", 10, _ITERATED),
+        ("gmm_tol", 1e-4, _ITERATED),
+        ("raise_on_non_convergence", False, _ITERATED),
+    ],
+)
+def test_a_gmm_option_with_two_stage_least_squares_raises(
+    df, option, value, condition
+):
+    """GMMのオプションは`estimator="gmm"`のときだけ使われる。"""
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
+    ):
+        _fit(df, **{option: value})
+
+
 def test_dk_requires_dk_time(df):
     with raises_error(ErrorCode.DK_TIME_REQUIRED):
         _fit(df, cov_type="dk")

@@ -6,8 +6,9 @@ use super::{
 };
 use crate::panel::common::{ColumnRole, PanelError};
 use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects};
-use crate::panel::fe_iv::{FeGmmEstimator, FeIvInput, RoleColumns};
-use crate::panel::fe_iv::{FeGmmType, FeWeightType};
+use crate::panel::fe_iv::common::{FeIvInput, RoleColumns};
+use crate::panel::fe_iv::gmm::FeGmmEstimator;
+use crate::panel::fe_iv::gmm::{FeGmmType, FeWeightType};
 use crate::shared::error::{CommonError, ErrorInfo};
 use crate::shared::error_catalog::ErrorCode;
 use crate::shared::group_codes::GroupCodes;

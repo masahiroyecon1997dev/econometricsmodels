@@ -1,7 +1,7 @@
 //! FE-2SLSへの還元、ダミー変数を明示したGMM（FWL）、クラスター重みの手計算との照合。
 //!
 //! - **還元**: `Classical`重みの2段階GMMと1段階GMMは、重みが`(Z̃'Z̃)⁻¹`に比例するので2SLSと同じ点推定になる。
-//!   丁度識別ではどの重みでも同じ。`FeIvEstimator`との一致で確かめる。
+//!   丁度識別ではどの重みでも同じ。`FeTwoSlsEstimator`との一致で確かめる。
 //! - **FWL**: 効果のダミーを外生変数（したがってモーメント条件にも入る）に加えた`iv::gmm::GmmEstimator`の
 //!   係数は、within変換した固定効果つきGMMと一致する。ダミーのモーメントは`α`で厳密に0にできるので、
 //!   残りのモーメントの重みは`S`のその部分行列になり、within変換後の`S`と同じになるため
@@ -22,8 +22,10 @@ use crate::iv::common::{IvEstimate, IvInput};
 use crate::iv::gmm::GmmEstimator;
 use crate::linear::ols::CovType;
 use crate::panel::fe::{FeCovType, FeEffects};
-use crate::panel::fe_iv::{FeGmmEstimator, FeIvEstimator, FeIvInput};
-use crate::panel::fe_iv::{FeGmmType, FeWeightType};
+use crate::panel::fe_iv::common::FeIvInput;
+use crate::panel::fe_iv::gmm::FeGmmEstimator;
+use crate::panel::fe_iv::gmm::{FeGmmType, FeWeightType};
+use crate::panel::fe_iv::two_sls::FeTwoSlsEstimator;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::least_squares::least_squares;
 
@@ -98,7 +100,7 @@ pub(super) fn structures() -> Vec<Structure> {
 const SPECS: [(usize, usize, usize); 5] = [(1, 1, 1), (1, 1, 2), (1, 1, 3), (0, 1, 2), (2, 2, 3)];
 
 fn fe_2sls_params(input: FeIvInput, effects: FeEffects) -> Vec<f64> {
-    let estimator = FeIvEstimator::fit(input, effects, FeCovType::Classical, 0.95).unwrap();
+    let estimator = FeTwoSlsEstimator::fit(input, effects, FeCovType::Classical, 0.95).unwrap();
     (0..estimator.params().nrows())
         .map(|j| *estimator.params().get(j, 0))
         .collect()

@@ -21,13 +21,13 @@ from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     Logit,
     LogitOptions,
@@ -57,8 +57,14 @@ FITS = {
     "FEIV": lambda d: FEIV(
         d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
     ).fit(),
-    "FEGMM": lambda d: FEGMM(
-        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    "FEIV_GMM": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(estimator="gmm"),
     ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }

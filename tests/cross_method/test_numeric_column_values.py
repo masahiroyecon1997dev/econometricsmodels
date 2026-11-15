@@ -15,13 +15,13 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
-    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     Logit,
     Probit,
     Tobit,
@@ -129,8 +129,16 @@ FIT_CASES = {
             ("z2", "instruments"),
         ],
     ),
-    "FEGMM": (
-        lambda d: FEGMM(d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]).fit(),
+    "FEIV_GMM": (
+        lambda d: FEIV(
+            d,
+            "y",
+            ["x2"],
+            ["x1"],
+            ["z", "z2"],
+            ["entity"],
+            options=FEIVOptions(estimator="gmm"),
+        ).fit(),
         [
             ("y", "y"),
             ("x2", "x_exog"),

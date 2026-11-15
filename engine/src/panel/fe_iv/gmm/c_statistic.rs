@@ -21,9 +21,8 @@ use faer::Mat;
 use super::FeWeightType;
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeAbsorption, FeEffects};
-use crate::panel::fe_iv::input::FeIvInput;
-use crate::panel::fe_iv::prepare::{
-    WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
+use crate::panel::fe_iv::common::{
+    FeIvInput, WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
 };
 use crate::shared::gmm_c_statistic::{
     CStatistic, CStatisticMatrices, CStatisticSettings, CStatisticTarget, gmm_c_statistic,

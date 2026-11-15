@@ -1,12 +1,14 @@
-# FEIV / FEGMM 仕様書
+# FEIV 仕様書（FE-2SLS・FE-GMM）
 
-FEIV（固定効果つき2SLS、FE-2SLS）とFEGMM（固定効果つきGMM）の確定済み仕様。実体は「within変換＋2SLS/GMM」で線形。
-`engine/src/panel/fe_iv.rs`（ファサード）・`engine/src/panel/fe_iv/`（FE-2SLS。FE-GMMは`fe_iv/gmm.rs`・`gmm/`）・
-`engine_pybind/src/panel/fe_iv.rs`・`fe_gmm.rs`・`python_package/econometricsmodels/panel/fe_iv.py`・`fe_gmm.py`として実装済み。
+FEIV（固定効果つきの操作変数法。`estimator`で2SLSとGMMを切り替える）の確定済み仕様。実体は「within変換＋2SLS/GMM」で線形。
+`engine/src/panel/fe_iv.rs`（`common`・`two_sls`・`gmm`の3つの子モジュールを持つ親。`iv/`と同じ構成）・
+`engine/src/panel/fe_iv/`（`common/`: 入力型と前段、`two_sls/`: `FeTwoSlsEstimator`、`gmm/`: `FeGmmEstimator`）・
+`engine_pybind/src/panel/fe_iv.rs`と`fe_iv/`（`options`・`option_values`・`gmm_setup`・`input`・`fit`・`result`）・
+`python_package/econometricsmodels/panel/fe_iv.py`として実装済み。
 FE/REと共通の設計判断（`effects`の引数設計・`cov_type`の対応・共通化方針）は[`panel-common.md`](./panel-common.md)、
 FEの内部実装（within変換・自由度・`cov_type`・R²・固定効果の復元）は[`fe-spec.md`](./fe-spec.md)、
-IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、本ドキュメントにはFEIV・FEGMM固有の内容のみを記載する。
-定義式（推定量・共分散・検定分布・診断）の正本は`docs/methods/fe_iv.md`・`docs/methods/fe_gmm.md`で、ここには重複させない。
+IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、本ドキュメントにはFEIV固有の内容のみを記載する。
+定義式（推定量・共分散・検定分布・診断）の正本は`docs/methods/fe_iv.md`で、ここには重複させない。
 
 ## 1. スコープ
 
@@ -18,25 +20,32 @@ IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、�
 ## 2. API
 
 3層構成: `FEIV(data, y, x_exog, x_endog, instruments, effects, *, options)`（python_package）→
-`fit_fe_iv`（engine_pybind）→`FeIvEstimator::fit`（engine）。FEGMMも同じ形で`FEGMM`→`fit_fe_gmm`→`FeGmmEstimator::fit`。
+`fit_fe_iv`（engine_pybind）→`FeTwoSlsEstimator::fit`・`FeGmmEstimator::fit`（engine。`estimator`で振り分ける）。
 必須の列は`data`の直後（`docs/spec/api-conventions.md`）。コンストラクタでは検証せず、`fit()`で初めて`_lib`を呼ぶ。
-`FEIVOptions`・`FEGMMOptions`は`_lib`の再輸出（独自クラスにしない）。`summary()`・`predict()`は持たない（FEと同じ）。
+`FEIVOptions`は`_lib`の再輸出（独自クラスにしない）。`summary()`・`predict()`は持たない（FEと同じ）。
 
-### 2.1 FEIVとFEGMMを別クラスにする
+### 2.1 2SLSとGMMは1つのクラスにする（IVと同じ）
 
-`FEIVOptions`に`estimator`を足す案は採らない。理由: `FeGmmEstimator`は第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`を持たず、
-結果の型が別の形になる。同じ結果クラスに「GMMでは使えないメソッド」を持たせない。IVの`estimator`引数とは設計が違う（IVは結果の形が同じ）。
+`FEIVOptions.estimator`（`"2sls"`既定・`"gmm"`）で切り替え、`FEIV`・`FEIVResults`は1組にする。GMMを別クラス（`FEGMM`）にしていた時期があったが、IVとの
+インターフェースが大きく異なり利用者が分かりにくくなるため、IVと同じ形に統合した（IVで推定量ごとにクラスを分けなかったのも同じ理由）。
+`FeGmmEstimator`は第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`を持たないので、推定量が持たないものは次のとおり扱う
+（IVの`wu_hausman_*`がGMMで`None`になるのと同じ形）:
+
+- **プロパティ**は`None`（`weak_instrument_f_*`・`wu_hausman_*`）。型は`int | None`・`dict | None`。
+- **メソッド**は`ValidationError`（`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`。`method`・`estimator`・`supported`を`params`に持つ）。GMMの`first_stage()`・`fixed_effects()`・
+  `cragg_donald()`・`kleibergen_paap()`・`effective_f()`、2SLSの`c_stat()`。
+- 将来GMMに第一段階・弱操作変数診断・`fixed_effects()`を足せば、このエラーを外すだけで済む（engine側の追加が要る）。FE-2SLSの`c_stat()`も同様。
 
 ### 2.2 `FEIVOptions`
 
-`cov_type`（既定`"cluster"`、`classical`・`hc1`〜`hc3`・`cluster`・`dk`。`hc0`は無い）・`cluster`・`dk_time`・`dk_bandwidth`・`confidence_level`（既定0.95）・
+`estimator`（`"2sls"`既定・`"gmm"`）、`cov_type`（既定`"cluster"`、`classical`・`hc1`〜`hc3`・`cluster`・`dk`。`hc0`は無い）・`cluster`・`dk_time`・`dk_bandwidth`・`confidence_level`（既定0.95）・
 `tol`・`max_iter`（交互射影。FEと同じ）。`cluster`の既定は`effects[0]`。`dk_time`は`effects`と独立で、`cov_type="dk"`のとき必須
 （`effects`の列は借用しない）。`include_intercept`は持たない。
 
-### 2.3 `FEGMMOptions`
+### 2.3 GMMのオプション
 
-`FEIVOptions`と同じ項目に、`gmm_type`・`gmm_weight_type`・`gmm_max_iter`・`gmm_tol`・`raise_on_non_convergence`を足したもの。名前と規則は`IVOptions`と同じ
-（既定`None`→使われるモードの実効既定値。使われないモードでの明示指定は`ValidationError`）。決定:
+上の項目に、`gmm_type`・`gmm_weight_type`・`gmm_max_iter`・`gmm_tol`・`raise_on_non_convergence`を足したもの。名前と規則は`IVOptions`と同じ
+（既定`None`→使われるモードの実効既定値。使われないモードでの明示指定は`ValidationError`。`estimator="2sls"`での明示指定も`OPTION_UNUSED`）。決定:
 
 - **`gmm_weight_type`の語彙は`classical`・`robust`・`cluster`の3つ**。`hac`は型に無い（`OPTION_UNKNOWN_VALUE`）。IVの`hac`重みは行単位のNewey-Westで、
   `hac_time`が全行で異なる値を要するためパネルに使えない。DK型の重み（時点ごとに集計したモーメントにカーネル）は、重み行列のランクが時点数`T`以下になり、
@@ -49,17 +58,18 @@ IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、�
 
 ### 2.4 結果
 
-`FEIVResults(raw, x_endog)`は`x_endog`を保持する（`_lib`の`weak_instrument_f_statistics`・`first_stage()`は`HashMap`で順序が不定なので、
+`FEIVResults(raw, x_endog)`は2SLSの項目に加えて`estimator`・`gmm_type`・`gmm_weight_type`（`one_step`と2SLSは`None`）・`n_iter`・`converged`を持つ。
+`x_endog`を保持する（`_lib`の`weak_instrument_f_statistics`・`first_stage()`は`HashMap`で順序が不定なので、
 `x_endog`の順の`dict`に直す。pickleはラッパーごと往復する）。係数・標準誤差・推論・`df_*`・`n_groups`・`dk_bandwidth_used`・`residuals`、
 Wald F（`wald_*`）、`first_stage()`（`dict[str, FEResults]`）、`weak_instrument_f_*`・`overid_*`（Sargan）・`wu_hausman_*`、R²3つ、`fixed_effects()`、
 診断メソッド`cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha)`（3.4）を持つ。`log_likelihood`・AIC・BICは出さない。
 
-`FEGMMResults(raw)`の公開面は**engineが持つものだけ**: 係数・推論（`stat_dist="normal"`、`stat_df`は`None`）・`wald_*`（`wald_dist="chi2"`、`wald_df_denom`は`None`、`wald_df_num`は`k`。
+`estimator="gmm"`の結果の公開面は**engineが持つものだけ**: 係数・推論（`stat_dist="normal"`、`stat_df`は`None`）・`wald_*`（`wald_dist="chi2"`、`wald_df_denom`は`None`、`wald_df_num`は`k`。
 Waldは`k`で割らない）・R²3つ・`overid_*`（Hansen J）・`gmm_type`・`gmm_weight_type`・`n_iter`・`converged`・`n_groups`・`c_stat()`。
-第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`は持たない（engineの`FeGmmEstimator`に無い）。
+第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`は持たない（engineの`FeGmmEstimator`に無い。上の2.1の扱い）。
 
-統計量の命名はIVに合わせる（`wald_*`＋`stat_dist`）。FEの`f_statistic`系ではない。FEIV（2SLS）は`stat_dist="t"`・`wald_dist="f"`で固定、FEGMMは
-`"normal"`・`"chi2"`で固定。
+統計量の命名はIVに合わせる（`wald_*`＋`stat_dist`）。FEの`f_statistic`系ではない。`estimator="2sls"`は`stat_dist="t"`・`wald_dist="f"`、`"gmm"`は
+`"normal"`・`"chi2"`（型は`Literal["t", "normal"]`・`Literal["f", "chi2"]`）。
 
 **R²**は構造残差ベースの`r_squared_within`・`_between`・`_overall`（FEと同じ3つ）。係数に`β̂`、`X`に実際の内生変数を使い、
 within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残差、overall=元の`y`・`X`に`β̂`だけを当てはめた残差。負や1超になりうる。
@@ -71,19 +81,19 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 
 診断の公開形は`CLAUDE.md`の規約（推定量の妥当性・識別に属するものは`fit()`時に計算してプロパティ、利用者の選択が入るものは独立メソッド）に従う。
 
-- `fit()`時に計算してプロパティ: 部分F（弱操作変数）・Sargan・Wu-Hausman（FEIV）、Hansen J（FEGMM）。
-- 事後診断のメソッド: `cragg_donald()`・`kleibergen_paap()`・`effective_f()`（FEIV）、`c_stat()`（FEGMM）、`fixed_effects()`（FEIV）。
+- `fit()`時に計算してプロパティ: 部分F（弱操作変数）・Sargan・Wu-Hausman（2SLS）、Hansen J（GMM）。
+- 事後診断のメソッド: `cragg_donald()`・`kleibergen_paap()`・`effective_f()`（2SLS）、`c_stat()`（GMM）、`fixed_effects()`（2SLS）。
   `fit()`では計算しない（`fit()`の計算量を増やさない）。`cov_type`は`fit()`のものを使い、メソッドの引数にしない。
 - メソッドのために結果が`fit()`に渡した`DataFrame`への参照（`source_data`。コピーしない）・列の役割・解決済みのオプションを保持し、**呼び出しのたびに再推定する**
   （設計行列を結果に持たせない）。呼び出しの間にそのデータを変えないことをdocstringに書く。
 - 戻り値は診断ごとの専用frozen dataclass（`CraggDonaldResult`・`KleibergenPaapResult`・`EffectiveFResult`。FEIVはIVと共有、組み立ては`_results_utils.py`）。
-  p値の無い診断があるので`DiagnosticResult`は継承しない。`CStatisticResult`はIVと**同じ型を使い回す**（`IVResults.c_stat()`・`FEGMMResults.c_stat()`）。
+  p値の無い診断があるので`DiagnosticResult`は継承しない。`CStatisticResult`はIVと**同じ型を使い回す**（`IVResults.c_stat()`・`FEIVResults.c_stat()`）。
   臨界値は水準をキーにした`dict[float, float]`。
 - 定義できないときは`None`でなく理由つきのエラー: `ALPHA_OUT_OF_RANGE`・`EFFECTIVE_F_ENDOGENOUS_COUNT`（`ValidationError`）、
   `WEAK_INSTRUMENT_STATISTIC_UNDEFINED`（`ComputationError`）、`C_STATISTIC_UNDEFINED`（`ComputationError`）。原因（共線・完全フィット・共分散のランク落ち・レバレッジ1）は
   1つのコードにまとめ、文面の括弧内に列挙するだけで区別しない。
 
-### 2.6 `first_stage()`と`fixed_effects()`（FEIV）
+### 2.6 `first_stage()`と`fixed_effects()`（`estimator="2sls"`）
 
 - 第一段階は内生変数ごとに`FeEstimator`の後半（変換済みの列を受け取る内部経路）で1回だけ推定し、`X̂`の作成と`first_stage()`の両方に使う
   （IVの第一段階が二重に計算される問題を最初から避ける）。
@@ -96,7 +106,7 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 ### 2.7 pickle
 
 `source_data`（使った列だけ）を状態に含め、`rebuilt_from`で作り直せる部分は状態に入れない。第一段階の`FEResult`は`Computed`なのでそのままpickleできる。
-`FEGMMResults`は`DataFrame`とオプションを保持する（`c_stat()`が再推定する）。
+`FEIVResults`は`DataFrame`とオプションを保持する（診断・`fixed_effects()`・`c_stat()`が再推定する）。
 
 ## 3. engine
 
@@ -109,7 +119,7 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 効果の種類は`FeEffects`（`OneWay`・`TwoWay`・`MultiWay`）。1-wayと均衡な2-wayは閉形式、それ以外（不均衡な2-way・3列以上）は交互射影。
 `effects`はentity/timeの意味を持たず、同じ組合せの複数行を許す（バランスの判定は「`n == N×T`かつ重複なし」）。
 
-### 3.2 `FeIvEstimator::fit`
+### 3.2 `FeTwoSlsEstimator::fit`
 
 1. `ensure_serial()`、`InsufficientInstruments`（`len(instruments) < len(x_endog)`）。
 2. singleton検出（`ensure_no_singleton_groups`。FEの事前検証と同じ関数。FEIV側で複製しない）。観測が1つしかないグループはエラーのまま（欠測値を自動除外しない方針と揃える。除去すると行の対応（`residuals`の長さ・クラスターとDKのキー・`fixed_effects()`）が入力とずれ、役割列が4種あるFEIVでは全列で同じ行を落とす仕組みも要る）。
@@ -169,7 +179,7 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 
 ### 3.5 FE-GMM
 
-`FeGmmEstimator`は`FeIvEstimator`とは別の型。`fit(input, effects, gmm_type: FeGmmType, raise_on_non_convergence, cov_type, confidence_level)`／`fit_with_absorption`。
+`FeGmmEstimator`は`FeTwoSlsEstimator`とは別の型（`fe_iv/two_sls/`と`fe_iv/gmm/`。どちらも`fe_iv/common/`の入力型と前段を共有する）。`fit(input, effects, gmm_type: FeGmmType, raise_on_non_convergence, cov_type, confidence_level)`／`fit_with_absorption`。
 前段（入力検査・全列のwithin変換・自由度の検証・変換後の分散ゼロの検査）は`prepare_within`でFE-2SLSと共有する。
 
 - **GMMの反復コア・重み行列は`shared/`へ**（`shared/gmm_iteration.rs`・`gmm_weight.rs`・`gmm.rs`・`gmm_c_statistic.rs`。`iv::gmm`も同じコアを呼ぶ）。`GmmEstimator`が自由度`n − k`固定で吸収した効果の数を渡せないため、
@@ -204,18 +214,18 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 説明変数側の2つに`role`パラメータ（`x`（FE）・`x_exog`・`x_endog`・`instruments`）を持たせ、文面とhintを`{role}`で書く。個体内で一定の操作変数（時間不変）が典型的な誤りなので、
 hintで指摘する。変換後の分散ゼロ検出は全役割に対しこの2分類で報告する。
 
-GMMに第一段階は無いので、共線な外生変数・操作変数は`MATRIX_NEAR_SINGULAR`（`DESIGN_MATRIX_SINGULAR`＋`stage`ではない）。エラーの`model`に`"FEIV"`・`"FEGMM"`を足す
-（カタログの`model`は自由な文字列なので変更なし）。`C_STATISTIC_UNKNOWN_VARIABLE`・`C_STATISTIC_UNDEFINED`のhintはIV・FEGMMで通じる中立な文面にしてある。
+GMMに第一段階は無いので、共線な外生変数・操作変数は`MATRIX_NEAR_SINGULAR`（`DESIGN_MATRIX_SINGULAR`＋`stage`ではない）。エラーの`model`は`"FEIV"`（推定量によらない。IVの`"IV"`と同じ）。
+`C_STATISTIC_UNKNOWN_VARIABLE`・`C_STATISTIC_UNDEFINED`のhintはIV・FEIVで通じる中立な文面にしてある。
 
-`test_validation_order`での検査順（FEIV・FEGMM）: `effects`の列数 → `x_endog`の空 → 役割の重複 → 内の重複 → `dk_time`の役割。`INSUFFICIENT_INSTRUMENTS`はエンジンの`fit`の中
+`test_validation_order`での検査順（FEIV。`feiv`・`feiv_gmm`）: `effects`の列数 → `x_endog`の空 → 役割の重複 → 内の重複 → `dk_time`の役割。`INSUFFICIENT_INSTRUMENTS`はエンジンの`fit`の中
 （列の抽出の後）で報告されるので、順位は固定していない。
 
 ## 4. engine_pybind
 
-- `FEIVOptions`・`FEGMMOptions`・`FEIVResult`・`FEGMMResult`、`fit_fe_iv`・`fit_fe_gmm`。`PanelModel::FeIv`・`FeGmm`、`validate_fe_iv_roles`（`model`引数）、`FeIvColumns::role_columns`。
+- `FEIVOptions`・`FEIVResult`、`fit_fe_iv`（`estimator`で2SLSとGMMに振り分ける）。`PanelModel::FeIv`、`validate_fe_iv_roles`、`FeIvColumns`。
   `FEResult`は`Clone`（`LazyFixedEffects`が`FeEstimator`を`Arc`で共有）。`fe_result_fields`（借用で`FEResult`を作る）・`fixed_effects_dict`・`resolve_fe_cov_type`を`panel/fe.rs`から切り出して共有する。
-- IVの診断の出力型（`diagnostics.rs`の`from_engine`）・`c_stat`の引数検査と結果の組み立て（`iv::common::diagnostics`の`resolve_c_stat_target`・`CStatisticOutput::from_engine`）はFEIV・FEGMMが再利用する。
-- `FEGMM`の`c_stat`は`fit`の重み（`one_step`は`Classical`）を`FeWeightType`に組み立て、検定する変数の名前を`x_endog`・`instruments`の位置に写す。空の`target`の検査はバインディングとengineの両方にある（IVと同じ）。
+- IVの診断の出力型（`diagnostics.rs`の`from_engine`）・`c_stat`の引数検査と結果の組み立て（`iv::common::diagnostics`の`resolve_c_stat_target`・`CStatisticOutput::from_engine`）はFEIVが再利用する。
+- `estimator="gmm"`の`c_stat`は`fit`の重み（`one_step`は`Classical`）を`FeWeightType`に組み立て、検定する変数の名前を`x_endog`・`instruments`の位置に写す。空の`target`の検査はバインディングとengineの両方にある（IVと同じ）。
 
 ## 5. 公開ドキュメント
 
@@ -228,7 +238,7 @@ GMMに第一段階は無いので、共線な外生変数・操作変数は`MATR
 ### 6.1 構成
 
 `tests/panel/test_fe_iv_{api,binding,reference,dummy_crosscheck,plm_crosscheck,weak_diagnostics_crosscheck,validation}.py`、
-`test_fe_gmm_{api,binding,reference,crosscheck,c_statistic,reduction,validation}.py`、`tests/support/_fe_iv_helpers.py`・`_fe_gmm_helpers.py`、許容誤差は`_tolerances_panel.py`のキー。
+`test_fe_iv_gmm_{api,binding,reference,crosscheck,c_statistic,reduction,validation}.py`、`tests/support/_fe_iv_helpers.py`・`_fe_iv_gmm_helpers.py`、許容誤差は`_tolerances_panel.py`のキー。
 `test_*_binding.py`は`_lib`を直接見る（ダミー変数を明示したnumpy実装との照合・配線）、`test_*_validation.py`は入力検証。engineの単体テストは`engine/src/panel/fe_iv/`の`mod tests`
 （`fe_iv/fit/tests/`の`lsdv`・`sargan`・`wu_hausman`・`weak_instruments`、`gmm/`）。
 
@@ -277,11 +287,11 @@ FEIV: 13シナリオに、小標本・境界・悪条件を足した20シナリ�
 DKは時点数が傾き係数の数を超えるケースだけ作る。時点ラベルはゼロ埋め（DKの時点列は文字列のバイト順）。外生変数を複数列にする追加の列・外れ値は別の乱数生成器
 （`default_rng([seed, 7])`）から作り、既存シナリオの凍結CSVを変えない。
 
-FEGMM: FEIVの20シナリオ（凍結CSVを流用）の既定の推定（`two_step`・`cluster`重み）に加え、baseline・多内生変数・不均衡・2-way・不均衡な2-way・3-wayの6構造で他の重み・`gmm_type`
+`estimator="gmm"`: FEIVの20シナリオ（凍結CSVを流用）の既定の推定（`two_step`・`cluster`重み）に加え、baseline・多内生変数・不均衡・2-way・不均衡な2-way・3-wayの6構造で他の重み・`gmm_type`
 （iteratedはrobust・cluster重みだけ。classical重みの反復は2SLSと同じ）。実データは含めない。
 
 **許容誤差**: FEIV `1e-8`（絶対`1e-10`）が基本。実測（FE-2SLS）: fixestに係数4e-15・標準誤差1e-12・Sargan 3e-12・rk Wald F 4e-11、ダミー変数2SLSに係数7e-15・有効F（MOP）5e-11、
-ivDiagにrk Wald F 1.1e-9・有効F 5e-10。FEGMM: `IVGMM`に係数8e-14・標準誤差9e-13・共分散2e-12・信頼区間3e-10（悪条件のHC3）・Wald/J 5e-13、momentfitに係数7e-15。
+ivDiagにrk Wald F 1.1e-9・有効F 5e-10。`estimator="gmm"`: `IVGMM`に係数8e-14・標準誤差9e-13・共分散2e-12・信頼区間3e-10（悪条件のHC3）・Wald/J 5e-13、momentfitに係数7e-15。
 `df1_boundary`（4個体×2時点）のHC3は`1/(1−h)²`が丸め誤差を増幅してWaldが2e-7ずれるので、HC2・HC3の追加シナリオから外す（標準誤差は3e-11）。
 fixestの`sargan`と本実装は`(n − n_abs)/n`倍の差があるので、参照値に同じ倍率を掛けて比べる。
 

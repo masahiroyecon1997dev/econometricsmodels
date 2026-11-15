@@ -1,4 +1,4 @@
-"""FE-GMM（`FEGMMResults.c_stat()`）の参照: within変換後のデータへのC統計量。
+"""FE-GMM（`FEIVResults.c_stat()`）の参照: within変換後のデータへのC統計量。
 
 固定効果をwithin変換で除いた列（`within_gmm_ref.within_columns`。本実装とは別の計算）に、定数項なしの
 C統計量（difference-in-Hansen）を当てる。参照は2つ。
@@ -23,7 +23,7 @@ from scipy import stats
 
 from benchmark.iv.references.c_statistic_oracle import c_statistic
 from benchmark.iv.references.r import run_momentfit_c_stat_r
-from benchmark.panel.fe_gmm_cases import CStatCase
+from benchmark.panel.fe_iv_gmm_cases import CStatCase
 from benchmark.panel.references.within_gmm_ref import within_columns
 
 

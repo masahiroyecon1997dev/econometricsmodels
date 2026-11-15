@@ -1,6 +1,6 @@
-# engine_pybind/src/panel/ 実装ノート（FE/RE）
+# engine_pybind/src/panel/ 実装ノート（FE/FEIV/RE）
 
-このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（FEIV・FEGMM）（FE/RE共通の論点は `docs/spec/panel-common.md`）が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（FEIV。2SLSとGMM）（FE/RE共通の論点は `docs/spec/panel-common.md`）が正本。ここは差分の索引のみ。
 
 ## 構成（FE/RE）
 
@@ -30,26 +30,34 @@ FE/REとも、IVの「データ抽出・pyclass定義」→「engine呼び出し
 
 `fixed_effects()`自体は`fit`と同じ理由（`SelectedData`を経由する`fit`が構築した`FEResult`のメソッドであり、独立に`#[cfg(test)]`から呼べるテスト用コンストラクタが無い）でRustユニットテストを追加していない。検証は`maturin develop`後のPythonからの数値照合で行う（fixestリファレンスフィクスチャで1-way/2-way双方がengine単体テスト`fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference`/`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`の期待値と一致する）。
 
-## FEIV（`panel/fe_iv.rs`）
+## FEIV（`panel/fe_iv.rs`と`fe_iv/`）
 
-`FEIVOptions`/`FEIVResult`/`build_fe_iv_input`/`fit`を`panel/fe_iv.rs`に置く（FEの`fit_fe`に対応する`_lib.fit_fe_iv(data, y, x_exog, x_endog, instruments, effects, options)`を`lib.rs`が登録する。`#[allow(clippy::too_many_arguments)]`は公開引数の数を変えられないため）。FEと共有するもの: `LazyFixedEffects`・`fe_result_fields`・`fixed_effects_dict`・`resolve_fe_cov_type`（`CovColumns`で`cluster`・`dk_time`・`dk_bandwidth`を渡す）、`PanelModel::FeIv`（エラーの`model`が`"FEIV"`。カタログの`model`は自由な文字列なので変更は要らない）。
+2SLSとGMMは**1つのクラス**（`FEIVOptions.estimator`が`"2sls"`既定・`"gmm"`。IVの`IVOptions.estimator`と同じ）。別クラスに分けるとIVとのインターフェースが大きく異なり利用者が分かりにくくなるため（GMMを別クラス`FEGMM`にしていたのを統合した）。
+`_lib.fit_fe_iv(data, y, x_exog, x_endog, instruments, effects, options)`を`lib.rs`が登録する（`#[allow(clippy::too_many_arguments)]`は公開引数の数を変えられないため）。構成は`iv/common/`と同じ:
 
-- **オプション**: `FEIVOptions`は`FEOptions`と同じ7つ（`cov_type`既定`cluster`・`confidence_level`・`cluster`・`dk_time`・`dk_bandwidth`・`tol`・`max_iter`）。GMMは`FEIVOptions`に足さず別クラス`FEGMMOptions`にした（下の「FEGMM」）。
-- **役割の検査**: `validate_fe_iv_roles`（`effects`の列数 → `x_endog`・`instruments`が空でない（`x_exog`は空でよい）→ 役割間の重複 → 役割内の重複 → `dk_time`の役割）。列は`FeIvColumns`にまとめて渡す。
-- **結果**: `FEIVResult`はFEの項目（`params`〜`dk_bandwidth_used`・`r_squared_*`）に、IVの命名の`wald_*`（常にF）・`weak_instrument_f_*`・`overid_*`（Sargan）・`wu_hausman_*`を足したもの。`log_likelihood`・AIC/BICは出さない。`first_stage()`は`dict[str, FEResult]`で、第一段階ごとに固定効果をその場で計算した`LazyFixedEffects::Computed`を持つ（`FeEstimator`を保持しない）。`FEResult`は`Clone`（`LazyFixedEffects`が`FeEstimator`を`Arc`で共有する）。
-- **診断・`fixed_effects()`は呼び出し時に再計算**: `fit()`に渡した`DataFrame`（`source_data`）・`FEIVOptions`・列名を結果が保持し、`with_estimator`が`fit()`と同じ`build_fe_iv_input`から`FeIvEstimator`を作り直して呼ぶ（IVの`Rebuilt`と同じ。1回呼ぶごとに推定が1回走る）。診断の出力型はIVの`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`を使い回す（`from_engine`で作る）。
-- **検証**: `fit`は`#[cfg(test)]`から呼べないので、`tests/panel/test_fe_iv_binding.py`が`_lib.fit_fe_iv`を直接呼び、fixestの参照値（エンジンのテストと同じ）とダミーを明示した2SLSのnumpy実装で照合する。Pythonのラッパー（`FEIV`）は別。
-
-## FEGMM（`panel/fe_gmm.rs`）
-
-`FEGMMOptions`/`FEGMMResult`/`build_fe_gmm_input`/`fit`/`c_stat`を`panel/fe_gmm.rs`に置く（`_lib.fit_fe_gmm(data, y, x_exog, x_endog, instruments, effects, options)`を`lib.rs`が登録する）。**FEIVの`estimator`引数では足さず、別クラスにした**（`FeGmmEstimator`は第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`を持たず、結果が別の形になるため。「GMMでは使えないメソッド」を持たない）。`FeIvColumns`・`resolve_fe_cov_type`・`validate_fe_iv_roles`（`PanelModel`を引数に取る。`FeGmm`は`"FEGMM"`）・`PanelModel::FeGmm`を共有する。
-
-- **オプション**: `FEIVOptions`の7つ（`cov_type`既定`cluster`・`confidence_level`・`cluster`・`dk_time`・`dk_bandwidth`・`tol`・`max_iter`）に、`IVOptions`と同名の`gmm_type`・`gmm_weight_type`・`gmm_max_iter`・`gmm_tol`・`raise_on_non_convergence`を足す（既定は`None`で、使われるモードの実効既定値に解決する。`gmm_type`→`two_step`、`gmm_weight_type`→**`cluster`**（IVの`classical`と逆。`cov_type`の既定と揃う）、`gmm_max_iter`→100、`gmm_tol`→1e-6、`raise_on_non_convergence`→`true`）。`tol`・`max_iter`は固定効果の交互射影用で、`gmm_tol`・`gmm_max_iter`とは別（docで明記）。
-- **重みの語彙は`classical`・`robust`・`cluster`の3つ**（`hac`は`FeWeightType`が型に持たないので、`parse_choice`が`OPTION_UNKNOWN_VALUE`で弾く。専用の`code`は足さない）。`GmmKind`・`WeightKind`は`iv/common`のものを使い回さず`fe_gmm.rs`に持つ（`Hac`を型で表せなくするため）。
-- **`cluster`は`cov_type`と重みで共用する**（IVと同じ）。指定が無ければどちらも`effects[0]`（`resolve_gmm_type`が`extract_optional_cluster_groups(..).unwrap_or(groups[0].clone())`で重みの`Cluster{groups}`を作る。engineは`Cluster{groups}`を明示で受ける）。`check_fe_gmm_options`は「`cov_type="cluster"`か、重みを使う`gmm_type`で`gmm_weight_type="cluster"`」のどちらかが使えば有効にする（`check_panel_cov_options`は`cov_type`だけで決め打ちなので使わない）。報告順は値（`cov_type` → `gmm_type` → `gmm_weight_type`。`gmm_weight_type`は`one_step`でも値を先に検査する）→ 組合せ（`gmm_weight_type` → `gmm_max_iter` → `gmm_tol` → `raise_on_non_convergence` → `cluster` → `dk_time` → `dk_bandwidth` → `dk_time`の必須）→ ロール → 列 → engine。
-- **結果**: `FEIVResult`のうちGMMで意味を持つもの（係数〜`dk_bandwidth_used`・`r_squared_*`・`overid_*`＝Hansen J）に、`gmm_type`・`gmm_weight_type`（`one_step`は`None`）・`n_iter`・`converged`、`stat_dist="normal"`・`stat_df=None`・`wald_dist="chi2"`・`wald_df_num=k`・`wald_df_denom=None`を持つ。`s_used`は公開しない（IVと同じ）。第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`は今回持たない（engineの`FeGmmEstimator`が持たない。足すときはGMMの係数での固定効果の復元などengine側の追加が要る）。
-- **`c_stat(variables=None, instruments=None)`**: `FEIVResult`の診断と同じく、`fit()`に渡した`DataFrame`・`FEGMMOptions`・列名を結果が保持し、呼ばれたときに`build_fe_gmm_input`で入力を作り直して`fe_gmm_c_statistic`を呼ぶ（GILを手放す。推定量・設計行列は持たない）。引数の検査・名前→位置は`iv::common::resolve_c_stat_target`（IVの`c_stat`と共有。型 → 空・重複 → 名前の順）、結果は`CStatisticOutput::from_engine`（IVと同じ型）。**重みは`fit()`の重み**（`two_step`・`iterated`は`gmm_weight_type`、重み行列を持たない`one_step`は`Classical`）。`Classical`のときだけ`S`の分母が`n − neffects`（engineの`fe_gmm_c_statistic`の規則）。
-- **検証**: `tests/panel/test_fe_gmm_binding.py`が`_lib.fit_fe_gmm`を直接呼び、固定効果をダミーへの回帰の残差で除いたnumpy実装（点推定・`classical`/`robust`/`cluster`の重み・`classical`/`hc1`/`hc2`/`hc3`のサンドイッチ・Hansen J・C統計量）と照合し、FE-2SLS（`_lib.fit_fe_iv`）への還元（`Classical`重みの係数・Sargan）も確かめる。入力・オプションの検証は`test_fe_gmm_validation.py`。オプションの判定表は`fe_gmm.rs`の`mod tests`。`cluster`・`dk`のSEの数値はengineの単体テスト（手計算）が担い、バインディングでは配線（`cluster`の共用・既定）だけを見る。横断テストへの登録は`tests/cross_method/test_pickle.py`の`SAMPLES`（`FEGMMOptions`・`FEGMMResult`）。Pythonのラッパー（`FEGMM`）・公開docs・横断テスト（`test_gil_release.py`等）は別。
+- `options.rs`: `FEIVOptions`（`estimator`・`cov_type`既定`cluster`・`confidence_level`・`cluster`・`dk_time`・`dk_bandwidth`・`gmm_type`・`gmm_weight_type`・`gmm_max_iter`・`gmm_tol`・`raise_on_non_convergence`・`tol`・`max_iter`）。
+  GMMのオプションは`IVOptions`と同名・同規則（既定は`None`で、使われるモードの実効既定値に解決する。`gmm_type`→`two_step`、`gmm_weight_type`→**`cluster`**（IVの`classical`と逆。`cov_type`の既定と揃う）、
+  `gmm_max_iter`→100、`gmm_tol`→1e-6、`raise_on_non_convergence`→`true`）。`tol`・`max_iter`は固定効果の交互射影用で、`gmm_tol`・`gmm_max_iter`とは別（docで明記）。
+- `option_values.rs`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の順に値を種類にし（`parse_option_values`）、使われないオプションの明示指定を`OPTION_UNUSED`にする（`check_fe_iv_options`）。
+  GMMのオプションは`estimator="gmm"`のときだけ有効（`gmm_weight_type`は重みを使う`gmm_type`、反復の設定は`iterated`のとき）。`estimator="2sls"`の`cluster`・`dk_time`・`dk_bandwidth`は`check_panel_cov_options`
+  （`cov_type`だけで決まる）、`estimator="gmm"`の`cluster`は「`cov_type="cluster"`か、重みを使う`gmm_type`で`gmm_weight_type="cluster"`」のどちらかが使えば有効。
+  **重みの語彙は`classical`・`robust`・`cluster`の3つ**（`hac`は`FeWeightType`が型に持たないので`parse_choice`が`OPTION_UNKNOWN_VALUE`で弾く。専用の`code`は足さない）。`GmmKind`・`WeightKind`は`iv/common`のものを使い回さず持つ（`Hac`を型で表せなくするため）。
+- `gmm_setup.rs`: `resolve_gmm_type`（`FeGmmType`の組み立て。重みが`cluster`で`cluster`列が無いときは`effects[0]`）と`c_statistic_weight`（`c_stat`の重み。`one_step`は`Classical`）。
+- `input.rs`: `FeIvColumns`と`build_fe_iv_input`（報告順は値 → 組合せ → ロール（`validate_fe_iv_roles`。`effects`の列数 → `x_endog`・`instruments`が空でない（`x_exog`は空でよい）→ 役割間の重複 → 役割内の重複 → `dk_time`の役割）→ 列 → `cov_type`・重みの列 → engine）。
+  `PanelModel::FeIv`（エラーの`model`が`"FEIV"`。推定量によらない）。FEと共有するもの: `LazyFixedEffects`・`fe_result_fields`・`fixed_effects_dict`・`resolve_fe_cov_type`（`CovColumns`）。
+- `fit.rs`: `FeTwoSlsEstimator`・`FeGmmEstimator`の推定（`estimator`で振り分ける）と、診断の再計算用の`estimate_two_sls`・`compute_c_statistic`。`fit`は`#[cfg(test)]`から呼べないので、
+  `tests/panel/test_fe_iv_binding.py`・`test_fe_iv_gmm_binding.py`が`_lib.fit_fe_iv`を直接呼び、数値を照合する。
+- `result.rs`: `FEIVResult`（FEの項目に、IVの命名の`wald_*`（2SLSは`f`、GMMは`chi2`）・`weak_instrument_f_*`・`overid_*`（2SLSはSargan、GMMはHansen J）・`wu_hausman_*`・`estimator`・`gmm_type`・`gmm_weight_type`（`one_step`と2SLSは`None`）・`n_iter`・`converged`を足したもの）。
+  `log_likelihood`・AIC/BICは出さない。`first_stage()`は`dict[str, FEResult]`（`LazyFixedEffects::Computed`を持つ）。**推定量が持たないものは、プロパティが`None`（`weak_instrument_f_*`・`wu_hausman_*`）、メソッドが
+  `METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`**（`require_estimator`。`first_stage()`・`fixed_effects()`・`cragg_donald()`・`kleibergen_paap()`・`effective_f()`は2SLSだけ、`c_stat()`はGMMだけ）。
+  GMMに足すには、engineの追加（GMMの係数での固定効果の復元、第一段階の共有）が要る。
+- **診断・`fixed_effects()`・`c_stat()`は呼び出し時に再計算**: `fit()`に渡した`DataFrame`（`source_data`）・`FEIVOptions`・列名を結果が保持し、`with_estimator`が`fit()`と同じ`build_fe_iv_input`から`FeTwoSlsEstimator`を作り直して呼ぶ
+  （IVの`Rebuilt`と同じ。1回呼ぶごとに推定が1回走る）。診断の出力型はIVの`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`・`CStatisticOutput`を使い回す（`from_engine`で作る）。
+  `c_stat`の引数の検査・名前→位置は`iv::common::resolve_c_stat_target`（IVの`c_stat`と共有。型 → 空・重複 → 名前の順）。重みは`fit()`の重み（`one_step`は`Classical`）で、`Classical`のときだけ`S`の分母が`n − neffects`
+  （engineの`fe_gmm_c_statistic`の規則）。
+- **検証**: 入力・オプションの検証は`test_fe_iv_validation.py`・`test_fe_iv_gmm_validation.py`、オプションの判定表は`option_values.rs`の`mod tests`。GMMの数値は固定効果をダミーへの回帰の残差で除いたnumpy実装と照合する
+  （`test_fe_iv_gmm_binding.py`。FE-2SLSへの還元も確かめる）。`cluster`・`dk`のSEの数値はengineの単体テスト（手計算）が担い、バインディングでは配線（`cluster`の共用・既定）だけを見る。
+  横断テストへの登録は`tests/cross_method/test_pickle.py`の`SAMPLES`（`FEIVOptions`・`FEIVResult`）。
 
 ## 踏んだ罠: `engine`側で`PanelError`に新バリアントを追加するとき
 

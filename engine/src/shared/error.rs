@@ -217,9 +217,10 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     InvalidHacLags { hac_lags: i64, n: usize },
 
-    /// `matrix`が数値的にほぼ特異で、推定量や共分散の計算を続けられない（条件数が倍精度の限界を
-    /// 超える。傾き係数がほぼ共線な場合、Gram行列の列のスケール差が倍精度の限界を超える場合、
-    /// 残差が0の完全な当てはまり等）。
+    /// `matrix`が数値的にほぼ特異で、推定量や共分散の計算を続けられない（設計行列の列を単位長に
+    /// 揃えた条件数が上限を超える場合（`DESIGN_GRAM`。列の単位を変えても合否は動かない）、共分散や
+    /// ヘッセ行列の条件数が倍精度の限界を超える場合等）。`hint`は同じ`code`で一つなので、共線な
+    /// 回帰変数を除く対処とスケールを揃える対処の両方を挙げる。
     #[error("{}", self.catalog_message())]
     NearSingularMatrix { matrix: MatrixKind },
 

@@ -19,10 +19,7 @@ from _tolerances_common import (
 # 条件数（約3e7、`expersq`のスケール由来）で増幅される。GMMは、共分散`V`を作って反転する
 # 従来の経路のまま（直交座標のQRを持たない）。Wald/Fの実測最大の相対差は、本実装と各参照の間で
 # 8.3e-9（linearmodels）、1.1e-8（momentfit）なので、約3倍のマージンで5e-8とする。
-# 2SLSは直交座標の経路（`V = R⁻¹M̃R⁻ᵀ`）に移り、同じ比較の相対差が8.5e-10（linearmodels）、
-# 6.8e-11（R ivreg）になったため、特例を外し、基本の許容誤差（相対1e-8）で比べる。
-# 60桁の10進演算で独立に計算した真値400.04600630に対する相対誤差は、R ivregが6.7e-11、
-# linearmodelsが8.5e-10。
+# 2SLSは直交座標の経路（`V = R⁻¹M̃R⁻ᵀ`）に移ったため、この特例を使わず基本の許容誤差で比べる。
 RTOL_WALD_CARD_CLUSTER_GMM = 5e-8
 
 IV_TOLERANCES: dict[str, dict[str, float]] = {

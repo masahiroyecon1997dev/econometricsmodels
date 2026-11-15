@@ -19,7 +19,7 @@
 //!
 //! - **分散成分**（`swamy_arora_variance_components`、`re-spec.md`3.1節）: σ_ε²は内部FE推定
 //!   （`FeEstimator`、1-wayはentity、2-wayはentity+time）のwithin回帰残差を再利用し、σ_u²は
-//!   between回帰（`between_ssr_and_df`。エンティティ平均への`least_squares`で、残差平方和と
+//!   between回帰（`between_ssr_and_df`。エンティティ平均へのQRによる最小二乗で、残差平方和と
 //!   自由度だけを使い、`OlsEstimator`は経由しない）から求める。
 //!   分母（自由度）は`re-spec.md`3.1節の式を手で組み立てず、委譲先が実際に使った`df_resid`相当の値
 //!   （`FeEstimator::df_resid()`・`OlsInput::nobs()-k()`）をそのまま再利用する。`re-spec.md`3.1節の式は

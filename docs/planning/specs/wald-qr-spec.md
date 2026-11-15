@@ -111,4 +111,41 @@ REの最終回帰と、Hausmanのcluster・DK経路は、`fit_auxiliary`（QR 1�
 5. #658の受け入れ条件の確認と、別Issueの起票（ユーザーの承認後。英語）: (a) IV GMM・FE-GMM・Tobitの直交座標の経路（設計行列のQRを持たず、breadが`Z'X`側・Hessian側なので別設計）、(b) #535（IV `card`のcluster共分散の精度）への影響の確認。IV 2SLSのcluster共分散は`V = R⁻¹M̃R⁻ᵀ`になったので、`RTOL_WALD_CARD_CLUSTER`（`tests/support/_tolerances_iv.py`、現状`5e-8`。`tests/iv/test_iv_reference.py`の`card`のcluster照合が使う）を測り直し、`1e-8`へ戻せるかを#535に報告する。
 6. 完了したら、本ノートの内容を`docs/spec/`の該当手法の仕様書（`ols-spec.md`・`fe-spec.md`・`re-spec.md`・`iv-spec.md`）へ、経緯を削って理由だけにして集約し、本ノートを削除する（CLAUDE.md 13章）。
 
+## 9. 段階6の計画（最終確認レビューの指摘への対応。2026-11-15、未着手）
+
+状態: ブランチ`feat/wald-qr-statistic`のHEADは`a1a87dbe`（段階5c）。`cargo test -p engine` 1567件・`pytest tests --check-error-coverage` 14899件・fmt・clippy・ruff通過。最終確認レビュー（`rust-reviewer`・`testing-completeness-reviewer`）の結果は**must fixなし**。以下はshould fix・nice to haveで、ユーザーが方針を承認済み（速度の記述は(a)）。コミットは6a・6b・6cの3つに分け、各段階の終わりでコミットして止まる（署名の確認がホストの端末に出ると事前に伝える。署名に失敗したら報告して止まり、リトライはユーザーの指示後）。
+
+### 6a（実装・検証済み、コミット待ち。2026-11-15）: 文書・エラーカタログ・古い記述（公開ページは英語。`docs/spec/`・`.claude/`・`CLAUDE.md`への参照を入れない）
+
+1. **公開ページの記述が実測・テストの裏付けを超えている箇所の訂正**（`docs/guide/validation.md`の「Near-singular matrices」行（302行付近）と92行付近、`CHANGELOG.md`、`docs/guide/verification.md`・`verification-details.md`）:
+   - 「IV GMM・FE-IV GMM・Tobitはロバスト共分散だとclassicalより弱い依存で止まる」は誤り。GMMは`cov_type`に依らず、条件数が約2e5で止まる（IV-GMMのスイープ: classical・hc1・clusterで同じepsで止まる）。Tobitは未確認なので触れない。
+   - 「`1 - 5e-15`を全`cov_type`でテスト済み」「厳密値と1e-8より良く一致」→「約1e-8」（実測はWald 2.6e-9・係数5.8e-9・標準誤差2.4e-9、許容誤差は3e-8・6e-8・3e-8）。REのテストは`eps ≤ 1e-6`まで、hac・dkは再パラメータ化のオラクルのみ（OLS・IV・FE・FE-IV）であることを正確に書く。
+   - 「`1e-12`から`1e12`の間でテスト」→「`1e±6`と`1e±12`でテスト（共線な対を同じ倍率で）」。
+   - REの別名窓: 「約3e-7以下」→「約4e-8〜3e-7（それ未満は条件数のガードで止まる）」。「設計行列」→FE・REでは「within/準偏差化した後の設計行列」（REの境界は他の手法より少し外側: seed 7のデータでOLS 3.72e-8・RE 4.51e-8）。
+   - `card`×clusterのWald p値は約1.8e-9で絶対許容誤差のフロア1e-8より小さく、実質検査されていない（ivregとの相対差1.5e-8）。`verification.md`の2SLS行の「Waldとそのp値は8.5e-10」は統計量だけの値。p値はフロア未満であることを書くか、相対誤差だけで比べる（Sargan・Wu-Hausmanのp値と同じ扱い。許容誤差は約5e-8が要る）。
+   - **速度の記述は(a)**: OLS（15〜35%）とIV（20〜25%）だけ数値を残し、FE・FE-IVは「同等かやや速い」（測定のばらつき約±15%の内側の数値は主張しない。性能の数値の正はCIの計測値、CLAUDE.md 13章）。ピークメモリ「OLSの100万行で最大約14%増」は実測（13.6%）どおり。
+   - `verification.md`に、厳密値（有理数）・再パラメータ化の検証を短く足す（許容誤差3e-8・6e-8・1e-7。手法×リファレンスの表の外）。
+   - 「`1e12`を超えると`DESIGN_MATRIX_SINGULAR`になることがある」は維持する（`rust-reviewer`は1e15付近のはずと指摘したが、実測はeps=1e-12・条件数約1e12で約30%のケースで`DESIGN_MATRIX_SINGULAR`）。
+2. **エラーカタログの助言の書き分け**（実施: 「同じ`code`は常に同じ`hint`」の規則（error-style-guide 6章）があるため、`code`は分けず、助言を「ほぼ共線な回帰変数を除く・まとめる、またはスケールを揃える」の1文にした。`DESIGN_GRAM`専用の助言が要るなら`code`を分ける設計判断になるので別途確認する）: `MATRIX_NEAR_SINGULAR`の助言（`engine/src/shared/error_catalog_golden.txt:38`、`error.rs:221`の`NearSingularMatrix`のdoc）は「スケールを揃えるか、ほぼ共線な回帰変数を除く」だが、`DESIGN_GRAM`のガードは列の単位を変えても合否が動かない。`DESIGN_GRAM`のときは「単位を変えても解消しない。ほぼ共線な回帰変数を除く・まとめる」と書き分ける。`tools/render_error_catalog.py`で`docs/guide/error-codes.md`を再生成し、`docs/spec/error-style-guide.md`・`error-handling.md`の手順に従う。
+3. **古い記述（`least_squares`・列ピボットQR・`X'X`のCholesky前提）の更新**: `engine/src/panel/re/variance.rs:105-106,222-223`、`panel/re.rs:22`、`panel/common.rs:43`、`panel/common/transform.rs:22`、`shared/covariance.rs:20`、`iv/two_sls/sargan.rs:31`、`shared/orthonormal.rs`のモジュールdoc（18-19行。`new`の呼び出し側が先に通すのは`OlsEstimator`経由の`new_checked`）、`docs/spec/ols-spec.md`（90-92行付近。「他の推定量は`X`の列ピボットQRで求める従来の形」は誤りで、2SLS・FE・RE・FE-IVも`new_checked`。GMM・Logit・Probit・Tobitだけが従来の形）。`tests/support/_tolerances_iv.py`の`RTOL_WALD_CARD_CLUSTER_GMM`のコメントに残る2SLSの数値（6.7e-11・8.5e-10）を除く。`shared/least_squares.rs`のファイル名と実態（残差平方和とテスト専用の参照実装）の不一致は、必要ならリネームを提案する（nice to have）。
+
+### 6b: テスト（`tests/cross_method/`）
+
+4. **REのeps=1e-7（別名窓の中）の検査**: 今は`hausman_df`のみ。`res.theta`が公開されている（`python_package/econometricsmodels/panel/re.py:395`）ので、`θ`を有理数にして準偏差化し、`exact_inference`で最終回帰のF・係数・標準誤差を照合する。最低限、6つの`cov_type`が`eps = 1e-7`・`6e-8`でも有限の統計量を返すスモークテスト。
+5. **操作変数側の近共線**（IV・FE-IV）: `z1≈z2`・`z3≈a`で、第一段階の`DESIGN_GRAM`（`stage=FIRST_STAGE`）と、`1e-13`での`DESIGN_MATRIX_SINGULAR`。第二段階の`X̂`のガード（`SecondStageFailed`）が`PERFECT_FIT`より先に出る構成には`d`にノイズが要る。
+6. **境界テストの整理**（`test_collinearity_boundary.py`）: RE・FEは設計行列そのものでなくwithin/準偏差化後で判定されるので、境界がずれる（RE 4.51e-8。`_NEAR_INSIDE = 5e-8`の余裕がREだけ約11%、他は約35%。docstringの「全手法で1.2〜1.8倍」はREに当てはまらない）。共線な対の片方だけを1e±6・1e±12倍するケース、単位を変えても統計量が変わらないこと、WLSのhacの再パラメータ化を足す。再パラメータ化のオラクルのdocstring「丸めを増やさない」はOLS・IVだけに当てはまる（FE・RE・FE-IVは個体平均の丸めで約1e-9の摂動。許容誤差1e-7は妥当）。
+7. **`g = q+1`のクラスターのテストの置き換え**（`tests/cross_method/test_unit_invariance.py:148`・`engine/src/linear/ols/cov_params/tests/cluster.rs:251`）: 現状のデータは共分散の厳密な行列式が+7e-16で厳密には特異でなく、合否が丸め誤差で決まる（他OSで保証されない）。レビューが検証した置き換え: **OLSの残差が4クラスターのうち厳密に2つにしか乗らない設計**（`g=4 > q=3`で事前検証は通る）。`x1, x2, x3`を乱数で作り、クラスター0・1の行に制限した`X'`の零空間の2本の基底ベクトルを取り、`y = Xβ + r`とする。すると`M̃`のランクが高々1で、残りの固有値は約1e-32（閾値より10桁以上小さい）。Pythonのseed 0〜7の8件すべてで`MATRIX_NEAR_SINGULAR`（`matrix=COEFFICIENT_COVARIANCE`）が出た。Rust側は整数データと整数の`r`で`y`をf64で厳密にする。これでPythonから再現できる唯一の`COEFFICIENT_COVARIANCE`の経路が堅牢に残る（`tests/support/_errors.py`のコメント・`validation.md`が主張している）。段階単位の`overall_f_test`の単体テストは残す。
+
+### 6c: Rustの細部（nice to have）
+
+8. `decompose`で`R`の全要素が有限という判定を足す（NaN列の扱いが「faerの列ピボットQRがNaNの対角にNaNを残す」ことに依存しないように。k²で安価）。`equilibrate_columns`の`norm`を`(r/largest)/sqrt(sum)`の形に（`largest`が`f64::MAX`近傍でのオーバーフロー回避）。`condition_number`の`singular_values[0]`・`[len-1]`を`first()`/`last()`で`INFINITY`に落とす形に。`shared/orthonormal.rs`のテスト間の空行（434-435行付近）。
+9. IV 2SLSで`x_structural`の作成を`new_checked`の後に移す（`iv/two_sls/fit.rs:73-80`。FE-IVと同じ方針で、`new_checked`中のピークをn×k分減らす）。
+10. 大きなn（1e4〜1e5）の完全共線（重複列・ダミー変数トラップ）が`Columns`になるテスト。ランク判定の閾値は等化した`R`に対する絶対`k·ε`で、Householder QRの丸めで完全重複列の`R_jj`が閾値を超えると`DESIGN_GRAM`になり、列名つきの`DESIGN_MATRIX_SINGULAR`にならない可能性がある（旧`checked_col_piv_qr(X)`も同じ式で退行ではない可能性が高いが、数値は未確認。先に実測し、`DESIGN_GRAM`になるなら、挙動を決める必要があるのでユーザーに確認する）。
+
+### 手順
+
+各段階: 実装 → `cargo fmt`・`cargo clippy --all-targets -- -D warnings`・`cargo test -p engine`・`ruff check/format --check tests`・`uv run --no-sync maturin develop`（debugビルドに反映）・`pytest tests --check-error-coverage`（約8分。xdistは入っていないので`-n`は使わない）→ ユーザーに結果を報告し、署名付きコミット。公開ページを変えたら`tests/cross_method/test_public_docs.py`・`test_doc_examples.py`・`test_docstring_examples.py`を通す。6aの後は`/review-docs`（公開ドキュメントの校閲）を、ユーザーの意向を確認してから検討する（変更しただけでは自動実行しない。CLAUDE.md 13章）。
+
+段階6のあと、8章の手順（`release/v0.10.0`への取り込み、後片付け、#658・#535・別Issue、`docs/spec/`への集約）に進む。
+
 守ること（CLAUDE.md）: コード・仕様書・`CLAUDE.md`のコメントにIssue番号・`docs/planning/specs/`への参照を書かない（6章）。判断が分かれる点は独自判断で埋めずにユーザーへ確認する（14章）。メインの作業ツリーの並行作業には触れない（`git worktree`で作業する）。

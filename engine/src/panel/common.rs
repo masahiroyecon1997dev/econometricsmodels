@@ -40,7 +40,7 @@
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
 //!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
 //! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）の
-//!   between回帰（`between_ssr_and_df`。エンティティ平均への`least_squares`）が
+//!   between回帰（`between_ssr_and_df`。エンティティ平均へのQRによる最小二乗）が
 //!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
 //!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
 //!   別バリアントにする（`FTestFailed`と同じ判断）。

@@ -1600,7 +1600,7 @@ pub static CATALOG: &[ErrorSpec] = &[
         }],
         message: r#"A matrix needed to compute the estimates or their covariance is numerically singular."#,
         hint: Some(
-            r#"Rescale the variables so that they are on similar scales, or remove nearly collinear regressors."#,
+            r#"Remove or combine nearly collinear regressors, or rescale the variables so that they are on similar scales."#,
         ),
         stage_allowed: true,
     },

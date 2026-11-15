@@ -103,7 +103,7 @@ pub(super) struct VarianceComponents {
 ///   内部FEに渡さない（`time_varying_regressor_indices`。REは時間不変の列を許容する、
 ///   `re-spec.md`5章。`plm`が定数列を除いてwithin回帰の自由度を数えるのと同じ）。
 /// - **σ_u²（individual variance）**: between回帰（`between_ssr_and_df`。エンティティ平均への
-///   `least_squares`。REは切片を持つためFEと異なりbetween回帰にも切片が要る）のSSRと、
+///   `OrthonormalDesign`のQRによる最小二乗。REは切片を持つためFEと異なりbetween回帰にも切片が要る）のSSRと、
 ///   その自由度（エンティティ数 - 切片込みの列数）から、
 ///   調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式
 ///   `max(0, ssr/df_resid - σ_ε²/t_bar)`で求める。
@@ -220,7 +220,7 @@ fn two_way_variance_components(
 /// # Errors
 /// 単位数が`K_b + 1`以下なら`PanelError::BetweenRegressionFailed`（`kind`が個体平均・時点平均の
 /// どちらの回帰かを持つ）。別名の列を落とした後の設計行列が特異になることは通常無い（相対`1e-7`で落とすので、
-/// `least_squares`の判定（約`1e-15`）より厳しい）が、非有限値などで失敗したときも同じバリアントで返す。
+/// `OrthonormalDesign::new_checked`のランク判定（等化した`R`に対する相対`k·ε`）より手前で落とす）が、非有限値などで失敗したときも同じバリアントで返す。
 fn between_ssr_and_df(
     means: &EntityMeans,
     x_scales: &[f64],

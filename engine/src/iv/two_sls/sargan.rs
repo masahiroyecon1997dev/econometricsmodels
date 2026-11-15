@@ -28,7 +28,7 @@ pub(super) struct SarganTest {
 /// ここで決めて渡す。`Z = [x_exog, instruments]`は`OlsInput::from_columns`を経由せず行列代数
 /// （`Z'Z`等）で使うため、定数項の扱いは通常の回帰変数と同じで良く、定数項込みの
 /// `x_exog`をそのまま使う。`Z'Z`は第一段階回帰（同じ列を設計行列とする`OlsEstimator::fit`）が
-/// `col_piv_qr`で既にfull column rankを検証済みのため、ここでの特異性は理論上到達不能
+/// `OrthonormalDesign::new_checked`で既にfull column rankを検証済みのため、ここでの特異性は理論上到達不能
 /// （`xtx_inverse`と同じ防御的`Result`化）。
 pub(super) fn sargan_test(
     input: &IvInput,

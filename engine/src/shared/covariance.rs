@@ -17,7 +17,7 @@ use crate::shared::linear_algebra::RankDeficient;
 
 /// `(X'X)⁻¹`を求める。classical・HC0-3・HAC・クラスターのいずれの標準誤差でも必要になる。
 ///
-/// `X'X`は対称正定値であることが`checked_col_piv_qr`（Xの特異性検出）で既に保証されている
+/// `X'X`は対称正定値であることが呼び出し側の特異性検出（`checked_col_piv_qr`・`OrthonormalDesign::new_checked`）で既に保証されている
 /// ため、Cholesky分解（`Llt`）で逆行列を求める。理論上ここで`LltError`は発生しないはずだが、
 /// 浮動小数点演算の丸めにより境界的なケースで失敗しうるため、`RankDeficient`として扱う
 /// （各系統が自系統のエラーへ`map_err`で変換する）。

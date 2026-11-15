@@ -19,7 +19,7 @@ use crate::shared::group_codes::GroupCodes;
 /// - **RE（準偏差変換）**: `θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`（同3.2節）を渡す。
 ///
 /// FE/REの`fit()`は`y`と`x`の各列にこの関数をループ適用し、変換後の列を最小二乗
-/// （FEは`least_squares`、REは`OlsEstimator::fit_auxiliary`）へ渡す
+/// （FEは`OrthonormalDesign`のQRによる最小二乗、REは`OlsEstimator::fit_auxiliary`）へ渡す
 /// （`panel-common.md`4.3節・`re-spec.md`3.2節）。列ごとに独立な変換のため、
 /// 列単位の関数として実装し
 /// 呼び出し側でループする（`y`/`x`をまとめて受けるより単体テストが単純）。

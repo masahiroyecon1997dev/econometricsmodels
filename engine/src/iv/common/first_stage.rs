@@ -105,9 +105,10 @@ pub fn compute_first_stage(
 ///
 /// 制限モデルの設計行列は`input.x_exog()`（定数項込み）で、`x_exog=[]`かつ定数項なしなら
 /// 回帰変数が0個になる。この退化ケースは共有関数が「残差が`y`そのもの」として扱う。
-/// 制限モデルの設計行列は制限なしモデル（`OlsEstimator::fit`が`col_piv_qr`で既にfull column
-/// rankを検証済み）の列の真部分集合のため、フルランクで、共有関数の`Internal`エラーは
-/// 理論上到達不能（`xtx_inverse`と同じ防御的`Result`化）。万一到達したときは、従来どおり
+/// 制限モデルの設計行列は制限なしモデル（`OlsEstimator::fit`が`new_checked`で、ランクと
+/// 列を揃えた条件数を既に検証済み）の列の真部分集合のため、フルランクで、列を揃えた条件数も
+/// 制限なしモデル以下（特異値の交差定理）。共有関数の`Internal`エラーは理論上到達不能
+/// （`xtx_inverse`と同じ防御的`Result`化）。万一到達したときは、従来どおり
 /// 内生変数名つきの`FirstStageFailed`にする。
 fn partial_f_statistic(
     input: &IvInput,

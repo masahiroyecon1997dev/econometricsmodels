@@ -14,7 +14,8 @@ use super::weak_instruments::first_stage_partial_f;
 use super::wu_hausman::{WuHausmanContext, fe_wu_hausman_test};
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
-    PanelCov, PanelCovInput, PanelDimension, PanelError, PanelStructure, panel_cov_params,
+    PanelCov, PanelCovInput, PanelDimension, PanelError, PanelStructure, overall_f_test,
+    panel_cov_params,
 };
 use crate::panel::fe::{
     AbsorbedEffects, FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, WithinOutput,
@@ -24,7 +25,6 @@ use crate::shared::error::CommonError;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::instrumental_variables::two_sls_point_estimate;
 use crate::shared::orthonormal::OrthonormalDesign;
-use crate::shared::wald::wald_f_test;
 
 /// 列の位置で選んだ列の吸収した効果（`absorbed[列][次元][水準]`から、`y`の列と`x`の列を取り出す）。
 fn pick_absorbed(
@@ -244,13 +244,7 @@ pub(super) fn fit_fe_two_sls(
 
     let f_test = match &wald {
         None => None,
-        Some((coordinates, meat)) => Some(
-            wald_f_test(coordinates, meat, 0, k, df_inference).map_err(|source| {
-                PanelError::FTestFailed {
-                    source: source.into(),
-                }
-            })?,
-        ),
+        Some((coordinates, meat)) => Some(overall_f_test(coordinates, meat, k, df_inference)?),
     };
 
     // 構造式の共分散・F検定が計算できた後に、補助回帰を回す（構造式のエラーを先に返す）。

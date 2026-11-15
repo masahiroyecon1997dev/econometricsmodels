@@ -6,6 +6,7 @@ use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, WithinOutput}
 use crate::shared::error::{CommonError, ErrorInfo};
 use crate::shared::error_catalog::Stage;
 use crate::shared::instrumental_variables::wu_hausman_columns;
+use crate::shared::orthonormal::WaldCoordinates;
 use crate::shared::wald::wald_f_test;
 
 use crate::panel::fe_iv::common::{FeIvInput, abs_max};
@@ -53,6 +54,32 @@ fn is_expected_failure(err: &PanelError) -> bool {
                 )
         ),
         _ => false,
+    }
+}
+
+/// 補助回帰の直交座標（`b̃`・`M̃`）で、末尾`k_endog`列（`v̂`の係数）がゼロという仮説をWald検定する。
+/// `v̂`の部分行列が数値的に特異なときは、診断だけの問題として`None`（`fit`全体は失敗させない）。
+/// 切り出してあるのは、この契約を手組みの特異な`M̃`で決定的にテストするため。
+fn wu_hausman_wald(
+    wald: &WaldCoordinates,
+    k_exog: usize,
+    k_endog: usize,
+    df_inference: usize,
+) -> Result<Option<FeWuHausmanTest>, PanelError> {
+    match wald_f_test(
+        &wald.coordinates,
+        &wald.meat,
+        k_exog + k_endog,
+        k_endog,
+        df_inference,
+    ) {
+        Ok((statistic, p_value)) => Ok(Some(FeWuHausmanTest {
+            statistic,
+            p_value,
+            df: (k_endog, df_inference),
+        })),
+        Err(CommonError::NearSingularMatrix { .. }) => Ok(None),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -176,21 +203,7 @@ pub(super) fn fe_wu_hausman_test(
                 "the auxiliary regression of the Wu-Hausman test has no coordinates".to_string(),
             ))
         })?;
-        match wald_f_test(
-            &wald.coordinates,
-            &wald.meat,
-            k_exog + k_endog,
-            k_endog,
-            df_inference,
-        ) {
-            Ok((statistic, p_value)) => Ok(Some(FeWuHausmanTest {
-                statistic,
-                p_value,
-                df: (k_endog, df_inference),
-            })),
-            Err(CommonError::NearSingularMatrix { .. }) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+        wu_hausman_wald(wald, k_exog, k_endog, df_inference)
     })();
 
     match outcome {
@@ -201,5 +214,35 @@ pub(super) fn fe_wu_hausman_test(
             Err(err.in_stage(Stage::WuHausmanRegression))
         }
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use faer::Mat;
+
+    use super::*;
+
+    /// 外生変数1個・内生変数1個の補助回帰（係数は`x̃_exog`・`x̃_endog`・`v̂`の3個）の直交座標。
+    fn coordinates(meat: Mat<f64>) -> WaldCoordinates {
+        WaldCoordinates {
+            coordinates: Mat::from_fn(3, 1, |i, _| 1.0 + i as f64),
+            meat,
+        }
+    }
+
+    #[test]
+    fn a_singular_covariance_gives_none_instead_of_failing() {
+        let wald = coordinates(Mat::<f64>::zeros(3, 3));
+        assert_eq!(wu_hausman_wald(&wald, 1, 1, 10).unwrap(), None);
+    }
+
+    #[test]
+    fn an_identity_covariance_gives_the_statistic_of_the_last_coefficient() {
+        // 末尾1個の係数（`b̃ = 3`、`M̃ = 1`）の`W = 9`、`F = 9`、自由度`(1, 10)`。
+        let wald = coordinates(Mat::<f64>::identity(3, 3));
+        let test = wu_hausman_wald(&wald, 1, 1, 10).unwrap().unwrap();
+        assert!((test.statistic - 9.0).abs() < 1e-12);
+        assert_eq!(test.df, (1, 10));
     }
 }

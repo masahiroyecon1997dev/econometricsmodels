@@ -17,7 +17,7 @@ use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     ColumnRole, PanelCov, PanelCovInput, PanelError, PanelStructure, absorbed_parameters,
-    panel_cov_params,
+    overall_f_test, panel_cov_params,
 };
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
@@ -25,7 +25,6 @@ use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::{column_is_zero_variance_with_noise, has_no_variation};
-use crate::shared::wald::wald_f_test;
 
 /// 固定効果が吸収する次元を返す（[`FeEffects::levels`]）。`FeEstimator::fit`が最初に呼ぶ。
 fn absorbed_levels(effects: FeEffects, input: &FeInput) -> Result<Vec<&GroupCodes>, PanelError> {
@@ -274,13 +273,12 @@ pub(in crate::panel) fn fit_fe_from_within(
     // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
     // `OlsInput::from_columns`呼び出しと同じ理由）。
     let f_test = match &wald {
-        Some(wald) if tests_overall_f => Some(
-            wald_f_test(&wald.coordinates, &wald.meat, 0, k, df_inference).map_err(|source| {
-                PanelError::FTestFailed {
-                    source: source.into(),
-                }
-            })?,
-        ),
+        Some(wald) if tests_overall_f => Some(overall_f_test(
+            &wald.coordinates,
+            &wald.meat,
+            k,
+            df_inference,
+        )?),
         // 説明変数が無いモデル、またはF検定をしない呼び出し。検定対象が存在しないため
         // `OlsEstimator::fit`同様定義なし（`None`）。
         _ => None,

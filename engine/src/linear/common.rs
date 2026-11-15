@@ -116,9 +116,9 @@ impl DiagnosticTest {
 
 impl LeastSquaresError {
     /// 設計行列`x`のランク落ちをエラーにする。列の完全な共線性は`SingularMatrix`（`names`は
-    /// `x`の列名で、共線な列を[`collinear_columns`]で求めて名前に直す）、`X'X`の分解の失敗
-    /// （列のスケール差が極端）は共線性ではなく数値的なほぼ特異性なので`NearSingularMatrix`に
-    /// する。
+    /// `x`の列名で、共線な列を[`collinear_columns`]で求めて名前に直す）、列を単位ノルムに揃えた
+    /// 条件数が上限を超えた（または`X'X`の分解が失敗した）場合は、共線性ではなく数値的なほぼ
+    /// 特異性なので`NearSingularMatrix`にする。
     #[must_use]
     pub fn from_rank_deficient(err: RankDeficient, x: &Mat<f64>, names: &[String]) -> Self {
         match err {

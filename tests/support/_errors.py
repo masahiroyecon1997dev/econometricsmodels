@@ -130,6 +130,10 @@ MIGRATED_CODES: frozenset[str] = frozenset(
 # `COEFFICIENT_COVARIANCE`と`DESIGN_GRAM`（列を揃えた条件数が上限を超える設計。
 # `tests/cross_method/test_collinearity_boundary.py`）。`HESSIAN`・`OPG`・`GMM_WEIGHT`は、
 # 前段の検査や分解が先に失敗するため、極端なスケール差のデータでも構成できていない。
+# 共分散が実際に特異なときの契約（FEの`FTestFailed`・REの`HausmanTestFailed`・FE-IVの
+# Wu-Hausmanが`None`）は、特異性の判定が丸め誤差の大きさで決まり、データから堅牢に構成できない
+# ため、手組みの特異な`M̃`でRustの単体テストが固定する（`panel/common/overall_wald.rs`・
+# `panel/fe_iv/wu_hausman.rs`・`panel/re/hausman/tests/undefined.rs`）。
 UNREACHABLE_CODES: dict[str, str] = {
     ErrorCode.BREUSCH_GODFREY_MATRIX_TOO_LARGE: (
         "補助回帰の行列を確保できない大きさのときだけ。`n <= k_aux`の検査が先に"

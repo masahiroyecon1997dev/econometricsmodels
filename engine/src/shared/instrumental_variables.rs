@@ -41,6 +41,12 @@ pub(crate) fn two_sls_point_estimate(
     x: &Mat<f64>,
     y: &Mat<f64>,
 ) -> TwoSlsPointEstimate {
+    debug_assert_eq!(
+        design.q().nrows(),
+        x.nrows(),
+        "design and x must have the same rows"
+    );
+    debug_assert_eq!(x.nrows(), y.nrows(), "x and y must have the same rows");
     let coordinates = design.coordinates(y);
     let params = design.coefficients(&coordinates);
     let residuals = y - x * &params;

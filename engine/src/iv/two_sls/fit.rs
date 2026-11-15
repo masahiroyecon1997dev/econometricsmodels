@@ -89,6 +89,7 @@ pub(super) fn fit_two_sls(
             *fitted_columns[j - k_exog].get(i, 0)
         }
     });
+    drop(fitted_columns);
     let k = x_hat.ncols();
     let mut param_names: Vec<String> = input.x_exog_names().to_vec();
     param_names.extend(input.x_endog_names().iter().cloned());
@@ -100,12 +101,15 @@ pub(super) fn fit_two_sls(
         OrthonormalDesign::new_checked(&x_hat).map_err(|err| IvError::SecondStageFailed {
             source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
         })?;
+    // `Q`ができたので、`X̂`は共分散の計算の間も持たない（`X`も点推定の後は使わない）。
+    drop(x_hat);
     let TwoSlsPointEstimate {
         params: beta,
         residuals,
         ssr,
         coordinates,
     } = two_sls_point_estimate(&design, &x_structural, input.y());
+    drop(x_structural);
 
     let df_resid = n - k;
 

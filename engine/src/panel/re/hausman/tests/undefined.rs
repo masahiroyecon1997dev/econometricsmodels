@@ -10,6 +10,7 @@ use crate::panel::fe::FeInput;
 use crate::panel::re::ReEffects;
 use crate::panel::re::ReEstimator;
 use crate::panel::re::ReInput;
+use crate::panel::re::hausman::hausman_wald_f;
 use crate::panel::re::hausman::hausman_within_column_is_aliased;
 use crate::panel::re::hausman::re_hausman_test;
 use crate::panel::re::input::ReCovType;
@@ -234,4 +235,25 @@ fn re_estimator_fit_returns_error_when_dk_periods_do_not_cover_hausman_slopes() 
         PanelError::InsufficientDkPeriodsForInference { t_periods: 2, q: 2 }
             .in_stage(Stage::OverallFTest)
     );
+}
+
+#[test]
+fn hausman_wald_f_fails_with_hausman_test_failed_when_the_covariance_is_singular() {
+    // 共分散が特異で検定できないとき、Wu-Hausmanのように`None`にせず`HausmanTestFailed`にする
+    // （手組みの零行列の`M̃`で、閾値の丸めに依らず決定的に特異）。
+    let coordinates = faer::Mat::from_fn(3, 1, |i, _| 1.0 + i as f64);
+    let meat = faer::Mat::<f64>::zeros(3, 3);
+    assert!(matches!(
+        hausman_wald_f(&coordinates, &meat, 3, 2, 10),
+        Err(PanelError::HausmanTestFailed { .. })
+    ));
+}
+
+#[test]
+fn hausman_wald_f_returns_the_f_statistic_of_the_last_coefficients() {
+    // 末尾2個の係数（`b̃ = (2, 3)`、`M̃ = I`）の`W = 13`、`F = W / 2`。
+    let coordinates = faer::Mat::from_fn(3, 1, |i, _| 1.0 + i as f64);
+    let meat = faer::Mat::<f64>::identity(3, 3);
+    let f_statistic = hausman_wald_f(&coordinates, &meat, 3, 2, 10).unwrap();
+    assert!((f_statistic - 6.5).abs() < 1e-12);
 }

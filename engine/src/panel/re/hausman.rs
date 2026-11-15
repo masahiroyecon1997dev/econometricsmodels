@@ -2,6 +2,7 @@
 //!
 //! テストは`hausman/tests.rs`と`hausman/tests/`にテーマ別で置く。
 
+use faer::Mat;
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::input::ReCovType;
@@ -42,6 +43,22 @@ fn hausman_aux_wald_f(
 ) -> Result<f64, LeastSquaresError> {
     let aux = OlsEstimator::fit_auxiliary(aux_input, cov_type, confidence_level)?;
     Ok(aux.wald_test_last_columns(k)?.0)
+}
+
+/// 補助回帰の直交座標（`b̃`・`M̃`）で、末尾`k`列（`X̃`の係数）が同時にゼロというWald検定のF統計量を
+/// 返す。`M̃`が数値的に特異などで検定できないときは`HausmanTestFailed`（`fit()`全体を失敗させる。
+/// Wu-Hausmanと違い、REのHausmanは検定そのものがREの診断の中心のため`None`にしない）。
+/// 切り出してあるのは、この契約を手組みの特異な`M̃`で決定的にテストするため。
+fn hausman_wald_f(
+    coordinates: &Mat<f64>,
+    meat: &Mat<f64>,
+    k_aux: usize,
+    k: usize,
+    df_inference: usize,
+) -> Result<f64, PanelError> {
+    wald_f_test(coordinates, meat, k_aux - k, k, df_inference)
+        .map(|(f_statistic, _)| f_statistic)
+        .map_err(|e| PanelError::HausmanTestFailed { source: e.into() })
 }
 
 /// ハウスマン検定（`re-spec.md`3.7節、`re.rs`のモジュールdoc「ハウスマン検定」参照）。
@@ -204,9 +221,7 @@ pub(super) fn re_hausman_test(
                 cluster_codes,
                 k_aux,
             );
-            wald_f_test(&coordinates, &meat, k_aux - k, k, g - 1)
-                .map_err(|e| to_err(e.into()))?
-                .0
+            hausman_wald_f(&coordinates, &meat, k_aux, k, g - 1)?
         }
         ReCovType::Dk { bandwidth, time } => {
             let aux = OlsEstimator::fit_auxiliary(aux_input, CovType::Classical, confidence_level)
@@ -232,9 +247,7 @@ pub(super) fn re_hausman_test(
                 k_aux,
                 bw,
             );
-            wald_f_test(&coordinates, &meat, k_aux - k, k, t_periods - 1)
-                .map_err(|e| to_err(e.into()))?
-                .0
+            hausman_wald_f(&coordinates, &meat, k_aux, k, t_periods - 1)?
         }
     };
 

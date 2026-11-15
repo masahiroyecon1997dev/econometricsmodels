@@ -84,6 +84,7 @@ mod error;
 mod fe_adjustment;
 mod index;
 mod moment_cov;
+mod overall_wald;
 mod panel_cov;
 #[cfg(test)]
 mod test_support;
@@ -101,6 +102,7 @@ pub(crate) use fe_adjustment::{absorbed_parameters, fe_cluster_k_correction, lev
 pub(crate) use index::EffectNames;
 pub use index::PanelIndex;
 pub(crate) use moment_cov::{PanelMoment, PanelMomentInput, panel_moment_covariance};
+pub(crate) use overall_wald::overall_f_test;
 pub(crate) use panel_cov::{PanelCov, PanelCovInput, PanelStructure, panel_cov_params};
 pub use time_keys::TimeKeys;
 pub(crate) use transform::{

@@ -59,7 +59,8 @@ impl ClusterSetting {
 pub enum MatrixKind {
     /// 係数の共分散行列のうち、全体F/Wald検定の対象にする傾き係数の部分行列。
     CoefficientCovariance,
-    /// 設計行列のGram行列`X'X`（QRのランク判定は通ったが、Cholesky分解が失敗した）。
+    /// 設計行列（QRのランク判定は通ったが、列を単位ノルムに揃えた条件数が上限を超えた。
+    /// `OrthonormalDesign::new_checked`。`X'X`のCholeskyの失敗でもこの種別になる）。
     DesignGram,
     /// 最尤推定の（負の）Hessian。
     Hessian,

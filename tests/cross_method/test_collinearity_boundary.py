@@ -114,19 +114,14 @@ def test_a_design_far_beyond_the_limit_raises_a_design_error_not_an_internal_one
 
 
 @pytest.mark.parametrize("method", list(_FITTERS))
-@pytest.mark.parametrize("scale", [1e6, 1e-6])
+@pytest.mark.parametrize("scale", [1e12, 1e6, 1e-6, 1e-12])
 def test_the_limit_does_not_move_with_the_unit_of_the_correlated_columns(
     method, scale
 ):
-    """共線な2列の単位を`1e6`倍・`1e-6`倍しても、受け入れる設計は変わらず、止める設計は
-    止まる（条件数のガードは列を揃えて測る。生の条件数なら`1e6`倍変わる）。止めるときの
-    `code`は、ガードの前段のランク判定（`max|R_ii|`に対する相対閾値で、列の単位に依る）が
-    先に働くと`DESIGN_MATRIX_SINGULAR`になることがあるため、どちらかを許す。"""
+    """共線な2列の単位を`1e±6`倍・`1e±12`倍しても、受け入れる設計は変わらず、止める設計は
+    `DESIGN_GRAM`で止まる。ランク判定も条件数のガードも、列を単位ノルムに揃えて行うため
+    （生の条件数なら単位の比だけ変わり、生の`R`の相対閾値でランク判定すると、列を小さくした
+    ときに先に`DESIGN_MATRIX_SINGULAR`で弾かれる）。"""
     _FITTERS[method](_data(_INSIDE[-1], scale))
-    with raises_one_of_errors(
-        {
-            ErrorCode.MATRIX_NEAR_SINGULAR: {"matrix": "DESIGN_GRAM"},
-            ErrorCode.DESIGN_MATRIX_SINGULAR: {},
-        }
-    ):
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="DESIGN_GRAM"):
         _FITTERS[method](_data(_OUTSIDE[0], scale))

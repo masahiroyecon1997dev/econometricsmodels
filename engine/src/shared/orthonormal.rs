@@ -17,24 +17,28 @@
 //! 列を入れ替えない上三角の`R`なら、切片が先頭・検定対象が末尾という既存の列の並びで
 //! そのまま使える。ランク落ちの判定は、呼び出し側の列ピボットQR（`checked_col_piv_qr`）が
 //! 先に行うか（[`OrthonormalDesign::new`]。ここでは対角が厳密に0または非有限のときだけ防御的に
-//! 弾く）、`R`（k×k）の列ピボットQRで行う（[`OrthonormalDesign::new_checked`]。`X = QR`の
-//! `R`は`X`と同じ特異値を持つので、n×kの列ピボットQRを別に走らせずに済む）。
+//! 弾く）、列を揃えた`R`（k×k）の列ピボットQRで行う（[`OrthonormalDesign::new_checked`]。
+//! `X = QR`の`R`は`X`と同じ特異値を持つので、n×kの列ピボットQRを別に走らせずに済む）。
 //!
-//! **条件数のガード**: [`OrthonormalDesign::new_checked`]は、ランク判定のあとに、列を単位ノルム
-//! に揃えた`R`の条件数が[`MAX_EQUILIBRATED_CONDITION`]を超えると[`RankDeficient::GramMatrix`]で
-//! 弾く。QRなら`cond(X)`が`1e8`を超える設計も推定できてしまうが、`X'X`のCholeskyで止めていた
-//! 従来の受け入れ範囲（列のスケールによらず、列を揃えた`cond(X)`で約`5e7`）を、手法によらず
-//! 保つため。生の`R`の条件数ではなく列を揃えたものを使うのは、列の単位で境界が動かないように
-//! するため（Choleskyの成否は列の一様な拡大縮小に依らない）。
+//! **列を揃えた`R`でのランク判定と条件数のガード**: [`OrthonormalDesign::new_checked`]は、`R`の
+//! 列を単位ノルムに揃えた行列（`R`の列ノルムは`X`の列ノルムに等しい）に対して、(1) 列ピボットQRの
+//! ランク判定（相対閾値`k·ε`）、(2) 条件数が[`MAX_EQUILIBRATED_CONDITION`]以内であることの
+//! 確認、をこの順に行う。ランク落ちは[`RankDeficient::Columns`]、条件数の超過は
+//! [`RankDeficient::GramMatrix`]で弾く。QRなら`cond(X)`が`1e8`を超える設計も推定できてしまうが、
+//! `X'X`のCholeskyで止めていた従来の受け入れ範囲（列のスケールによらず、列を揃えた`cond(X)`で
+//! 約`5e7`）を、手法によらず保つため。**生の`R`でなく列を揃えた行列に対して判定する**のは、列の
+//! 単位で合否が動かないようにするため（Choleskyの成否は列の一様な拡大縮小に依らない。生の`R`の
+//! 相対閾値`max|R_ii|`だと、共線な2列を`1e-12`倍するだけでランク落ちとして弾かれる）。
 
 use faer::{Mat, MatRef};
 
 use super::linear_algebra::{RankDeficient, checked_col_piv_qr};
 
 /// 列を単位ノルムに揃えた設計行列の条件数の上限。これを超える設計は[`RankDeficient::GramMatrix`]
-/// で弾く（`OrthonormalDesign::new_checked`）。`X'X`のCholeskyが成功と失敗に分かれていた境界
-/// （凍結した準共線データで、2.8e7までは成功・9.2e7から失敗）の間に置いた暫定値。この値を
-/// 緩めるのは、受け入れる設計が増えるだけで破壊的でない（厳しくするのは破壊的）。
+/// で弾く（`OrthonormalDesign::new_checked`）。`X'X`のCholeskyは`cond² · ε ≈ 1`、つまり
+/// `cond ≈ ε^(-1/2) ≈ 6.7e7`で失敗する。凍結した準共線データで実測した成否の境界（2.8e7までは
+/// 成功・9.2e7から失敗）の間に置いた暫定値で、Rの`lm`の許容`1e-7`とも同程度。この値を緩める
+/// のは、受け入れる設計が増えるだけで破壊的でない（厳しくするのは破壊的）。
 pub(crate) const MAX_EQUILIBRATED_CONDITION: f64 = 5.0e7;
 
 /// 全体Wald検定に使う直交座標の組。推定量が保持し、末尾`q`列の検定にも使う。
@@ -57,16 +61,19 @@ impl OrthonormalDesign {
     /// `x`（n×k）をピボットなしのHouseholder QRで分解する。`k = 0`（列が無い`x`、固定効果のみの
     /// モデルのwithin変換後の設計行列）は空の`Q`・`R`を返す。
     ///
+    /// ランク・条件数のガードは**無い**。呼び出し側が、同じ行列に対して先に[`Self::new_checked`]
+    /// （または`OlsEstimator::fit_auxiliary`など、それを呼ぶ推定）を通していること。
+    ///
     /// # Errors
     /// 行数が列数に満たない、または`R`の対角が厳密に0・非有限のとき[`RankDeficient::Columns`]。
-    /// 数値的なランク落ちの判定ではない（呼び出し側の列ピボットQRが先に行う）。
+    /// 数値的なランク落ちの判定ではない（呼び出し側が先に行う）。
     pub(crate) fn new(x: &Mat<f64>) -> Result<Self, RankDeficient> {
         Self::decompose(x, false)
     }
 
-    /// [`Self::new`]に加えて、`R`（k×k）の列ピボットQRでランク落ちを判定し（`checked_col_piv_qr`と
-    /// 同じ閾値）、列を揃えた条件数が[`MAX_EQUILIBRATED_CONDITION`]以内であることを確かめる。
-    /// `Q`を作る前に判定するので、弾く入力では`Q`を作らない。
+    /// [`Self::new`]に加えて、列を単位ノルムに揃えた`R`（k×k）の列ピボットQRでランク落ちを判定し
+    /// （`checked_col_piv_qr`と同じ相対閾値）、その条件数が[`MAX_EQUILIBRATED_CONDITION`]以内で
+    /// あることを確かめる。`Q`を作る前に判定するので、弾く入力では`Q`を作らない。
     ///
     /// # Errors
     /// `x`がフルカラムランクでないとき[`RankDeficient::Columns`]。フルランクでも、列を揃えた
@@ -95,9 +102,9 @@ impl OrthonormalDesign {
             return Err(RankDeficient::Columns);
         }
         if check_rank {
-            checked_col_piv_qr(&r)?;
-            let condition = equilibrated_condition(&r);
-            if condition.is_nan() || condition > MAX_EQUILIBRATED_CONDITION {
+            let equilibrated = equilibrate_columns(&r);
+            checked_col_piv_qr(&equilibrated)?;
+            if condition_number(&equilibrated) > MAX_EQUILIBRATED_CONDITION {
                 return Err(RankDeficient::GramMatrix);
             }
         }
@@ -150,26 +157,48 @@ impl OrthonormalDesign {
     }
 }
 
-/// `r`（k×k、`X = QR`の`R`）の列を単位ノルムに揃えた行列の条件数（最大特異値/最小特異値）。
-/// `R`の列ノルムは`X`の列ノルムと等しいので、`X`の列を揃えた条件数と同じ値になる。特異値分解が
-/// 失敗したとき、または最小特異値が0のときは`f64::INFINITY`（呼び出し側が弾く）。
-fn equilibrated_condition(r: &Mat<f64>) -> f64 {
+/// 上三角`r`（k×k、`X = QR`の`R`）の列を単位ノルムに揃える。`R`の列ノルムは`X`の列ノルムに
+/// 等しいので、`X`の列を揃えた行列と同じ特異値を持つ。列のノルムは、最大の成分で割ってから
+/// 二乗和を取り、極端なスケールでのオーバーフロー・アンダーフローを避ける。前提: 各列に0でない
+/// 成分がある（`R`の対角が厳密に0・非有限の入力は呼び出し側が先に弾く）。
+fn equilibrate_columns(r: &Mat<f64>) -> Mat<f64> {
     let k = r.ncols();
     let norms: Vec<f64> = (0..k)
-        .map(|j| (0..=j).map(|i| r.get(i, j).powi(2)).sum::<f64>().sqrt())
+        .map(|j| {
+            let largest = (0..=j).map(|i| r.get(i, j).abs()).fold(0.0_f64, f64::max);
+            let scaled_sum: f64 = (0..=j).map(|i| (*r.get(i, j) / largest).powi(2)).sum();
+            largest * scaled_sum.sqrt()
+        })
         .collect();
-    let equilibrated = Mat::from_fn(k, k, |i, j| *r.get(i, j) / norms[j]);
-    let Ok(svd) = equilibrated.svd() else {
+    Mat::from_fn(
+        k,
+        k,
+        |i, j| if i <= j { *r.get(i, j) / norms[j] } else { 0.0 },
+    )
+}
+
+/// 行列（k×k、`k ≥ 1`）の条件数（最大特異値/最小特異値）。特異値分解が失敗したとき、最小特異値が
+/// 0のとき、結果が有限でないとき（NaNを含む）は`f64::INFINITY`（呼び出し側が弾く）。
+fn condition_number(matrix: &Mat<f64>) -> f64 {
+    let Ok(singular_values) = matrix.singular_values() else {
         return f64::INFINITY;
     };
-    let singular_values = svd.S().column_vector();
-    let largest = *singular_values.get(0);
-    let smallest = *singular_values.get(k - 1);
-    if smallest > 0.0 {
-        largest / smallest
+    let (largest, smallest) = (
+        singular_values[0],
+        singular_values[singular_values.len() - 1],
+    );
+    let condition = largest / smallest;
+    if smallest > 0.0 && condition.is_finite() {
+        condition
     } else {
         f64::INFINITY
     }
+}
+
+/// `r`（`X = QR`の`R`）の列を揃えた行列の条件数。
+#[cfg(test)]
+fn equilibrated_condition(r: &Mat<f64>) -> f64 {
+    condition_number(&equilibrate_columns(r))
 }
 
 /// 上三角`r`（k×k）で`r · x = b`を解く（後退代入。`b`はk×m）。
@@ -444,6 +473,65 @@ mod tests {
                 "scale={scale}: cond above the limit must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn new_checked_rank_decision_does_not_move_with_the_column_scale() {
+        // 条件数が上限の内側（eps=1e-7で約2.8e7）の設計は、共線な2列の単位を1e±12倍しても受け入れる
+        // （生の`R`の相対閾値`max|R_ii|`だと、1e-12倍で最小の対角が閾値を下回りランク落ちとして
+        // 弾かれていた）。完全に重複した列は、どの単位でもランク落ち。
+        for scale in [1e-12, 1e-9, 1e9, 1e12] {
+            assert!(
+                OrthonormalDesign::new_checked(&near_collinear_design(1e-7, scale)).is_ok(),
+                "scale={scale}: a well-inside design must be accepted"
+            );
+            let (x, _, _) = near_collinear(1.0);
+            let duplicated = Mat::from_fn(x.nrows(), 3, |i, j| match j {
+                0 => 1.0,
+                1 => scale * *x.get(i, 1),
+                _ => 3.0 * scale * *x.get(i, 1),
+            });
+            assert_eq!(
+                OrthonormalDesign::new_checked(&duplicated).unwrap_err(),
+                RankDeficient::Columns,
+                "scale={scale}: duplicated columns are rank deficient at any unit"
+            );
+        }
+    }
+
+    #[test]
+    fn equilibrate_columns_survives_extreme_magnitudes() {
+        // 二乗和がオーバーフロー（1e200²）・アンダーフロー（1e-200²）する大きさでも、列は単位ノルムに揃う。
+        for magnitude in [1e200, 1e-200] {
+            let r = Mat::from_fn(2, 2, |i, j| match (i, j) {
+                (0, 0) => magnitude,
+                (0, 1) => 0.5 * magnitude,
+                (1, 1) => 0.5 * magnitude,
+                _ => 0.0,
+            });
+            let equilibrated = equilibrate_columns(&r);
+            for j in 0..2 {
+                let norm: f64 = (0..2)
+                    .map(|i| equilibrated.get(i, j).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                assert_relative(norm, 1.0, 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn condition_number_handles_degenerate_matrices() {
+        assert_relative(
+            condition_number(&Mat::from_fn(1, 1, |_, _| 5.0)),
+            1.0,
+            1e-12,
+        );
+        assert_eq!(condition_number(&Mat::<f64>::zeros(2, 2)), f64::INFINITY);
+        let singular = Mat::from_fn(2, 2, |_, j| if j == 0 { 1.0 } else { 0.0 });
+        assert_eq!(condition_number(&singular), f64::INFINITY);
+        let with_nan = Mat::from_fn(2, 2, |i, j| if i == 0 && j == 1 { f64::NAN } else { 1.0 });
+        assert_eq!(condition_number(&with_nan), f64::INFINITY);
     }
 
     #[test]

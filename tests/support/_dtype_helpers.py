@@ -35,6 +35,7 @@ UNUSED_COLUMN_DTYPES = [
     pl.String,
     pl.Categorical,
     pl.Enum(["a", "b"]),
+    pl.Enum(["UInt128", "b"]),
     pl.Date,
     pl.Datetime,
     pl.Duration,
@@ -43,6 +44,7 @@ UNUSED_COLUMN_DTYPES = [
     pl.List(pl.Int64),
     pl.Array(pl.Int64, 2),
     pl.Struct({"a": pl.Int64}),
+    pl.Struct({"UInt128": pl.Int64}),
     pl.List(pl.UInt128),
     pl.Array(pl.UInt128, 2),
     pl.Struct({"a": pl.UInt128}),
@@ -55,6 +57,7 @@ NON_NUMERIC_DTYPES = [
     (pl.String, "String"),
     (pl.Categorical, "Categorical"),
     (pl.Enum(["a", "b"]), "Enum"),
+    (pl.Enum(["UInt128", "b"]), "Enum"),
     (pl.Date, "Date"),
     (pl.Datetime, "Datetime"),
     (pl.Duration, "Duration"),
@@ -63,6 +66,7 @@ NON_NUMERIC_DTYPES = [
     (pl.List(pl.Int64), "List"),
     (pl.Array(pl.Int64, 2), "Array"),
     (pl.Struct({"a": pl.Int64}), "Struct"),
+    (pl.Struct({"UInt128": pl.Int64}), "Struct"),
     (pl.List(pl.UInt128), "List"),
     (pl.Array(pl.UInt128, 2), "Array"),
     (pl.Struct({"a": pl.UInt128}), "Struct"),
@@ -81,8 +85,10 @@ def unused_column(dtype: pl.DataType) -> pl.Series:
         return pl.Series("unused", [True, False] * (N // 2))
     if dtype == pl.String:
         return pl.Series("unused", ["a", "b"] * (N // 2))
-    if dtype == pl.Enum(["a", "b"]):
-        return pl.Series("unused", ["a", "b"] * (N // 2), dtype=dtype)
+    if isinstance(dtype, pl.Enum):
+        return pl.Series(
+            "unused", dtype.categories.to_list()[:2] * (N // 2), dtype=dtype
+        )
     if dtype == pl.Categorical:
         return pl.Series("unused", ["a", "b"] * (N // 2), dtype=pl.Categorical)
     if dtype == pl.Date:
@@ -101,6 +107,8 @@ def unused_column(dtype: pl.DataType) -> pl.Series:
         return pl.Series("unused", [[1, 2]] * N, dtype=dtype)
     if dtype == pl.Struct({"a": pl.Int64}):
         return pl.Series("unused", [{"a": 1}] * N)
+    if dtype == pl.Struct({"UInt128": pl.Int64}):
+        return pl.Series("unused", [{"UInt128": 1}] * N)
     if dtype == pl.List(pl.UInt128):
         return pl.Series("unused", [[1, 2]] * N, dtype=dtype)
     if dtype == pl.Array(pl.UInt128, 2):

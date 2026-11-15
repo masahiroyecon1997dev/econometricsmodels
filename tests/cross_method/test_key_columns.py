@@ -186,6 +186,7 @@ UNSUPPORTED_IDENTITY_DTYPES = [
     (pl.List(pl.Int64), "List"),
     (pl.Array(pl.Int64, 2), "Array"),
     (pl.Struct({"a": pl.Int64}), "Struct"),
+    (pl.Struct({"UInt128": pl.Int64}), "Struct"),
     (pl.List(pl.UInt128), "List"),
     (pl.Array(pl.UInt128, 2), "Array"),
     (pl.Struct({"a": pl.UInt128}), "Struct"),
@@ -667,6 +668,30 @@ def test_blank_enum_category_absent_from_the_data_is_accepted(
     """データに現れない`Enum`のカテゴリが空・空白だけでも拒否しない（行に現れるラベルだけを検査する）。"""
     dtype = pl.Enum([str(i) for i in range(10)] + ["", " "])
     series = frame[column].cast(pl.String).cast(dtype)
+    df = frame.with_columns(series.alias(column))
+
+    _assert_same_result(fit(df), fit(frame))
+
+
+@pytest.mark.parametrize("present", [False, True], ids=["absent", "present"])
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_enum_category_named_like_an_unreadable_dtype_is_accepted(
+    frame, column, method, fit, present
+):
+    """カテゴリ名が`UInt128`の`Enum`は、取り込めないdtypeと取り違えずに受け付ける
+    （dtypeの文字列表現にはカテゴリ名が入る）。カテゴリがデータに現れない場合と、
+    最後のカテゴリの行ラベルを`UInt128`にして現れる場合の両方で、同じ結果になる
+    （最後のラベルを置き換えるのは、グループの並びを保って結果の丸めを変えないため）。
+    """
+    labels = [str(i) for i in range(10)]
+    if present:
+        labels[-1] = "UInt128"
+    dtype = pl.Enum(labels if present else [*labels, "UInt128"])
+    series = frame[column].cast(pl.String).replace("9", labels[-1]).cast(dtype)
     df = frame.with_columns(series.alias(column))
 
     _assert_same_result(fit(df), fit(frame))

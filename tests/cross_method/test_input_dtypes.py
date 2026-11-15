@@ -140,8 +140,6 @@ def test_boolean_y_is_usable_for_logit():
 
 def _non_numeric_column(name: str, dtype: pl.DataType) -> pl.Series:
     """数値として使えないdtypeの列（`n`行）を作る。"""
-    if dtype == pl.Enum(["a", "b"]):
-        return pl.Series(name, ["a", "b"] * (N // 2), dtype=dtype)
     return unused_column(dtype).alias(name)
 
 

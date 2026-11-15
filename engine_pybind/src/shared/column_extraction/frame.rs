@@ -39,21 +39,50 @@ pub fn check_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<()> 
     )))
 }
 
-/// polarsの`DataFrame`の全列を取り込もうとすると、polars-coreがpanicするdtype。取り込めないので、
-/// 推定に使う列として指名されたときは`ValidationError`にし、指名されなければ読まない
-/// （`docs/guide/accepted-data.md`「指名した列だけ読む」）。`pyo3-polars`が列の取り込みで
-/// 使うpolarsの機能（`engine_pybind/Cargo.toml`の`dtype-*`）に合わせて保つ。
+/// polarsの`DataFrame`の全列を取り込もうとすると、polars-coreがpanicするdtype（Pythonの
+/// クラス名）。取り込めないので、推定に使う列として指名されたときは`ValidationError`にし、
+/// 指名されなければ読まない（`docs/guide/accepted-data.md`「指名した列だけ読む」）。
+/// `pyo3-polars`が列の取り込みで使うpolarsの機能（`engine_pybind/Cargo.toml`の`dtype-*`）に
+/// 合わせて保つ。
 const UNREADABLE_DTYPES: &[&str] = &["UInt128"];
 
-/// polarsのdtypeの文字列表現`dtype`（`str(dtype)`）が、取り込めないdtype（[`UNREADABLE_DTYPES`]）を
-/// 含んでいれば、エラーに出すdtypeの呼び名を返す。`UInt128`そのものは`UInt128`、`List(UInt128)`のように
-/// 中に含むネスト型は`List`（最上位の型名。ネスト型は数値・キーのどの役割にも使えない）。
-/// パラメータを持つdtypeを`UNREADABLE_DTYPES`に足すときも、部分一致なのでそのまま使える。
-fn unreadable_label(dtype: &str) -> Option<String> {
-    UNREADABLE_DTYPES
-        .iter()
-        .any(|unreadable| dtype.contains(unreadable))
-        .then(|| dtype.split('(').next().unwrap_or(dtype).trim().to_string())
+/// polarsのdtype（Pythonのオブジェクト）が、取り込めないdtype（[`UNREADABLE_DTYPES`]）そのもの、
+/// または`List`・`Array`の内側の型・`Struct`のフィールドの型として含んでいれば、エラーに出す
+/// dtypeの呼び名を返す。`UInt128`そのものは`UInt128`、`List(UInt128)`のように中に含むネスト型は
+/// `List`（最上位の型名。ネスト型は数値・キーのどの役割にも使えない）。
+///
+/// dtypeの文字列表現（`str(dtype)`）の部分一致では判定しない。`Enum`のカテゴリ名や`Struct`の
+/// フィールド名のように、利用者が決めた文字列が表現に入るdtypeがあり、`UInt128`という名前の
+/// カテゴリを持つ`Enum`を取り込めないdtypeと取り違えるため。クラス名と型の構造だけを見る。
+fn unreadable_label(dtype: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let name: String = dtype
+        .call_method0("base_type")?
+        .getattr("__name__")?
+        .extract()?;
+    if UNREADABLE_DTYPES.contains(&name.as_str()) {
+        return Ok(Some(name));
+    }
+    let mut children: Vec<Bound<'_, PyAny>> = Vec::new();
+    // `List`・`Array`は`inner`、`Struct`は`fields`（各`Field`の`dtype`）に内側の型を持つ。
+    // 他のdtypeにはどちらの属性も無い（`Enum`のカテゴリは`categories`で別）。
+    if let Some(inner) = dtype.getattr_opt("inner")?
+        && !inner.is_none()
+    {
+        children.push(inner);
+    }
+    if let Some(fields) = dtype.getattr_opt("fields")?
+        && !fields.is_none()
+    {
+        for field in fields.try_iter()? {
+            children.push(field?.getattr("dtype")?);
+        }
+    }
+    for child in &children {
+        if unreadable_label(child)?.is_some() {
+            return Ok(Some(name));
+        }
+    }
+    Ok(None)
 }
 
 /// 目印の列の名前（[`UNREADABLE_MARKER`]に続けてdtypeの呼び名と元の列名を`\u{1}`で区切る）。
@@ -118,8 +147,8 @@ pub fn select_columns(
         if !seen.insert(name.as_str()) || !schema.contains(name).map_err(read)? {
             continue;
         }
-        let dtype = schema.get_item(name).map_err(read)?.str().map_err(read)?;
-        if let Some(label) = unreadable_label(&dtype.to_string()) {
+        let dtype = schema.get_item(name).map_err(read)?;
+        if let Some(label) = unreadable_label(&dtype).map_err(read)? {
             let marker = marker_name(&label, name);
             markers.push(Series::new_null(marker.as_str().into(), height).into());
             continue;
@@ -292,27 +321,6 @@ mod tests {
             present_value::<f64>("x", None),
             Err(ColumnExtractionError::ConversionFailed { .. })
         ));
-    }
-
-    #[test]
-    fn unreadable_label_names_a_plain_unreadable_dtype_and_the_outer_type_of_a_nested_one() {
-        assert_eq!(unreadable_label("UInt128").as_deref(), Some("UInt128"));
-        assert_eq!(unreadable_label("List(UInt128)").as_deref(), Some("List"));
-        assert_eq!(
-            unreadable_label("Struct({'a': UInt128})").as_deref(),
-            Some("Struct")
-        );
-        assert_eq!(
-            unreadable_label("Array(UInt128, shape=(2,))").as_deref(),
-            Some("Array")
-        );
-    }
-
-    #[test]
-    fn unreadable_label_is_none_for_readable_dtypes() {
-        for dtype in ["Int128", "UInt64", "Float64", "List(Int64)", "String"] {
-            assert_eq!(unreadable_label(dtype), None, "{dtype}");
-        }
     }
 
     #[test]

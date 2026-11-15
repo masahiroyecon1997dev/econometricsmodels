@@ -199,7 +199,7 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 
 ### 4.3 FEの内部実装方針
 
-FEはwithin変換したデータに`shared::least_squares::least_squares`を直接あてはめる。
+FEはwithin変換したデータの設計行列を`shared::orthonormal::OrthonormalDesign::new_checked`でQR分解し、係数・残差・共分散を求める。
 `OlsEstimator`は経由しない: FEが使うのは係数・残差・`(X̃'X̃)⁻¹`・適合度だけで、標準誤差・F検定は
 `cov_type`ごとにFE自身が計算し直すため（`OlsEstimator`の推論結果は使わない）。`OlsEstimator`の
 推論結果をそのまま使えない点は、WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓で、

@@ -94,16 +94,18 @@ pub(super) fn fit_two_sls(
     param_names.extend(input.x_endog_names().iter().cloned());
 
     validate_second_stage(n, k, confidence_level)?;
+    // `X̂ = QR`（ピボットなしQR）1本から、係数（`β̂ = R⁻¹Q'y`）・構造残差・共分散・全体Fを求める。
+    // ランク落ちと悪条件は`new_checked`が判定する（`shared::orthonormal`）。
+    let design =
+        OrthonormalDesign::new_checked(&x_hat).map_err(|err| IvError::SecondStageFailed {
+            source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
+        })?;
     let TwoSlsPointEstimate {
         params: beta,
         residuals,
         ssr,
-        ..
-    } = two_sls_point_estimate(&x_structural, &x_hat, input.y()).map_err(|err| {
-        IvError::SecondStageFailed {
-            source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
-        }
-    })?;
+        coordinates,
+    } = two_sls_point_estimate(&design, &x_structural, input.y());
 
     let df_resid = n - k;
 
@@ -119,11 +121,7 @@ pub(super) fn fit_two_sls(
     // （`B = (X̂'X̂)⁻¹`）を作ってから反転すると、傾きの相関が極端に高いときに`B`の明示的な逆行列で
     // 桁落ちする。`M̃`は`x = Q`・`xtx_inv = 単位行列`で`covariance_stage`を呼んで得て、
     // `V = R⁻¹ M̃ R⁻ᵀ`と統計量`b̃_S' M̃_SS⁻¹ b̃_S`の両方に使う（`shared::orthonormal`）。
-    // `β = (X̂'X̂)⁻¹X̂'y`なので`Rβ = Q'y`。`Q`はここで作って捨てる。
-    let design = OrthonormalDesign::new(&x_hat).map_err(|err| IvError::SecondStageFailed {
-        source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
-    })?;
-    let coordinates = design.coordinates(input.y());
+    // `β = (X̂'X̂)⁻¹X̂'y`なので`Rβ = Q'y`（点推定が返す`coordinates`）。`Q`は共分散の計算後に捨てる。
     let CovStage {
         cov_params: meat,
         df_inference,

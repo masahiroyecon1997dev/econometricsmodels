@@ -12,8 +12,8 @@ use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::error::CommonError;
-use super::least_squares::{least_squares, residual_sum_of_squares};
-use super::linear_algebra::RankDeficient;
+use super::least_squares::residual_sum_of_squares;
+use super::orthonormal::OrthonormalDesign;
 
 /// [`two_sls_point_estimate`]の結果。
 #[derive(Debug)]
@@ -24,30 +24,33 @@ pub(crate) struct TwoSlsPointEstimate {
     pub(crate) residuals: Mat<f64>,
     /// 構造残差の二乗和 `Σ eᵢ²`
     pub(crate) ssr: f64,
+    /// `X̂ = QR`の直交座標 `b̃ = Q'y`（= `Rβ̂`、k×1）。全体Wald検定が使う（`β̂ = (X̂'X̂)⁻¹X̂'y`なので
+    /// `Rβ̂ = Q'y`）。
+    pub(crate) coordinates: Mat<f64>,
 }
 
-/// 2SLSの点推定。`y`を`X̂`（第一段階の予測値で内生変数を置き換えた設計行列）に回帰して係数を求め
-/// （列ピボットQR）、残差は元の設計行列`X`で作る。
+/// 2SLSの点推定。`y`を`X̂`（第一段階の予測値で内生変数を置き換えた設計行列）に回帰した係数を、
+/// `X̂`のQR分解（`design`）から`β̂ = R⁻¹Q'y`で求め、残差は元の設計行列`X`で作る。共分散・全体F検定が
+/// 同じ`design`（`Q`）を使うので、QRは1本で済む。
 ///
-/// `x`と`x_hat`は同じ列の並びで、`x`の内生変数の列が`x_hat`では予測値に置き換わっている
-/// （外生変数の列は同じ）。
-///
-/// # Errors
-/// `x_hat`がフルカラムランクでない、または`X̂'X̂`のCholesky分解が丸めで失敗した場合に
-/// [`RankDeficient`]を返す。
+/// `x`と`x_hat`（`design`の元の行列）は同じ列の並びで、`x`の内生変数の列が`x_hat`では予測値に
+/// 置き換わっている（外生変数の列は同じ）。`design`は、呼び出し側が`OrthonormalDesign::new_checked`
+/// で作ったもの（ランク落ち・悪条件の判定はそこで済んでいる）。
 pub(crate) fn two_sls_point_estimate(
+    design: &OrthonormalDesign,
     x: &Mat<f64>,
-    x_hat: &Mat<f64>,
     y: &Mat<f64>,
-) -> Result<TwoSlsPointEstimate, RankDeficient> {
-    let fit = least_squares(x_hat, y)?;
-    let residuals = y - x * &fit.params;
+) -> TwoSlsPointEstimate {
+    let coordinates = design.coordinates(y);
+    let params = design.coefficients(&coordinates);
+    let residuals = y - x * &params;
     let ssr = residual_sum_of_squares(&residuals);
-    Ok(TwoSlsPointEstimate {
-        params: fit.params,
+    TwoSlsPointEstimate {
+        params,
         residuals,
         ssr,
-    })
+        coordinates,
+    }
 }
 
 /// Sargan過剰識別検定の統計量とp値。`df`はχ²分布の自由度。
@@ -130,10 +133,10 @@ pub(crate) fn partial_f_statistic(
         return Err(CommonError::InsufficientObservations { n, k: k_total });
     }
     let df_u = n - k_total;
-    let restricted = least_squares(x_restricted, y).map_err(|_| {
+    let restricted = OrthonormalDesign::new_checked(x_restricted).map_err(|_| {
         CommonError::internal("the restricted model of the partial F statistic is rank deficient")
     })?;
-    let ssr_r = residual_sum_of_squares(&restricted.residuals);
+    let ssr_r = residual_sum_of_squares(&restricted.residuals(y, &restricted.coordinates(y)));
     Ok(((ssr_r - ssr_unrestricted) / (q as f64)) / (ssr_unrestricted / (df_u as f64)))
 }
 
@@ -170,6 +173,8 @@ pub(crate) fn wu_hausman_columns(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::least_squares::least_squares;
+    use crate::shared::linear_algebra::RankDeficient;
 
     fn column(values: &[f64]) -> Mat<f64> {
         Mat::from_fn(values.len(), 1, |i, _| values[i])
@@ -191,6 +196,16 @@ mod tests {
             _ => z2[i],
         });
         (exog, z, column(&d), column(&y))
+    }
+
+    /// `X̂`をQR分解（ランク・条件数の判定つき）してから、点推定を求める。
+    fn point_estimate(
+        x: &Mat<f64>,
+        x_hat: &Mat<f64>,
+        y: &Mat<f64>,
+    ) -> Result<TwoSlsPointEstimate, RankDeficient> {
+        let design = OrthonormalDesign::new_checked(x_hat)?;
+        Ok(two_sls_point_estimate(&design, x, y))
     }
 
     /// 第一段階`d ~ z`の予測値`d̂`と残差、制限なしモデルの`ssr`。
@@ -217,7 +232,7 @@ mod tests {
             }
         });
 
-        let est = two_sls_point_estimate(&x, &x_hat, &y).unwrap();
+        let est = point_estimate(&x, &x_hat, &y).unwrap();
 
         // 閉形式: β = (X̂'X̂)⁻¹ X̂'y。残差は元のXで作る。
         let gram = x_hat.transpose() * &x_hat;
@@ -252,7 +267,7 @@ mod tests {
         let x_hat = Mat::from_fn(6, 3, |i, j| if j < 2 { *exog.get(i, j) } else { 1.0 });
         let x = x_hat.clone();
         assert!(matches!(
-            two_sls_point_estimate(&x, &x_hat, &y),
+            point_estimate(&x, &x_hat, &y),
             Err(RankDeficient::Columns)
         ));
     }
@@ -391,7 +406,7 @@ mod tests {
                 *d_hat_a.get(i, 0)
             }
         });
-        let est_a = two_sls_point_estimate(&x_a, &x_hat_a, &mat(&[&y])).unwrap();
+        let est_a = point_estimate(&x_a, &x_hat_a, &mat(&[&y])).unwrap();
         let z_a = mat(&[d0, d1, d2, &x, &z1, &z2]);
         let sargan_a = sargan_test(&z_a, &est_a.residuals, est_a.ssr / n as f64, 1).unwrap();
         let ssr_u_a = residual_sum_of_squares(&first_a.residuals);
@@ -405,7 +420,7 @@ mod tests {
         let d_hat_b = &mat(&[&dt]) - &first_b.residuals;
         let x_b = mat(&[&xt, &dt]);
         let x_hat_b = Mat::from_fn(n, 2, |i, j| if j == 0 { xt[i] } else { *d_hat_b.get(i, 0) });
-        let est_b = two_sls_point_estimate(&x_b, &x_hat_b, &mat(&[&yt])).unwrap();
+        let est_b = point_estimate(&x_b, &x_hat_b, &mat(&[&yt])).unwrap();
         let sargan_b = sargan_test(&z_b, &est_b.residuals, est_b.ssr / n as f64, 1).unwrap();
         let ssr_u_b = residual_sum_of_squares(&first_b.residuals);
         let f_b = partial_f_statistic(&mat(&[&dt]), &mat(&[&xt]), ssr_u_b, 3, 2, groups).unwrap();

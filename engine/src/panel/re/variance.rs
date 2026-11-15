@@ -14,8 +14,9 @@ use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::shared::error::{CommonError, ErrorInfo};
 use crate::shared::error_catalog::Stage;
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::least_squares::{least_squares, residual_sum_of_squares};
+use crate::shared::least_squares::residual_sum_of_squares;
 use crate::shared::linear_algebra::{COLLINEARITY_TOLERANCE, independent_columns_in_order};
+use crate::shared::orthonormal::OrthonormalDesign;
 
 /// エンティティ平均（between回帰・between R²用）。`y`/各`x`列のエンティティごとの単純平均と、
 /// 各エンティティの観測数`T_i`（`re-spec.md`3.1節の調和平均`t_bar`計算に使う）。
@@ -250,22 +251,23 @@ fn between_ssr_and_df(
             }),
         });
     }
-    let design = Mat::from_fn(n_units, n_params, |i, j| {
+    let design_matrix = Mat::from_fn(n_units, n_params, |i, j| {
         if j == 0 { 1.0 } else { means.x[kept[j - 1]][i] }
     });
     let y = Mat::from_fn(n_units, 1, |i, _| means.y[i]);
     // 別名の列は上で落としてあり、残りは前の列に対する
     // 相対残差が`1e-7`より大きいので、ここで特異と判定される入力は通常無い（防御的なエラー）。
-    let fit = least_squares(&design, &y).map_err(|err| {
+    let design = OrthonormalDesign::new_checked(&design_matrix).map_err(|err| {
         let names: Vec<String> = std::iter::once("const".to_string())
             .chain(kept.iter().map(|&j| x_names[j].clone()))
             .collect();
         PanelError::BetweenRegressionFailed {
             means: kind,
-            source: LeastSquaresError::from_rank_deficient(err, &design, &names),
+            source: LeastSquaresError::from_rank_deficient(err, &design_matrix, &names),
         }
     })?;
-    Ok((residual_sum_of_squares(&fit.residuals), n_units - n_params))
+    let residuals = design.residuals(&y, &design.coordinates(&y));
+    Ok((residual_sum_of_squares(&residuals), n_units - n_params))
 }
 
 /// 各説明変数の元の列（単位平均ではなく観測値）の最大絶対値。between回帰の一定判定

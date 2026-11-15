@@ -122,6 +122,13 @@ impl OrthonormalDesign {
         self.q.transpose() * y
     }
 
+    /// `(X'X)⁻¹ = R⁻¹R⁻ᵀ`（k×k）。`X'X`のCholeskyで逆行列を作るより、`X`の条件数の2乗で失う精度が
+    /// 小さい。分散成分のトレース形など、`(X'X)⁻¹`そのものが式に現れる計算が使う。
+    pub(crate) fn gram_inverse(&self) -> Mat<f64> {
+        let r_inverse = solve_upper(&self.r, self.identity().as_ref());
+        &r_inverse * r_inverse.transpose()
+    }
+
     /// 係数 `β̂ = R⁻¹ b̃`（k×1）。`b̃`は[`Self::coordinates`]の値。
     pub(crate) fn coefficients(&self, coordinates: &Mat<f64>) -> Mat<f64> {
         solve_upper(&self.r, coordinates.as_ref())
@@ -478,6 +485,28 @@ mod tests {
                 RankDeficient::Columns,
                 "{name}"
             );
+        }
+    }
+
+    #[test]
+    fn gram_inverse_matches_the_cholesky_inverse_of_the_gram_matrix() {
+        let (x, _, _) = near_collinear(1.0);
+        let from_qr = OrthonormalDesign::new_checked(&x).unwrap().gram_inverse();
+        let from_cholesky = xtx_inverse(&x).unwrap();
+        for i in 0..x.ncols() {
+            for j in 0..x.ncols() {
+                assert_relative(
+                    *from_qr.get(i, j) + 1.0,
+                    *from_cholesky.get(i, j) + 1.0,
+                    1e-12,
+                );
+            }
+        }
+        // 対称。
+        for i in 0..x.ncols() {
+            for j in 0..i {
+                assert_relative(*from_qr.get(i, j) + 1.0, *from_qr.get(j, i) + 1.0, 1e-12);
+            }
         }
     }
 

@@ -147,28 +147,32 @@ pub(super) fn fit_fe_two_sls(
     // （共分散・Wu-Hausmanの間も保持するとピークメモリが列数の数倍になる）。
     let mut param_names = input.x_exog_names().to_vec();
     param_names.extend(input.x_endog_names().iter().cloned());
-    let (estimate, x_hat) = {
+    let (estimate, design) = {
         let exog_columns: Vec<&[f64]> = tilde[exog_range.clone()]
             .iter()
             .map(Vec::as_slice)
             .collect();
         let endog_columns: Vec<&[f64]> = tilde[endog_range].iter().map(Vec::as_slice).collect();
         let fitted_columns: Vec<&[f64]> = fitted_endog.iter().map(Vec::as_slice).collect();
-        let x_tilde = mat_from_columns(
-            n,
-            &[exog_columns.as_slice(), endog_columns.as_slice()].concat(),
-        );
+        // `X̂ = QR`（ピボットなしQR）1本から、係数・構造残差・共分散・全体Fを求める。ランク落ちと
+        // 悪条件は`new_checked`が判定する。`X̂`は`Q`を作った直後に解放し、`X̃`はその後に作る
+        // （`X̂`・QRの作業領域・`Q`が重なる分より、行列を同時に持たない）。
         let x_hat = mat_from_columns(
             n,
             &[exog_columns.as_slice(), fitted_columns.as_slice()].concat(),
         );
-        let y_mat = mat_from_columns(n, &[y_tilde.as_slice()]);
-        let estimate = two_sls_point_estimate(&x_tilde, &x_hat, &y_mat).map_err(|err| {
+        let design = OrthonormalDesign::new_checked(&x_hat).map_err(|err| {
             PanelError::SecondStageFailed {
                 source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
             }
         })?;
-        (estimate, x_hat)
+        drop(x_hat);
+        let x_tilde = mat_from_columns(
+            n,
+            &[exog_columns.as_slice(), endog_columns.as_slice()].concat(),
+        );
+        let y_mat = mat_from_columns(n, &[y_tilde.as_slice()]);
+        (two_sls_point_estimate(&design, &x_tilde, &y_mat), design)
     };
     drop(fitted_endog);
 
@@ -198,18 +202,13 @@ pub(super) fn fit_fe_two_sls(
         None
     };
 
-    // 係数の共分散と全体F検定は、`X̂ = QR`の直交座標（`b̃ = Q'ỹ`、構造残差のミート`M̃`）で求める。
+    // 係数の共分散と全体F検定は、上のQRの直交座標（`b̃ = Q'ỹ`、構造残差のミート`M̃`）で求める。
     // `V = B M B`（`B = (X̂'X̂)⁻¹`）を作ってから反転すると、傾きの相関が極端に高いときに`B`の
     // 明示的な逆行列で桁落ちする。`M̃`は`panel_cov_params`に`x = Q`・`xtx_inv = 単位行列`を
     // 渡して得て、`V = R⁻¹ M̃ R⁻ᵀ`と統計量の両方に使う（`shared::orthonormal`）。`β = (X̂'X̂)⁻¹X̂'ỹ`
-    // なので`Rβ = Q'ỹ`。`Q`を作った直後に`x_hat`を解放する（`x_hat`の寿命は延びず、`Q`と
-    // 入れ替わるだけでピークは増えない）。
+    // なので`Rβ = Q'ỹ`（点推定が返す`coordinates`）。
     let residuals: Vec<f64> = (0..n).map(|i| *estimate.residuals.get(i, 0)).collect();
-    let design = OrthonormalDesign::new(&x_hat).map_err(|err| PanelError::SecondStageFailed {
-        source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
-    })?;
-    drop(x_hat);
-    let coordinates = design.coordinates(&mat_from_columns(n, &[y_tilde.as_slice()]));
+    let coordinates = estimate.coordinates.clone();
     let PanelCov {
         cov_params: meat,
         df_inference,

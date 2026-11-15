@@ -101,7 +101,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
   よりR対角成分にNaNを生成しうるため。単純な`<=`比較だとNaNとの比較が常にfalseになりすり抜ける）。
 - `(X'X)⁻¹`（`shared::covariance::xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
   導出する案は実測で高速化しないことを確認済み）。OLSの標準誤差は`R⁻¹M̃R⁻ᵀ`で作るので使わない
-  （`least_squares`経由のFE・IV・FE-IV等は今も使う）。
+  （RE・Wallace-Hussainのトレース形は`(Z'Z)⁻¹ = R⁻¹R⁻ᵀ`を`OrthonormalDesign::gram_inverse`で作る）。
 
 ### 3.2 標準誤差
 

@@ -33,7 +33,7 @@ use super::variance::{
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::PanelError;
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::least_squares::{LeastSquaresFit, least_squares};
+use crate::shared::orthonormal::OrthonormalDesign;
 
 /// RE（GLS）の分散成分（σ_ε²・σ_u²・σ_λ²）の推定法（`re-spec.md`3.1節・3.1.2節）。
 /// `plm::ercomp`の`method`（`swar`・`walhus`・`amemiya`）に対応する。
@@ -217,8 +217,17 @@ fn group_means(values: &[f64], groups: &GroupCodes) -> Vec<f64> {
         .collect()
 }
 
-/// 切片と全説明変数へのプールドOLS（Wallace-Hussainの1段目）。
-fn pooled_fit(input: &ReInput) -> Result<LeastSquaresFit, PanelError> {
+/// プールドOLS（Wallace-Hussainの1段目）の残差と`(Z'Z)⁻¹`。
+struct PooledFit {
+    /// 残差 (n, 1)
+    residuals: Mat<f64>,
+    /// `(Z'Z)⁻¹`（`Z = [1, X]`、p×p）
+    xtx_inv: Mat<f64>,
+}
+
+/// 切片と全説明変数へのプールドOLS（Wallace-Hussainの1段目）。`Z = QR`のQR分解から、残差と
+/// `(Z'Z)⁻¹ = R⁻¹R⁻ᵀ`を求める（ランク落ち・悪条件の判定は`OrthonormalDesign::new_checked`）。
+fn pooled_fit(input: &ReInput) -> Result<PooledFit, PanelError> {
     let n = input.nobs();
     let k = input.x().len();
     let design = Mat::from_fn(
@@ -229,13 +238,18 @@ fn pooled_fit(input: &ReInput) -> Result<LeastSquaresFit, PanelError> {
         },
     );
     let y = Mat::from_fn(n, 1, |i, _| input.y()[i]);
-    least_squares(&design, &y).map_err(|err| {
+    let qr = OrthonormalDesign::new_checked(&design).map_err(|err| {
         let names: Vec<String> = std::iter::once("const".to_string())
             .chain(input.x_names().iter().cloned())
             .collect();
         PanelError::PooledRegressionFailed {
             source: LeastSquaresError::from_rank_deficient(err, &design, &names),
         }
+    })?;
+    let residuals = qr.residuals(&y, &qr.coordinates(&y));
+    Ok(PooledFit {
+        residuals,
+        xtx_inv: qr.gram_inverse(),
     })
 }
 
@@ -307,7 +321,7 @@ type Moments = (f64, f64, f64, f64);
 /// - `M_w,η = tr((Z'Z)⁻¹ W (Z'Z)⁻¹ S)`
 /// - `M_id,ν = N - tr((Z'Z)⁻¹ B)`
 /// - `M_id,η = O - 2 tr((Z'Z)⁻¹ S) + tr((Z'Z)⁻¹ B (Z'Z)⁻¹ S)`
-fn pooled_trace_moments(input: &ReInput, entity: &GroupCodes, fit: &LeastSquaresFit) -> Moments {
+fn pooled_trace_moments(input: &ReInput, entity: &GroupCodes, fit: &PooledFit) -> Moments {
     let n = input.nobs();
     let k = input.x().len();
     let p = k + 1;

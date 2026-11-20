@@ -10,7 +10,7 @@ use super::problem::TobitProblem;
 use super::scaling::TobitScaling;
 use super::statistics::{log_likelihood, ols_initial_params, validate_has_uncensored_observations};
 use crate::nonlinear::common::{
-    MleError, MleFitOptions, cov_params_for_type, run_solver, scores_needed,
+    MleError, MleFitOptions, orthogonal_inference_for_type, run_solver, scores_needed,
     validate_cluster_cov_type, validate_mle_options, validate_sufficient_observations,
 };
 use crate::shared::inference;
@@ -80,7 +80,22 @@ pub(super) fn fit_tobit(
 
     let hessian_std = Mat::from_fn(k + 1, k + 1, |i, j| output.hessian[i][j]);
     let scores = problem_for_scores.map(|problem| problem.scores(&output.params));
-    let cov_params_std = cov_params_for_type(&cov_type, &hessian_std, scores.as_ref(), n, k + 1)?;
+    // 傾き（検定対象）を末尾に並べ替えた直交座標で共分散とWald検定の入力を作る
+    // （`orthogonal_inference_for_type`）。並びは`[切片, logσ, 傾き...]`（切片なしは`[logσ, 傾き...]`）。
+    let k_constant = usize::from(input.has_intercept());
+    let order: Vec<usize> = (0..k_constant)
+        .chain(std::iter::once(k))
+        .chain(k_constant..k)
+        .collect();
+    let inference = orthogonal_inference_for_type(
+        &cov_type,
+        &hessian_std,
+        scores.as_ref(),
+        &output.params,
+        n,
+        &order,
+    )?;
+    let cov_params_std = inference.cov_params;
     // 標準化空間`(β̃, s̃)`の分散共分散行列を、元のスケール`(β, σ)`空間へ
     // `Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`で変換する（`J`は`TobitScaling::param_jacobian`。
     // `x`の列標準化・センタリングの解除と、`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を
@@ -124,7 +139,6 @@ pub(super) fn fit_tobit(
     let bic = -2.0 * llf + (n as f64).ln() * ((k + 1) as f64);
     let df_resid = n - (k + 1);
 
-    let k_constant = usize::from(input.has_intercept());
     let df_model = k - k_constant;
     let (wald_statistic, wald_p_value) = if df_model == 0 {
         // 検定対象の傾き係数が存在しない（切片のみ、または切片も無いモデル）。
@@ -132,9 +146,15 @@ pub(super) fn fit_tobit(
         // （0除算・自由度0のカイ二乗分布の構築を避ける）。
         (f64::NAN, f64::NAN)
     } else {
-        // 検定対象は`β`の傾き係数（`cov_params`の`k_constant..k`）で、`σ`（`k`番目）は含まれない。
-        let beta = Mat::from_fn(k, 1, |i, _| params[i]);
-        wald_chi2_test(&beta, &cov_params, k_constant, df_model)?
+        // 検定対象は`β`の傾き係数で、`σ`は含まれない。標準化空間の直交座標`(b̃, M̃)`の末尾`df_model`
+        // 成分が傾きで、先頭の`k_constant + 1`個（切片と`logσ`）は検定しない。標準化は傾きを対角行列で
+        // 変換するだけなので、統計量は元のスケールで`β_S'V_SS⁻¹β_S`を作った値と同じ。
+        wald_chi2_test(
+            &inference.coordinates,
+            &inference.meat,
+            k_constant + 1,
+            df_model,
+        )?
     };
 
     Ok(TobitEstimator {

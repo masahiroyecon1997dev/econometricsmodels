@@ -96,6 +96,13 @@
   - **LP定式化の注意**: 目的関数を`Σ‖z‖`などで正規化すると`n`で縮み、和の閾値は`n`で雑音が積もる。単位長の行にそろえ、解の最大マージンを絶対閾値と比べる。分離観測の個数を数える定式化（`s_i≤1`）は`n=1e5`で12〜18秒と超線形に遅く不採用。
   - **実測・限界**: `docs/spec/logit-spec.md`3.2節・4章。再現データは`benchmark/nonlinear/datasets.py`の`quasi_complete_separation`・`complete_separation`と`tests/support/_helpers.py`の`small_sample_separation_dataset`・`strongly_collinear_binary_dataset`。
 
+## Tobitの全体Wald・共分散は`-H`のコレスキー因子の直交座標（`orthogonal_inference_for_type`）
+
+- **新しい手法で`cov_params_for_type`の結果から全体Waldを作ってはいけない（相関の高い傾きで桁を失う）**: `-H⁻¹`と`Ψ`を明示的にかけ合わせる式は、傾きの相関が約`1 - 1e-11`以上で桁落ちする。Tobitは`orthogonal_inference_for_type`で`A = -H = R'R`（`shared::orthonormal::information_factor`）の座標`b̃ = Rθ̂`・`V = R⁻¹M̃R⁻ᵀ`を作り、`wald_chi2_test(&coordinates, &meat, k_constant + 1, df_model)`に渡す。並びは`[切片, logσ, 傾き...]`（`R`が上三角なので末尾の傾きだけで検定できる）。`cov_params_for_type`はLogit/Probit（Wald検定を持たない）が使う。
+- **受け入れ境界は`-H`を対角で揃えた条件数の平方根`1e6`（`MAX_INFORMATION_CONDITION`）。因子ができる前に特異値分解で見積もる**: コレスキー分解は特異に近い`A`でも失敗せず、誤った因子を返す（`eps = 1e-8`の準共線でWaldが`735`のところ`764`）。因子の条件数で判定する実装に戻さないこと。他の手法の`5e7`にそろえないのは、`H`の丸め（`cond(X)²`）が統計量に条件数に比例して入るため。`opg`は`-H`を使わず、スコア行列のQR（`OrthonormalDesign::checked_r_factor`、`5e7`）の`R`が因子。
+- **スコアは外積和を取る前に`s̃ = R⁻ᵀs`にする（`solve_upper_from_right`）**。`Ψ = Σ sᵢsᵢ'`を先に作ると条件数が2乗になる。
+- 回帰ガード: `nonlinear/common/cov.rs`の`orthogonal_wald_matches_exact_rational_values_for_nearly_collinear_information`（同じ`H`・`S`の有理数の厳密値）・`orthogonal_inference_matches_the_explicit_covariance_for_every_cov_type`（従来の式との一致）、`shared/orthonormal.rs`の`information_factor_*`、`tests/cross_method/test_near_collinear_tobit.py`（境界・再パラメータ化・単位）。
+
 ## Tobit `expected_uncensored`（`E[y|lower<y<upper,x]`）の数値実装で踏む罠
 
 - **`W=Φ(zb)-Φ(za)`で割る量は、`W`を作らずに`Pa=φ(za)/W`・`Pb=φ(zb)/W`を直接計算する**（`tobit/mills.rs`の`truncation_pdf_ratios`）。既存3 targetは`W`で割らないので、`clamped_pdf_cdf`（`|z|>8.13`でクランプ）で足りたが、`E[y|uncensored]`は`μ`が境界から遠い観測（実データ`many_regressors`で`za=72`）で`W→0`になり、素の`φ/W`は`0/0`になる。片側は逆ミルズ比（`a>=3`は連分数）、両側は上側/下側の裾を比（`p·q/(q-r·p)`）で、中央は正の項の和で組む。

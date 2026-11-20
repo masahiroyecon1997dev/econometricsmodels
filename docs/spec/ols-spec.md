@@ -88,7 +88,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 - 係数は、ピボットなしQR `X = QR`から`β̂ = R⁻¹Q'y`で求める（残差は`y - Q(Q'y)`）。共分散・全体Fと同じQR
   1本を使い、n×kの列ピボットQRと`(X'X)⁻¹`は走らせない（時間の根拠は`engine/src/linear/CLAUDE.md`）。
   以下の特異性判定は、列を単位ノルムに揃えたこの`R`（k×k）の列ピボットQRに対して行う（`X`の列を揃えた
-  行列と同じ特異値を持ち、閾値は相対`k·ε`で、列の単位に依らない。2SLS・FE・RE・FE-IVも同じ`new_checked`で判定する。条件数が1e12を超える設計は完全な共線として列名つきの`DESIGN_MATRIX_SINGULAR`にする（ダミー変数トラップ・重複列の条件数は1e14〜1e16で、ランク判定の閾値の境界に来て`DESIGN_GRAM`に転ぶのを防ぐ）。GMM・Logit・Probit・Tobitだけが`X`の列ピボットQRで求める従来の形）。以下の説明のうち`X`の`col_piv_qr`とあるのは、
+  行列と同じ特異値を持ち、閾値は相対`k·ε`で、列の単位に依らない。2SLS・FE・RE・FE-IVも同じ`new_checked`で判定する。条件数が1e12を超える設計は完全な共線として列名つきの`DESIGN_MATRIX_SINGULAR`にする（ダミー変数トラップ・重複列の条件数は1e14〜1e16で、ランク判定の閾値の境界に来て`DESIGN_GRAM`に転ぶのを防ぐ）。Logit・Probit・Tobitだけが`X`の列ピボットQRで求める従来の形）。以下の説明のうち`X`の`col_piv_qr`とあるのは、
   OLSでは`R`の`col_piv_qr`に読み替える。さらに、列を単位ノルムに揃えた`R`の条件数が5e7を超える設計は
   `MATRIX_NEAR_SINGULAR`（`DESIGN_GRAM`）で弾く（`X'X`のCholeskyで止めていた従来の受け入れ範囲を保つ。
   QRのままだと`cond(X)`が1e8〜1e15の設計も通るが、そこでは係数が静かに大きくずれる）。
@@ -190,7 +190,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   求める**: 統計量は`b̃_S' M̃_SS⁻¹ b̃_S`（`b̃ = Q'y`、`M̃`は`x = Q`・`xtx_inv = 単位行列`で既存のmeat
   構築部品を呼んで得る）、係数の共分散は`V = R⁻¹M̃R⁻ᵀ`（`shared::orthonormal`）。傾きの相関が`1 - 5e-13`でも、厳密な有理数演算との相対誤差は
   `1e-11`（`tests/support/_exact_wald.py`）。標準誤差は旧経路との差が凍結データ79件で最大`2e-12`。
-  この経路はOLS・WLS・IV 2SLS・FE・RE・FE-IV。IV GMM・FE-GMM・Tobitは従来の`cov_params`を渡す経路。
+  この経路はOLS・WLS・IV 2SLS・FE・RE・FE-IV。IV GMM・FE-GMMは白色化した操作変数の座標（`iv-spec.md`）、Tobitは`-H`のコレスキー因子の座標（`tobit-spec.md`3.3節）。
 - **被説明変数が定数（`OUTCOME_CONSTANT`）**: 切片のあるモデルで`y`が（丸め誤差の範囲で）全行で
   同じ値だと、中心化した総平方和が0でR²が定義できない。入力だけから分かるので、QR分解より前に
   `ValidationError`にする。切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。

@@ -161,3 +161,15 @@ GMM（コミット`b7de4fa7`・`ccb10e97`・`127a942e`と、レビュー対応�
 #662はまだ開いている（GMMは済み、Tobitが残り）。#664（GMMの最適化）は起票済み。#658は閉じた。
 
 **次: Tobit**（軽いレビュー）。方針: `−H = R'R`（Hessianのコレスキー、パラメータの順を`[const, log σ, 傾き]`に並べ替えて傾きを末尾）、`M̃ = R⁻ᵀ(Σ s_i s_i')R⁻¹`、`b̃ = Rθ̂`、Wald`b̃_S'M̃_SS⁻¹b̃_S`。クラスターのスコア・HC0・HC1の小標本補正は`nonlinear/common/cov.rs`（`cov_params_for_type`）を参照。Tobitの受け入れ境界は新設（`−H`の列を揃えた分解の条件数の平方根を5e7・1e12と比べる。ユーザー決定は「他にそろえる」。数値は実測してから決める）。標準化した列で当てはめるので座標化も標準化後のHessianで行う。Hessian自体の`cond(X)²`の丸めは残る。検証は`tests/cross_method/`の再パラメータ化（Tobitは有理数の厳密値が作れないので、`(x2 − x1)/2^k`の不変性）と、同じ`H`・`S`を入力にした厳密値（試作は`scratchpad/tobit_proto.py`相当: numpyで`H`・`S`を組み、有理数で`V`とWaldを求める）。Tobitの現状の精度（再パラメータ化で、`eps=1e-4`でWald相対誤差1.4e-8（classical）〜1.2e-5（cluster）、`1e-6`でhc1・clusterは`COEFFICIENT_COVARIANCE`で止まる）。終わったら#662に測定結果をコメントして閉じる、最後に公開ページ・CHANGELOG・内部文書を直し、軽いレビュー、ノートの内容を`docs/spec/`へ集約してノートを削除する。
+
+### 10.1 Tobit（2026-11-20、実装・テスト・文書まで済み。未コミット→コミット待ち）
+
+実装: `nonlinear/common/cov.rs`の`orthogonal_inference_for_type`（`-H`のコレスキー因子`R`、`opg`はスコアのQR。パラメータ`[切片, logσ, 傾き]`、`s̃ = R⁻ᵀs`、ミートはclassical/opg=単位行列・hc0/hc1=`Σ s̃s̃'`・cluster）、`shared/orthonormal.rs`の`information_factor`（`MAX_INFORMATION_CONDITION=1e6`、特異値分解で先に判定）・`solve_upper_from_right`・`covariance_from_factor`、`tobit/fit.rs`は`wald_chi2_test(&coordinates, &meat, k_constant+1, df_model)`。
+
+ユーザー決定: 受け入れ境界は`-H`を対角で揃えた条件数の**平方根が1e6以内**（5e7にそろえない。実測: 因子の条件数で判定するとcond≈1e15でコレスキーが通り、eps=1e-8でWaldが735のところ764になった）。Q座標で解く案（`H`の丸めも`cond(X)`の1乗になり5e7にそろえられる）は未着手、必要なら別Issue。
+
+精度（再パラメータ化との相対差）: eps=1e-5で最大6.4e-8（cluster）、境界の2.5e-6で最大1.1e-7（3e-6では2.5e-6）。傾きのSEは1e-6程度（`H`の丸め）。同じ`H`・`S`の有理数の厳密値との差は1e-8未満（Rust単体テスト）。変更前はeps=1e-5でhc0/cluster 9e-4、1e-6で`COEFFICIENT_COVARIANCE`。
+
+テスト: `tests/cross_method/test_near_collinear_tobit.py`（158件。境界・単位・再パラメータ化・ソルバー）、Rust単体7件。全体: cargo test 1584件・pytest 19564件・ruff/clippy/fmt/エラーカタログ clean。文書: CHANGELOG・validation.md・verification.md・tobit-spec.md 3.3節・ols-spec.md・nonlinear/CLAUDE.md・wald.rs docstring。
+
+残り: rust-reviewerの軽いレビュー（実行中）→指摘対応→コミット→#662に測定結果をコメントして閉じる（ユーザーの指示後）→ノートを`docs/spec/`に集約して削除。未決: HAC重みのQR経路を残すか（利得なし）。

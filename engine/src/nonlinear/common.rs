@@ -64,7 +64,7 @@ pub(crate) use cov::cluster_cov_params;
 pub use cov::{
     SandwichVariant, observed_information_cov_params, opg_cov_params, sandwich_cov_params,
 };
-pub(crate) use cov::{cov_params_for_type, scores_needed};
+pub(crate) use cov::{cov_params_for_type, orthogonal_inference_for_type, scores_needed};
 pub use error::MleError;
 pub use goodness_of_fit::{GoodnessOfFit, goodness_of_fit, log_likelihood_null};
 pub use initial::{checked_design_matrix_qr, ols_based_initial_params};

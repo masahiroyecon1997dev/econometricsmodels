@@ -21,20 +21,13 @@ use crate::shared::wald::wald_f_test;
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
-/// 第二段階の設計行列が回帰できる入力かを検査する。`OlsEstimator::fit`が回帰の前に行う検査
-/// （回帰変数の有無・`confidence_level`の範囲）と同じ条件で、失敗は`SecondStageFailed`にする。
-/// `x_endog=[]`のときは第一段階が一度も回らないので、`confidence_level`の範囲違反を検知する
-/// 唯一の経路になる。観測数は`validate_iv_fit_inputs`が`n > k`を検証済み。
-fn validate_second_stage(n: usize, k: usize, confidence_level: f64) -> Result<(), IvError> {
+/// 第二段階の設計行列が回帰変数を持つかを検査する。`OlsEstimator::fit`が回帰の前に行う検査（回帰変数の有無）と
+/// 同じ条件で、失敗は`SecondStageFailed`にする。`confidence_level`の範囲は`validate_iv_fit_inputs`が
+/// 先頭で検査済み。観測数は`validate_iv_fit_inputs`が`n > k`を検証済み。
+fn validate_second_stage(n: usize, k: usize) -> Result<(), IvError> {
     validate_has_regressors(n, k).map_err(|source| IvError::SecondStageFailed {
         source: source.into(),
-    })?;
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(IvError::SecondStageFailed {
-            source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
-        });
-    }
-    Ok(())
+    })
 }
 
 /// [`TwoSlsEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
@@ -50,7 +43,7 @@ pub(super) fn fit_two_sls(
     // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`以下の入力、
     // 被説明変数が定数の入力を、第一段階の`OlsEstimator::fit`
     // （`FirstStageFailed`にラップされ、`k`・`q`も構造方程式のものと食い違う）より先に弾く（`compute_first_stage`より前）。
-    validate_iv_fit_inputs(&input, &cov_type)?;
+    validate_iv_fit_inputs(&input, &cov_type, confidence_level, None)?;
 
     // 第一段階回帰・弱操作変数診断（部分F統計量、docs/spec/iv-spec.md 3.4節）は
     // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
@@ -90,7 +83,7 @@ pub(super) fn fit_two_sls(
     let mut param_names: Vec<String> = input.x_exog_names().to_vec();
     param_names.extend(input.x_endog_names().iter().cloned());
 
-    validate_second_stage(n, k, confidence_level)?;
+    validate_second_stage(n, k)?;
     // `X̂ = QR`（ピボットなしQR）1本から、係数（`β̂ = R⁻¹Q'y`）・構造残差・共分散・全体Fを求める。
     // ランク落ちと悪条件は`new_checked`が判定する（`shared::orthonormal`）。
     let design =

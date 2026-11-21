@@ -28,7 +28,7 @@ fn groups_of(count: usize) -> FeWeightType {
 
 #[test]
 fn invalid_max_iter_is_rejected_before_anything_else() {
-    for invalid in [0_usize, 1, 2, 10_001] {
+    for invalid in [0_i64, 1, 2, 10_001, -1, i64::MIN] {
         let err = error_of(fit(
             one_way_input(),
             FeEffects::OneWay,
@@ -40,11 +40,60 @@ fn invalid_max_iter_is_rejected_before_anything_else() {
         ));
         assert_eq!(
             err,
-            PanelError::Common(CommonError::InvalidGmmMaxIter {
-                max_iter: invalid as i64
-            })
+            PanelError::Common(CommonError::InvalidGmmMaxIter { max_iter: invalid })
         );
     }
+}
+
+/// 設定値は、データを見る検査（singleton）より先に、`confidence_level` → `max_iter` → `tol` →
+/// `gmm_max_iter` → `gmm_tol`の順で報告される。
+#[test]
+fn settings_are_reported_in_order_before_the_data_checks() {
+    // 個体0の行を1つだけ残す（singleton）。
+    let rows: Vec<usize> = std::iter::once(0).chain(4..40).collect();
+    let iterated = |max_iter: i64, tol: f64| FeGmmType::Iterated {
+        weight: FeWeightType::Classical,
+        max_iter,
+        tol,
+    };
+    let fit_with = |gmm_type: FeGmmType, confidence_level: f64, absorption: FeAbsorption| {
+        error_of(FeGmmEstimator::fit_with_absorption(
+            input_with(&rows, &[entity_labels()]),
+            FeEffects::OneWay,
+            gmm_type,
+            true,
+            FeCovType::Classical,
+            confidence_level,
+            &absorption,
+        ))
+    };
+    let valid = FeAbsorption::default();
+    let bad_absorption = FeAbsorption {
+        tol: -1.0,
+        max_iter: 0,
+    };
+
+    assert!(matches!(
+        fit_with(iterated(10, 1e-6), 0.95, valid),
+        PanelError::SingletonGroup { .. }
+    ));
+    // すべて不正なら、`confidence_level`、`max_iter`、`gmm_max_iter`の順。
+    assert!(matches!(
+        fit_with(iterated(1, -1.0), 1.5, bad_absorption),
+        PanelError::WithinRegressionFailed { .. }
+    ));
+    assert_eq!(
+        fit_with(iterated(1, -1.0), 0.95, bad_absorption),
+        PanelError::InvalidMaxIter { max_iter: 0 }
+    );
+    assert_eq!(
+        fit_with(iterated(1, -1.0), 0.95, valid),
+        PanelError::Common(CommonError::InvalidGmmMaxIter { max_iter: 1 })
+    );
+    assert!(matches!(
+        fit_with(iterated(10, -1.0), 0.95, valid),
+        PanelError::Common(CommonError::InvalidGmmTol { .. })
+    ));
 }
 
 #[test]
@@ -69,7 +118,7 @@ fn invalid_tol_is_rejected() {
 /// `max_iter`の範囲の端（3と10,000）は受理する。
 #[test]
 fn max_iter_boundaries_are_accepted() {
-    for max_iter in [3_usize, 10_000] {
+    for max_iter in [3_i64, 10_000] {
         let result = fit(
             one_way_input(),
             FeEffects::OneWay,

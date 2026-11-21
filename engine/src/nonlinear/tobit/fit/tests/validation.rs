@@ -537,3 +537,74 @@ fn fit_does_not_return_no_uncensored_observations_error_when_exactly_one_observa
         "{result:?}"
     );
 }
+
+/// 設定値（`confidence_level` → `max_iter` → `tol`）、打ち切り境界、観測数の順に報告される
+/// （設定値の検査をデータに依る検査より先に行う順序は、Logit・Probitと同じ）。
+#[test]
+fn fit_reports_settings_before_the_censoring_bounds_and_the_observation_count() {
+    // `n = 2 <= k + 1 = 2`（定数項のみ）で、`y`が下限`0.0`を下回る行を含み、境界も不正。
+    let build = |lower: Option<f64>, upper: Option<f64>| {
+        TobitInput::from_columns(
+            &[-1.0, 1.0],
+            &[],
+            vec![],
+            true,
+            "y".to_string(),
+            lower,
+            upper,
+        )
+        .unwrap()
+    };
+    let options = |confidence_level: f64, max_iter: i64, tol: f64| MleFitOptions {
+        solver: SolverType::Newton,
+        max_iter,
+        tol,
+        raise_on_non_convergence: true,
+        cov_type: CovType::Classical,
+        confidence_level,
+    };
+    let fit = |lower: Option<f64>, upper: Option<f64>, options: MleFitOptions| {
+        TobitEstimator::fit(build(lower, upper), options).unwrap_err()
+    };
+
+    // 設定値が不正なら、境界が不正でも設定値のエラー（`confidence_level` → `max_iter` → `tol`）。
+    assert!(matches!(
+        fit(None, None, options(1.5, 0, -1.0)),
+        MleError::Common(CommonError::InvalidConfidenceLevel { .. })
+    ));
+    assert!(matches!(
+        fit(None, None, options(0.95, 0, -1.0)),
+        MleError::InvalidMaxIter { .. }
+    ));
+    assert!(matches!(
+        fit(None, None, options(0.95, 10, -1.0)),
+        MleError::InvalidTol { .. }
+    ));
+    // 設定値が有効なら、観測数より先に境界。
+    assert_eq!(
+        fit(None, None, options(0.95, 10, 1e-8)),
+        MleError::CensoringBoundsMissing
+    );
+    assert!(matches!(
+        fit(Some(0.0), None, options(0.95, 10, 1e-8)),
+        MleError::YOutOfCensoringBounds { row: 0, .. }
+    ));
+    // 境界が有効で`y`も範囲内なら、観測数。
+    assert_eq!(
+        TobitEstimator::fit(
+            TobitInput::from_columns(
+                &[0.0, 1.0],
+                &[],
+                vec![],
+                true,
+                "y".to_string(),
+                Some(0.0),
+                None
+            )
+            .unwrap(),
+            options(0.95, 10, 1e-8),
+        )
+        .unwrap_err(),
+        MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+    );
+}

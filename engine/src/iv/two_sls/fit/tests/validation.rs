@@ -126,10 +126,9 @@ fn fit_returns_outcome_constant_before_the_first_stage() {
 }
 
 #[test]
-fn fit_returns_second_stage_failed_when_confidence_level_is_invalid_and_x_endog_is_empty() {
-    // `x_endog=[]`だと第一段階ループが一度も回らないため、`confidence_level`の
-    // 範囲チェックは第二段階の回帰の前の検査（`validate_second_stage`）でのみ働く（`two_sls.rs`の
-    // モジュールdoc参照）。
+fn fit_returns_invalid_confidence_level_when_x_endog_is_empty() {
+    // `x_endog=[]`で第一段階ループが一度も回らなくても、`confidence_level`の範囲は
+    // `validate_iv_fit_inputs`が先頭で検査する（段階を示す包みは付かない）。
     let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
     let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
     let input = IvInput::from_columns(
@@ -148,13 +147,9 @@ fn fit_returns_second_stage_failed_when_confidence_level_is_invalid_and_x_endog_
     let result = TwoSlsEstimator::fit(input, CovType::Classical, 1.5);
     assert_eq!(
         result.unwrap_err(),
-        IvError::SecondStageFailed {
-            source: crate::linear::common::LeastSquaresError::Common(
-                CommonError::InvalidConfidenceLevel {
-                    confidence_level: 1.5
-                }
-            ),
-        }
+        IvError::Common(CommonError::InvalidConfidenceLevel {
+            confidence_level: 1.5
+        })
     );
 }
 
@@ -191,7 +186,6 @@ fn fit_returns_second_stage_failed_when_there_are_no_regressors() {
 #[test]
 fn fit_reports_an_invalid_confidence_level_before_a_singular_second_stage_design() {
     // 同じ列を2つ持つ`x_exog`（設計行列が特異）と範囲外の`confidence_level`が重なるとき、
-    // 第二段階の検査の順（回帰変数の有無→`confidence_level`→特異性）どおりに
     // `confidence_level`のエラーが先に出る。
     let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
     let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
@@ -212,13 +206,42 @@ fn fit_reports_an_invalid_confidence_level_before_a_singular_second_stage_design
 
     assert_eq!(
         result.unwrap_err(),
-        IvError::SecondStageFailed {
-            source: crate::linear::common::LeastSquaresError::Common(
-                CommonError::InvalidConfidenceLevel {
-                    confidence_level: 1.5
-                }
-            ),
-        }
+        IvError::Common(CommonError::InvalidConfidenceLevel {
+            confidence_level: 1.5
+        })
+    );
+}
+
+/// 範囲外の`confidence_level`は、識別の順序条件・観測数・クラスター数・被説明変数の定数より先に
+/// 報告される（設定値の検査がデータの大きさに依る検査より先、他の手法と同じ順序）。
+#[test]
+fn fit_reports_an_invalid_confidence_level_before_the_observation_count() {
+    // 構造方程式は`k = 3`（定数項・`x1`・`endog1`）で、`n = 3 <= k`。
+    let col = |offset: f64| -> Vec<f64> { (0..3).map(|i| f64::from(i) * 0.7 + offset).collect() };
+    let build = || {
+        IvInput::from_columns(
+            &col(0.0),
+            &[col(1.0)],
+            vec!["x1".to_string()],
+            &[col(2.0)],
+            vec!["endog1".to_string()],
+            &[col(3.0)],
+            vec!["z1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    };
+
+    assert_eq!(
+        TwoSlsEstimator::fit(build(), CovType::Classical, 0.95).unwrap_err(),
+        IvError::Common(CommonError::InsufficientObservations { n: 3, k: 3 })
+    );
+    assert_eq!(
+        TwoSlsEstimator::fit(build(), CovType::Classical, 1.5).unwrap_err(),
+        IvError::Common(CommonError::InvalidConfidenceLevel {
+            confidence_level: 1.5
+        })
     );
 }
 

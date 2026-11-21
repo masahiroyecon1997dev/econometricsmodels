@@ -268,19 +268,21 @@ impl FeEstimator {
     /// 「`cov_type`対応」「パネル固有R²」参照）。
     ///
     /// パイプライン: 吸収する次元の解決（`absorbed_levels`。2-wayで`time`が無ければ
-    /// `PanelError::TwoWayRequiresTime`。以降の検証より先に評価する）→ singleton検出
+    /// `PanelError::TwoWayRequiresTime`。以降の検証より先に評価する）→ 設定値の検査
+    /// （`confidence_level` → `max_iter` → `tol`。データを見る検査より先）→ singleton検出
     /// （`validate_no_singleton_groups_one_way`/`_two_way`/`_multi_way`）
     /// → within変換（`within_transform_one_way`/`within_transform_two_way_with`/
     /// `within_transform_multi_way`。2-wayは全組合せがそろえば閉形式、そうでなければ、3次元以上は常に
     /// 交互射影）→ 自由度検証 → 分散ゼロ検出
-    /// （`validate_no_zero_variance_regressors`）→ `confidence_level`検証 → 最小二乗
+    /// （`validate_no_zero_variance_regressors`）→ 最小二乗
     /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
     /// - `effects=TwoWay`で`input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`、
     ///   `effects=MultiWay`で入力の次元が3つ未満の場合は`CommonError::Internal`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
-    /// - 打ち切り設定が範囲外なら`PanelError::InvalidTol`・`PanelError::InvalidMaxIter`、不均衡な2-wayで
+    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（他のどの検査より先）
+    /// - 打ち切り設定が範囲外なら`PanelError::InvalidMaxIter`・`PanelError::InvalidTol`（この順）、不均衡な2-wayで
     ///   交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
     /// - HC2/HC3で密な行列を解く場合（組合せが欠ける2-way、3次元以上）に、最大の次元を除いた水準数の合計が
     ///   上限を超えれば

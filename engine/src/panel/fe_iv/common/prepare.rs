@@ -11,7 +11,7 @@ use faer::Mat;
 use super::input::FeIvInput;
 use crate::panel::common::{
     ColumnRole, PanelError, absorbed_parameters, ensure_no_singleton_groups,
-    ensure_no_zero_variance_columns,
+    ensure_no_zero_variance_columns, validate_confidence_level,
 };
 use crate::panel::fe::{FeAbsorption, FeEffects, FeInput, WithinColumns, within_transform_columns};
 use crate::shared::error::{CommonError, ErrorInfo};
@@ -55,7 +55,7 @@ pub(in crate::panel::fe_iv) struct WithinPrepared<'a> {
 
 /// [`WithinPrepared`]を作る。
 ///
-/// `confidence_level`は`Some`のとき、`absorption`の検証の直後に`(0, 1)`かを調べる（推論をしない
+/// `confidence_level`は`Some`のとき、`absorption`の検証の前に`(0, 1)`かを調べる（推論をしない
 /// 推定量は`None`）。`first_stage`は、操作変数の自由度の不足（`n <= l + neffects`）を第一段階の
 /// 失敗（`stage=FIRST_STAGE`つき）として返すか（FE-2SLS）、段階の無いエラーとして返すか（GMM）。
 ///
@@ -72,14 +72,11 @@ pub(in crate::panel::fe_iv) fn prepare_within<'a>(
     let groups = input.index().effect_codes();
     // 吸収する次元。`time`の無い2-wayや次元が足りない`MultiWay`はここで弾く。
     let levels = effects.levels(groups)?;
-    absorption.validate()?;
-    if let Some(confidence_level) = confidence_level
-        && !(confidence_level > 0.0 && confidence_level < 1.0)
-    {
-        return Err(PanelError::WithinRegressionFailed {
-            source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
-        });
+    // 設定値は`confidence_level` → `max_iter` → `tol`の順に、データを見る検査より先に調べる。
+    if let Some(confidence_level) = confidence_level {
+        validate_confidence_level(confidence_level)?;
     }
+    absorption.validate()?;
 
     let n = input.nobs();
     let (k_exog, k_endog, k_instruments) = (input.k_exog(), input.k_endog(), input.k_instruments());

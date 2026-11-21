@@ -6,6 +6,7 @@ use super::hansen_j::fe_hansen_j;
 use super::{FeGmmEstimator, FeGmmType};
 use crate::panel::common::{
     PanelCovType, PanelError, PanelMoment, PanelMomentInput, panel_moment_covariance,
+    validate_confidence_level,
 };
 use crate::panel::fe::{
     FeAbsorption, FeCovType, FeEffects, FeEstimator, fe_r_squared_between, fe_r_squared_overall,
@@ -40,6 +41,11 @@ pub(super) fn fit_fe_gmm<T>(
     // faerのグローバル並列度を`Par::Seq`に固定する（`FeEstimator::fit`と同じ理由）。
     crate::shared::parallelism::ensure_serial();
 
+    // 設定値は、データを見る検査より先に、`confidence_level` → `max_iter` → `tol` →
+    // `gmm_max_iter` → `gmm_tol`の順に調べる（前の3つは`prepare_within`も同じ順で調べるので、ここでの検査と
+    // 重複するが、反復の設定を`prepare_within`の前に挟むために先に行う）。
+    validate_confidence_level(confidence_level)?;
+    absorption.validate()?;
     // 共有の反復コアが受け取る型に直して検証する。`FeGmmType`は`Hac`の重みを持たない。
     let shared_type = gmm_type.to_gmm_type();
     shared_type.validate()?;

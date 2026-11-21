@@ -37,6 +37,8 @@ pub(super) fn fit_tobit(
     crate::shared::parallelism::ensure_serial();
 
     validate_mle_options(confidence_level, max_iter, tol)?;
+    // 打ち切り境界自体と、`y`と境界の整合性（`TobitInput::from_columns`は次元だけを検証する）。
+    input.validate_censoring_bounds()?;
 
     let n = input.nobs();
     let k = input.k();

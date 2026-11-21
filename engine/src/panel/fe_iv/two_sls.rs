@@ -7,7 +7,8 @@
 //!
 //! # `FeTwoSlsEstimator::fit`のパイプライン
 //!
-//! 1. 操作変数の数の検査（`len(instruments) >= len(x_endog)`）、singleton・生の値が一定の列の検出。
+//! 1. 設定値の検査（`confidence_level` → `max_iter` → `tol`）、操作変数の数の検査（`len(instruments) >= len(x_endog)`）、
+//!    singleton・生の値が一定の列の検出。
 //! 2. `y`・`x_exog`・`x_endog`・`instruments`の全列を**1回だけ**within変換する（`FeEstimator`と同じ
 //!    変換。バランスな1-way・2-wayは閉形式、不均衡な2-wayと3次元以上は交互射影）。変換が残す誤差
 //!    （`noise`）は全列で共有し、分散ゼロ・完全適合の判定に足す。

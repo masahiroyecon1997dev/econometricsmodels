@@ -66,7 +66,7 @@ pub enum IvError {
     #[error("{}", self.catalog_message())]
     InsufficientObservationsForFirstStage { n: usize, l: usize },
 
-    /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が失敗した（回帰変数が無い・`confidence_level`が範囲外・設計行列が特異）。
+    /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が失敗した（回帰変数が無い・設計行列が特異。`confidence_level`の範囲は`fit()`の先頭で検査済み）。
     #[error("{}", self.catalog_message())]
     SecondStageFailed {
         #[source]
@@ -81,7 +81,7 @@ pub enum IvError {
     /// Wald検定側の数値的なほぼ特異性（`NearSingularMatrix`）は、このバリアントを経由せず
     /// `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にするだけで`fit()`自体は成功
     /// させる**（`two_sls/fit.rs`の`fit_two_sls`参照）。このバリアントは
-    /// それら以外の（`confidence_level`・`cov_type=Cluster/Hac`の妥当性は`fit()`の
+    /// それら以外の（`confidence_level`・`cov_type=Cluster/Hac`の妥当性は`fit()`の先頭と
     /// 第二段階側で既に検証済みのため）理論上到達不能な失敗を防御的に伝播するためだけに
     /// 存在する（`FirstStageFailed`/`SecondStageFailed`と同じ理由で`LeastSquaresError`を
     /// そのまま透過させず専用バリアントにする）。

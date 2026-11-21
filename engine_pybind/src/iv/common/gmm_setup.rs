@@ -3,13 +3,10 @@
 use crate::linear::common::require_hac_time;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{extract_optional_cluster_groups, extract_time_order_ranks};
-use engine::iv::common::IvError;
 use engine::iv::gmm::{GmmType, WeightType};
-use engine::shared::error::CommonError;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
-use super::error::iv_error_to_pyerr;
 use super::option_values::{
     DEFAULT_GMM_MAX_ITER, DEFAULT_GMM_TOL, GmmKind, IvOptionValues, WeightKind,
 };
@@ -75,8 +72,7 @@ pub(crate) struct GmmSetup {
 ///
 /// # Errors
 /// - 重み行列の列の抽出時に発覚する問題: `ValidationError`
-/// - `"iterated"`で`gmm_max_iter`が負値: `IvError::InvalidGmmMaxIter`（3未満・上限超過と
-///   `gmm_tol`が0以下の検証はengine）
+/// - `gmm_max_iter`の範囲（負値を含む）と`gmm_tol`の検証はengine
 pub(super) fn resolve_gmm_setup(
     df: &DataFrame,
     options: &IVOptions,
@@ -99,14 +95,8 @@ pub(super) fn resolve_gmm_setup(
         }),
         GmmKind::Iterated => {
             let weight = resolve_weight_type(df, options, values.weight)?;
-            let max_iter = match options.gmm_max_iter {
-                Some(v) => usize::try_from(v).map_err(|_| {
-                    iv_error_to_pyerr(IvError::Common(CommonError::InvalidGmmMaxIter {
-                        max_iter: v,
-                    }))
-                })?,
-                None => DEFAULT_GMM_MAX_ITER,
-            };
+            // 範囲（負値を含む）の検査はengineの`fit`が行う。
+            let max_iter = options.gmm_max_iter.unwrap_or(DEFAULT_GMM_MAX_ITER);
             let tol = options.gmm_tol.unwrap_or(DEFAULT_GMM_TOL);
             Ok(GmmSetup {
                 gmm_type: GmmType::Iterated {

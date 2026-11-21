@@ -45,10 +45,8 @@
 //! **第一段階・第二段階のいずれにも**、`fit()`の呼び出し元から渡された`cov_type`/
 //! `confidence_level`をそのまま使う（第一段階は文字通り`OlsEstimator::fit`に渡す。
 //! 第二段階は上記のサンドイッチ計算に渡す）。
-//! `confidence_level`の`(0, 1)`範囲チェックは、第二段階の回帰の前（`two_sls/fit.rs`の
-//! `validate_second_stage`）で一度だけ行う（サンドイッチ計算側では検証しない。
-//! `x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、この検証が範囲外エラーを
-//! 検知する唯一の経路になる）。
+//! `confidence_level`の`(0, 1)`範囲チェックは、`fit()`の先頭（`validate_iv_fit_inputs`）で
+//! 他のどの検査より先に一度だけ行う（サンドイッチ計算側では検証しない。段階を示す包みは付かない）。
 //!
 //! ## ファイル構成
 //!
@@ -143,17 +141,16 @@ impl TwoSlsEstimator {
     /// `cov_type`/`confidence_level`の扱い」参照）。
     ///
     /// # Errors
+    /// - `confidence_level`が`(0, 1)`の範囲外: `IvError::Common(CommonError::InvalidConfidenceLevel)`
+    ///   （`validate_iv_fit_inputs`。他のどの検査より先）
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
     /// - 観測数`n`が構造方程式の係数の数`k`以下: `IvError::Common(CommonError::InsufficientObservations)`
     /// - 観測数`n`が第一段階の回帰変数の数`l`（`x_exog ++ instruments`、定数項込み）以下
     ///   （`n > k`でも）: `IvError::InsufficientObservationsForFirstStage`（`validate_iv_fit_inputs`）
     /// - 第一段階回帰（内生変数ごと）が失敗: `IvError::FirstStageFailed`
-    ///   （`cov_type=Cluster`でグループキー未指定・信頼水準が範囲外等、`cov_type`/
-    ///   `confidence_level`起因のエラーもここに含まれる）
-    /// - 第二段階の回帰が失敗（回帰変数が無い・`confidence_level`が範囲外・設計行列が特異）: `IvError::SecondStageFailed`
-    ///   （`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
-    ///   `confidence_level`が範囲外の場合のエラーもここ経由になる）
+    ///   （`cov_type=Cluster`でグループキー未指定等、`cov_type`起因のエラーもここに含まれる）
+    /// - 第二段階の回帰が失敗（回帰変数が無い・設計行列が特異）: `IvError::SecondStageFailed`
     /// - `cov_type=Hac`の`hac_lags`が不正: `CommonError::InvalidHacLags`
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /

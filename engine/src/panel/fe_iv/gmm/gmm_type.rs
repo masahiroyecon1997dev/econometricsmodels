@@ -35,7 +35,7 @@ pub enum FeGmmType {
     /// （3以上）に達するまで繰り返す。
     Iterated {
         weight: FeWeightType,
-        max_iter: usize,
+        max_iter: i64,
         tol: f64,
     },
 }

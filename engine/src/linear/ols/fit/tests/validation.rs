@@ -73,6 +73,32 @@ fn fit_returns_no_regressors_error_when_k_is_zero() {
     );
 }
 
+/// 範囲外の`confidence_level`は、回帰変数の有無・観測数の検査より先に報告される
+/// （設定値の検査がデータの大きさに依る検査より先、他の手法と同じ順序）。
+#[test]
+fn fit_reports_an_invalid_confidence_level_before_the_regressor_and_observation_checks() {
+    let invalid = |input: OlsInput| OlsEstimator::fit(input, CovType::Classical, 1.5).unwrap_err();
+    let expected = LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
+        confidence_level: 1.5,
+    });
+
+    // `k = 0`。
+    let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    let no_regressors = OlsInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
+    assert_eq!(invalid(no_regressors), expected);
+
+    // `n <= k`。
+    let too_few = OlsInput::from_columns(
+        &[1.0, 2.0],
+        &[vec![1.0, 2.0]],
+        vec!["x1".to_string()],
+        true,
+        "y".to_string(),
+    )
+    .unwrap();
+    assert_eq!(invalid(too_few), expected);
+}
+
 #[test]
 fn fit_returns_insufficient_observations_when_n_le_k() {
     let y = vec![1.0, 2.0];

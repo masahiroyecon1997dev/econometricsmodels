@@ -459,7 +459,7 @@ fn cluster_weight_matches_manual_computation_for_multi_way_effects() {
             } else {
                 FeGmmType::Iterated {
                     weight: weight.clone(),
-                    max_iter: estimates,
+                    max_iter: estimates as i64,
                     tol: 1e-300,
                 }
             };
@@ -521,8 +521,8 @@ fn two_step_robust_s_used_is_built_from_the_first_step_residuals() {
 fn iterated_cluster_weight_matches_manual_iteration() {
     let entity_group: Vec<usize> = (0..40).map(|r| r / 4).collect();
     let make = || input_spec(&all_rows(), &[entity_labels()], 1, 1, 2);
-    for max_iter in [3_usize, 4] {
-        let (expected, s_expected) = manual_one_way_gmm(&make(), &entity_group, max_iter);
+    for max_iter in [3_i64, 4] {
+        let (expected, s_expected) = manual_one_way_gmm(&make(), &entity_group, max_iter as usize);
         let estimator = FeGmmEstimator::fit(
             make(),
             FeEffects::OneWay,
@@ -536,7 +536,7 @@ fn iterated_cluster_weight_matches_manual_iteration() {
             0.95,
         )
         .unwrap();
-        assert_eq!(estimator.n_iter(), max_iter as i64);
+        assert_eq!(estimator.n_iter(), max_iter);
         assert_params_close(
             estimator.params(),
             &expected,

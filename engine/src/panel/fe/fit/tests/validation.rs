@@ -11,6 +11,7 @@ use crate::panel::common::ColumnRole;
 use crate::panel::common::PanelDimension;
 use crate::panel::common::PanelError;
 use crate::panel::common::TimeKeys;
+use crate::panel::fe::FeAbsorption;
 use crate::panel::fe::FeEstimator;
 use crate::panel::fe::input::FeCovType;
 use crate::panel::fe::input::FeEffects;
@@ -303,6 +304,56 @@ fn fe_estimator_fit_propagates_invalid_confidence_level_error() {
             }),
         }
     );
+}
+
+/// 設定値は、データを見る検査（singleton）より先に、`confidence_level` → `max_iter` → `tol`の順で報告される。
+#[test]
+fn fe_estimator_fit_reports_settings_in_order_before_the_data_checks() {
+    // entity "c"は1観測（singleton）。
+    let build = || {
+        let entity = strings(&["a", "a", "c"]);
+        let x1 = vec![1.0, 2.0, 3.0];
+        FeInput::from_columns(
+            &[1.0, 2.0, 3.0],
+            &[x1],
+            vec!["x1".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap()
+    };
+    let fit_with = |confidence_level: f64, tol: f64, max_iter: i64| {
+        FeEstimator::fit_with_absorption(
+            build(),
+            FeEffects::OneWay,
+            FeCovType::Classical,
+            confidence_level,
+            &FeAbsorption { tol, max_iter },
+        )
+        .unwrap_err()
+    };
+
+    assert!(matches!(
+        fit_with(0.95, 1e-8, 10),
+        PanelError::SingletonGroup { .. }
+    ));
+    assert_eq!(
+        fit_with(1.5, -1.0, 0),
+        PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5,
+            }),
+        }
+    );
+    assert_eq!(
+        fit_with(0.95, -1.0, 0),
+        PanelError::InvalidMaxIter { max_iter: 0 }
+    );
+    assert!(matches!(
+        fit_with(0.95, -1.0, 10),
+        PanelError::InvalidTol { .. }
+    ));
 }
 
 #[test]

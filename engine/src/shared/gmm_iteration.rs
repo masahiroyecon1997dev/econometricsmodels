@@ -29,7 +29,7 @@ pub enum GmmType {
     /// 含めて`max_iter`回に達するまで繰り返す（`max_iter`は3以上）。
     Iterated {
         weight: WeightType,
-        max_iter: usize,
+        max_iter: i64,
         tol: f64,
     },
 }
@@ -42,9 +42,9 @@ impl GmmType {
     /// - `tol`が正の有限値でない: `CommonError::InvalidGmmTol`
     pub(crate) fn validate(&self) -> Result<(), CommonError> {
         if let Self::Iterated { max_iter, tol, .. } = self {
-            if *max_iter < GMM_MAX_ITER_MIN as usize || *max_iter as u64 > MAX_ITER_LIMIT as u64 {
+            if !(GMM_MAX_ITER_MIN..=MAX_ITER_LIMIT).contains(max_iter) {
                 return Err(CommonError::InvalidGmmMaxIter {
-                    max_iter: *max_iter as i64,
+                    max_iter: *max_iter,
                 });
             }
             if !(tol.is_finite() && *tol > 0.0) {
@@ -166,7 +166,7 @@ pub(crate) fn gmm_iterate(
     let (max_steps, tol): (i64, Option<f64>) = match gmm_type {
         GmmType::OneStep => (1, None),
         GmmType::TwoStep { .. } => (2, None),
-        GmmType::Iterated { max_iter, tol, .. } => (*max_iter as i64, Some(*tol)),
+        GmmType::Iterated { max_iter, tol, .. } => (*max_iter, Some(*tol)),
     };
 
     if let Some(weight_type) = weight_type {
@@ -338,7 +338,7 @@ pub(crate) fn gmm_point_estimate(
 mod tests {
     use super::*;
 
-    fn iterated(max_iter: usize, tol: f64) -> GmmType {
+    fn iterated(max_iter: i64, tol: f64) -> GmmType {
         GmmType::Iterated {
             weight: WeightType::Robust,
             max_iter,
@@ -359,15 +359,13 @@ mod tests {
         );
         assert_eq!(iterated(3, 1e-12).validate(), Ok(()));
         assert_eq!(
-            iterated(MAX_ITER_LIMIT as usize, f64::MIN_POSITIVE).validate(),
+            iterated(MAX_ITER_LIMIT, f64::MIN_POSITIVE).validate(),
             Ok(())
         );
-        for invalid in [0, 1, 2, MAX_ITER_LIMIT as usize + 1] {
+        for invalid in [0, 1, 2, MAX_ITER_LIMIT + 1, i64::MAX, -1, i64::MIN] {
             assert_eq!(
                 iterated(invalid, 1e-6).validate(),
-                Err(CommonError::InvalidGmmMaxIter {
-                    max_iter: invalid as i64
-                })
+                Err(CommonError::InvalidGmmMaxIter { max_iter: invalid })
             );
         }
         for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {

@@ -17,7 +17,7 @@ use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     ColumnRole, PanelCov, PanelCovInput, PanelError, PanelStructure, absorbed_parameters,
-    overall_f_test, panel_cov_params,
+    overall_f_test, panel_cov_params, validate_confidence_level,
 };
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
@@ -49,6 +49,9 @@ pub(super) fn fit_fe(
     // 1-way/2-way/高次元を分岐する。
     absorbed_levels(effects, &input)?;
 
+    // 設定値の検査は、データを見る検査（singleton・定数列・自由度など）より先に、
+    // `confidence_level` → `max_iter` → `tol`の順で行う。
+    validate_confidence_level(confidence_level)?;
     absorption.validate()?;
 
     match effects {
@@ -164,11 +167,9 @@ pub(in crate::panel) fn fit_fe_from_within(
     drop(x);
     drop(y);
 
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(PanelError::WithinRegressionFailed {
-            source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
-        });
-    }
+    // `fit_fe`と`prepare_within`（FEIVの第一段階）が先頭で検査済みで、ここでは通らない入力が無い
+    // （`fit_fe_from_within`を単独で呼ぶ経路への備え）。
+    validate_confidence_level(confidence_level)?;
 
     // `β̂`・残差は、within変換後の設計行列`X̃ = QR`の直交座標（`b̃ = Q'ỹ`、`β̂ = R⁻¹b̃`、
     // 残差`ỹ - Qb̃`）から求める。共分散・全体F検定と同じQR 1本で済ませ、ランク落ちは`R`（k×k）の

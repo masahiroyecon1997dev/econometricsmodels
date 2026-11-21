@@ -18,7 +18,7 @@ use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
     PanelCov, PanelCovInput, PanelError, PanelStructure, panel_cov_params, quasi_demean_column,
-    quasi_demean_two_way,
+    quasi_demean_two_way, validate_confidence_level,
 };
 use crate::panel::fe::FeEffects;
 use crate::shared::error::CommonError;
@@ -41,6 +41,9 @@ pub(super) fn fit_re(
     // で`ReEstimator::fit`を直接叩く経路との統一のためここでも呼ぶ、
     // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
     crate::shared::parallelism::ensure_serial();
+
+    // 設定値の検査は、分散成分の推定（内部のFEが行うsingleton・自由度などのデータを見る検査）より先に行う。
+    validate_confidence_level(confidence_level)?;
 
     let VarianceComponents {
         sigma2_eps,

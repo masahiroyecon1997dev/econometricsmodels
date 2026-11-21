@@ -13,9 +13,11 @@
 //! ## Logit/Probitとの設計上の違い: 検証の実施箇所
 //!
 //! Logit/Probitの`validate_binary_y`（`nonlinear/common/validation.rs`）は`fit()`冒頭で呼ばれ、
-//! `from_columns`自体は次元検証のみを行う。Tobitは打ち切り境界（`lower`/`upper`）を
-//! `from_columns`の追加引数として受け取る都合上、境界自体の妥当性検証・`y`との整合性検証も
-//! `from_columns`内で完結させる。
+//! `from_columns`自体は次元検証のみを行う。Tobitも同じく、`from_columns`は次元だけを検証し、
+//! 打ち切り境界（`lower`/`upper`）自体の妥当性検証・`y`との整合性検証
+//! （`TobitInput::validate_censoring_bounds`）は`fit()`が`validate_mle_options`
+//! （`confidence_level` → `max_iter` → `tol`）の直後に行う（設定値の検査をデータに依る検査より先に
+//! 行う順序を、他の手法と揃えるため）。
 //!
 //! ## 数式（打ち切り正規回帰）
 //!
@@ -23,7 +25,7 @@
 //! 回避するための変数変換。`docs/spec/tobit-spec.md`3.1節参照。Olsen(1978)の
 //! `(β/σ, 1/σ)`変換は不採用）。
 //!
-//! `TobitInput::from_columns`が保証する通り、各観測は`lower`/`upper`との比較で
+//! `TobitInput::validate_censoring_bounds`が`fit()`で保証する通り、各観測は`lower`/`upper`との比較で
 //! 3種類に分類される（`lower`/`upper`いずれかが`None`ならその側の分類は発生しない）:
 //!
 //! - **非打ち切り**（`lower < yᵢ < upper`）: `vᵢ = (yᵢ - xᵢ'β)/σ`とおくと
@@ -225,7 +227,8 @@ impl TobitEstimator {
     /// 推定オプションの検証は3手法共通の`validate_mle_options`を使い、Logit/Probit用の
     /// `validate_fit_preconditions`は呼ばない（手法ごとの違いは同関数のdocコメント参照）。
     /// 打ち切り境界の検証（`MleError::CensoringBoundsMissing`等・`YOutOfCensoringBounds`）は
-    /// `fit()`ではなく`TobitInput::from_columns`で完了済み（モジュール冒頭のdocコメント参照）。
+    /// `TobitInput::validate_censoring_bounds`が行い、`fit()`は`validate_mle_options`の直後
+    /// （観測数の検査より前）に呼ぶ（モジュール冒頭のdocコメント参照）。
     ///
     /// ## `σ`のSE（デルタ法）
     ///
@@ -245,6 +248,8 @@ impl TobitEstimator {
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - `max_iter`が0以下: `MleError::InvalidMaxIter`
     /// - `tol`が0以下: `MleError::InvalidTol`
+    /// - 打ち切り境界が両方`None`・非有限・順序が逆、または`y`が境界の範囲外（`TobitInput::validate_censoring_bounds`）:
+    ///   `MleError::CensoringBoundsMissing`・`CensoringBoundNotFinite`・`CensoringBoundsNotOrdered`・`YOutOfCensoringBounds`
     /// - 観測数`n`が総パラメータ数`k+1`以下: `CommonError::InsufficientObservations`
     /// - 非打ち切り観測（`y`が`lower`/`upper`いずれの境界にも一致しない観測）が1件も無い:
     ///   `MleError::NoUncensoredObservations`（`validate_has_uncensored_observations`参照）

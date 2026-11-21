@@ -32,19 +32,12 @@ impl TobitInput {
     /// `TobitInput`を組み立てる。`include_intercept=true`の場合、設計行列の先頭列に
     /// 定数項（すべて1.0）を自動追加する。
     ///
-    /// 検証は次の順序で行う（`tobit.rs`のモジュールdocコメント参照）:
-    /// 1. 次元検証（`y`と各`x_columns`の長さ一致）
-    /// 2. 打ち切り境界自体の検証（`lower`/`upper`の少なくとも一方が有限の`Some`、かつ
-    ///    両方`Some`の場合は`lower < upper`。`NaN`・無限大は不正な境界として弾く）
-    /// 3. `y`と境界の整合性検証（`lower`指定時に`y < lower`の行が無い、`upper`指定時に
-    ///    `y > upper`の行が無い）
+    /// 次元（`y`と各`x_columns`の長さ一致）だけを検証する。打ち切り境界自体と、`y`と境界の整合性は
+    /// [`Self::validate_censoring_bounds`]が検証する（`fit()`が`confidence_level`・`max_iter`・`tol`の
+    /// 検査の後に呼ぶ。設定値の検査をデータに依る検査より先に行う順序を、他の手法と揃えるため）。
     ///
     /// # Errors
-    /// - `y`といずれかの`x_columns`の長さが一致しない: `CommonError::DimensionMismatch`
-    /// - `lower`/`upper`が両方`None`: `MleError::CensoringBoundsMissing`
-    /// - `lower`/`upper`のいずれかが`NaN`または無限大: `MleError::CensoringBoundNotFinite`
-    /// - 両方`Some`で`lower >= upper`: `MleError::CensoringBoundsNotOrdered`
-    /// - `y`が指定された境界の範囲外の値を含む: `MleError::YOutOfCensoringBounds`
+    /// `y`といずれかの`x_columns`の長さが一致しない: `CommonError::DimensionMismatch`
     ///
     /// # パニックについて
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする。これは
@@ -76,43 +69,6 @@ impl TobitInput {
             }
         }
 
-        // 有限性（NaN・無限大）を先に確かめ、順序の比較は有限値だけに行う
-        // （NaNは`l >= u`が常に`false`になり、順序の検査をすり抜けるため）。
-        if lower.is_none() && upper.is_none() {
-            return Err(MleError::CensoringBoundsMissing);
-        }
-        if !(lower.is_none_or(f64::is_finite) && upper.is_none_or(f64::is_finite)) {
-            return Err(MleError::CensoringBoundNotFinite { lower, upper });
-        }
-        if let (Some(l), Some(u)) = (lower, upper)
-            && l >= u
-        {
-            return Err(MleError::CensoringBoundsNotOrdered { lower: l, upper: u });
-        }
-
-        for (i, &value) in y.iter().enumerate() {
-            if let Some(l) = lower
-                && value < l
-            {
-                return Err(MleError::YOutOfCensoringBounds {
-                    row: i,
-                    value,
-                    lower,
-                    upper,
-                });
-            }
-            if let Some(u) = upper
-                && value > u
-            {
-                return Err(MleError::YOutOfCensoringBounds {
-                    row: i,
-                    value,
-                    lower,
-                    upper,
-                });
-            }
-        }
-
         let n = y.len();
         let k = if include_intercept {
             x_columns.len() + 1
@@ -140,6 +96,50 @@ impl TobitInput {
             lower,
             upper,
         })
+    }
+
+    /// 打ち切り境界自体と、`y`と境界の整合性を検証する。`fit()`が`validate_mle_options`の直後に呼ぶ
+    /// （`from_columns`は次元だけを検証する）。順序は次のとおり:
+    /// 1. 打ち切り境界自体の検証（`lower`/`upper`の少なくとも一方が有限の`Some`、かつ
+    ///    両方`Some`の場合は`lower < upper`。`NaN`・無限大は不正な境界として弾く）
+    /// 2. `y`と境界の整合性検証（`lower`指定時に`y < lower`の行が無い、`upper`指定時に
+    ///    `y > upper`の行が無い）
+    ///
+    /// # Errors
+    /// - `lower`/`upper`が両方`None`: `MleError::CensoringBoundsMissing`
+    /// - `lower`/`upper`のいずれかが`NaN`または無限大: `MleError::CensoringBoundNotFinite`
+    /// - 両方`Some`で`lower >= upper`: `MleError::CensoringBoundsNotOrdered`
+    /// - `y`が指定された境界の範囲外の値を含む: `MleError::YOutOfCensoringBounds`
+    pub(super) fn validate_censoring_bounds(&self) -> Result<(), MleError> {
+        let (lower, upper) = (self.lower, self.upper);
+        // 有限性（NaN・無限大）を先に確かめ、順序の比較は有限値だけに行う
+        // （NaNは`l >= u`が常に`false`になり、順序の検査をすり抜けるため）。
+        if lower.is_none() && upper.is_none() {
+            return Err(MleError::CensoringBoundsMissing);
+        }
+        if !(lower.is_none_or(f64::is_finite) && upper.is_none_or(f64::is_finite)) {
+            return Err(MleError::CensoringBoundNotFinite { lower, upper });
+        }
+        if let (Some(l), Some(u)) = (lower, upper)
+            && l >= u
+        {
+            return Err(MleError::CensoringBoundsNotOrdered { lower: l, upper: u });
+        }
+
+        for i in 0..self.y.nrows() {
+            let value = *self.y.get(i, 0);
+            let below = lower.is_some_and(|l| value < l);
+            let above = upper.is_some_and(|u| value > u);
+            if below || above {
+                return Err(MleError::YOutOfCensoringBounds {
+                    row: i,
+                    value,
+                    lower,
+                    upper,
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn y(&self) -> &Mat<f64> {
@@ -193,11 +193,35 @@ mod tests {
 
     use crate::shared::error::CommonError;
 
+    /// `TobitInput::from_columns`に続けて`validate_censoring_bounds`（`fit()`が呼ぶ検査）まで行う。
+    #[allow(clippy::too_many_arguments)]
+    fn from_columns_validated(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        include_intercept: bool,
+        dep_var_name: String,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> Result<TobitInput, MleError> {
+        let input = TobitInput::from_columns(
+            y,
+            x_columns,
+            x_names,
+            include_intercept,
+            dep_var_name,
+            lower,
+            upper,
+        )?;
+        input.validate_censoring_bounds()?;
+        Ok(input)
+    }
+
     #[test]
     fn from_columns_with_intercept_prepends_const_column() {
         let y = vec![0.0, 1.0, 2.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0]];
-        let input = TobitInput::from_columns(
+        let input = from_columns_validated(
             &y,
             &x_columns,
             vec!["x1".to_string()],
@@ -226,7 +250,7 @@ mod tests {
     fn from_columns_without_intercept_omits_const_column() {
         let y = vec![1.0, 0.0, 3.0, 0.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0], vec![4.0, 3.0, 2.0, 1.0]];
-        let input = TobitInput::from_columns(
+        let input = from_columns_validated(
             &y,
             &x_columns,
             vec!["x1".to_string(), "x2".to_string()],
@@ -248,7 +272,7 @@ mod tests {
         // （`docs/spec/nonlinear-common.md`7章の「右打ち切りのみ」）。
         let y = vec![-100.0, 5.0, 10.0];
         let input =
-            TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), None, Some(10.0))
+            from_columns_validated(&y, &[], vec![], true, "y".to_string(), None, Some(10.0))
                 .unwrap();
 
         assert_eq!(input.lower(), None);
@@ -256,13 +280,13 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_y_out_of_censoring_bounds_above_upper_when_lower_is_none() {
+    fn validate_returns_y_out_of_censoring_bounds_above_upper_when_lower_is_none() {
         // lower=Noneのとき、y整合性検証のlower方向の分岐（`if let Some(l) = lower`）を
         // 経由せずupper方向の分岐だけが正しく機能することを確認する
         // （両方Someのテストだけではlower=Noneの経路を独立に検証できない）。
         let y = vec![-100.0, 5.0, 11.0];
         let result =
-            TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), None, Some(10.0));
+            from_columns_validated(&y, &[], vec![], true, "y".to_string(), None, Some(10.0));
 
         assert_eq!(
             result.unwrap_err(),
@@ -276,9 +300,9 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_censoring_bound_not_finite_when_lower_is_nan() {
+    fn validate_returns_censoring_bound_not_finite_when_lower_is_nan() {
         let y = vec![0.0, 1.0, 2.0];
-        let result = TobitInput::from_columns(
+        let result = from_columns_validated(
             &y,
             &[],
             vec![],
@@ -298,9 +322,9 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_censoring_bound_not_finite_when_upper_is_nan() {
+    fn validate_returns_censoring_bound_not_finite_when_upper_is_nan() {
         let y = vec![0.0, 1.0, 2.0];
-        let result = TobitInput::from_columns(
+        let result = from_columns_validated(
             &y,
             &[],
             vec![],
@@ -320,12 +344,12 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_censoring_bound_not_finite_when_only_bound_is_nan() {
+    fn validate_returns_censoring_bound_not_finite_when_only_bound_is_nan() {
         // 片側のみ指定（upper=None）でも、`lower`単体がNaNなら弾かれることを確認する
         // （`(Some(l), None) => l.is_finite()`分岐、両方Someのケースとは別分岐）。
         let y = vec![0.0, 1.0, 2.0];
         let result =
-            TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), Some(f64::NAN), None);
+            from_columns_validated(&y, &[], vec![], true, "y".to_string(), Some(f64::NAN), None);
 
         assert!(matches!(
             result.unwrap_err(),
@@ -337,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_censoring_bound_not_finite_for_infinite_bounds() {
+    fn validate_returns_censoring_bound_not_finite_for_infinite_bounds() {
         let y = vec![0.0, 1.0, 2.0];
         for (lower, upper) in [
             (Some(f64::NEG_INFINITY), None),
@@ -346,7 +370,7 @@ mod tests {
             (Some(f64::NEG_INFINITY), Some(10.0)),
         ] {
             let result =
-                TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), lower, upper);
+                from_columns_validated(&y, &[], vec![], true, "y".to_string(), lower, upper);
 
             assert_eq!(
                 result.unwrap_err(),
@@ -359,14 +383,14 @@ mod tests {
     /// 判定順は Missing → NotFinite → NotOrdered。逆順に判定すると、順序が逆転した
     /// 非有限の境界が`CensoringBoundsNotOrdered`になる。
     #[test]
-    fn from_columns_reports_not_finite_before_not_ordered() {
+    fn validate_reports_not_finite_before_not_ordered() {
         let y = vec![0.0, 1.0, 2.0];
         for (lower, upper) in [
             (f64::INFINITY, f64::NEG_INFINITY),
             (5.0, f64::NAN),
             (f64::NAN, -1.0),
         ] {
-            let result = TobitInput::from_columns(
+            let result = from_columns_validated(
                 &y,
                 &[],
                 vec![],
@@ -387,9 +411,9 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_censoring_bounds_not_ordered_when_lower_gt_upper() {
+    fn validate_returns_censoring_bounds_not_ordered_when_lower_gt_upper() {
         let y = vec![0.0, 1.0, 2.0];
-        let result = TobitInput::from_columns(
+        let result = from_columns_validated(
             &y,
             &[],
             vec![],
@@ -412,7 +436,7 @@ mod tests {
     fn from_columns_supports_two_sided_censoring() {
         let y = vec![0.0, 5.0, 10.0];
         let x_columns = vec![vec![1.0, 2.0, 3.0]];
-        let input = TobitInput::from_columns(
+        let input = from_columns_validated(
             &y,
             &x_columns,
             vec!["x1".to_string()],
@@ -431,7 +455,7 @@ mod tests {
     fn from_columns_returns_dimension_mismatch_on_mismatched_column_length() {
         let y = vec![0.0, 1.0, 2.0];
         let x_columns = vec![vec![1.0, 2.0]];
-        let result = TobitInput::from_columns(
+        let result = from_columns_validated(
             &y,
             &x_columns,
             vec!["x1".to_string()],
@@ -458,7 +482,7 @@ mod tests {
         // （`LogitInput::from_columns`と同じ方針）。
         let y = vec![0.0, 1.0];
         let x_columns = vec![vec![1.0, 2.0]];
-        let _ = TobitInput::from_columns(
+        let _ = from_columns_validated(
             &y,
             &x_columns,
             vec![],
@@ -470,18 +494,18 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_censoring_bounds_missing_when_both_none() {
+    fn validate_returns_censoring_bounds_missing_when_both_none() {
         let y = vec![0.0, 1.0, 2.0];
-        let result = TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), None, None);
+        let result = from_columns_validated(&y, &[], vec![], true, "y".to_string(), None, None);
 
         assert_eq!(result.unwrap_err(), MleError::CensoringBoundsMissing);
     }
 
     #[test]
-    fn from_columns_returns_censoring_bounds_not_ordered_when_lower_ge_upper() {
+    fn validate_returns_censoring_bounds_not_ordered_when_lower_ge_upper() {
         let y = vec![0.0, 1.0, 2.0];
         let result =
-            TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), Some(5.0), Some(5.0));
+            from_columns_validated(&y, &[], vec![], true, "y".to_string(), Some(5.0), Some(5.0));
 
         assert_eq!(
             result.unwrap_err(),
@@ -493,10 +517,10 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_y_out_of_censoring_bounds_when_y_below_lower() {
+    fn validate_returns_y_out_of_censoring_bounds_when_y_below_lower() {
         let y = vec![0.0, -1.0, 2.0];
         let result =
-            TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), Some(0.0), None);
+            from_columns_validated(&y, &[], vec![], true, "y".to_string(), Some(0.0), None);
 
         assert_eq!(
             result.unwrap_err(),
@@ -510,9 +534,9 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_y_out_of_censoring_bounds_when_y_above_upper() {
+    fn validate_returns_y_out_of_censoring_bounds_when_y_above_upper() {
         let y = vec![0.0, 5.0, 11.0];
-        let result = TobitInput::from_columns(
+        let result = from_columns_validated(
             &y,
             &[],
             vec![],
@@ -534,11 +558,11 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_accepts_y_exactly_at_bounds() {
+    fn validate_accepts_y_exactly_at_bounds() {
         // 境界値ちょうど（lower/upperそのもの）は打ち切り観測として正常な値のため、
         // 厳密な `<`/`>` 比較で弾かれないことを確認する（`<=`/`>=`との取り違え回帰防止）。
         let y = vec![0.0, 5.0, 10.0];
-        let result = TobitInput::from_columns(
+        let result = from_columns_validated(
             &y,
             &[],
             vec![],

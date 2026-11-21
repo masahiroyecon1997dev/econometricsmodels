@@ -3,15 +3,12 @@
 //! `iv/common/gmm_setup.rs`に対応する。`IVOptions`と違い、重みの既定は`cluster`（`effects[0]`）で、
 //! 重みの種類は`FeWeightType`（`hac`を型で持たない）。
 
-use engine::panel::common::PanelError;
 use engine::panel::fe::FeCovType;
 use engine::panel::fe_iv::gmm::{FeGmmType, FeWeightType};
-use engine::shared::error::CommonError;
 use engine::shared::group_codes::GroupCodes;
 use polars::prelude::DataFrame;
 use pyo3::PyResult;
 
-use super::super::common::panel_error_to_pyerr;
 use super::option_values::{GmmKind, OptionValues, WeightKind};
 use super::options::FEIVOptions;
 use crate::shared::column_error::ColumnSource;
@@ -19,7 +16,7 @@ use crate::shared::column_extraction::extract_optional_cluster_groups;
 
 /// `gmm_max_iter`・`gmm_tol`の実効既定値（`IVOptions`と同じ。`FEIVOptions`の既定値は`None`のため、使われる
 /// モード（`gmm_type="iterated"`）でここに解決する）。
-const DEFAULT_GMM_MAX_ITER: usize = 100;
+const DEFAULT_GMM_MAX_ITER: i64 = 100;
 const DEFAULT_GMM_TOL: f64 = 1e-6;
 
 /// `gmm_type`・重み・反復の設定を`FeGmmType`にする。`entity_groups`は重みが`cluster`で`cluster`列が無いときの
@@ -49,14 +46,8 @@ pub(super) fn resolve_gmm_type(
         GmmKind::TwoStep => FeGmmType::TwoStep { weight: weight()? },
         GmmKind::Iterated => {
             let weight = weight()?;
-            let max_iter = match options.gmm_max_iter {
-                Some(value) => usize::try_from(value).map_err(|_| {
-                    panel_error_to_pyerr(PanelError::Common(CommonError::InvalidGmmMaxIter {
-                        max_iter: value,
-                    }))
-                })?,
-                None => DEFAULT_GMM_MAX_ITER,
-            };
+            // 範囲（負値を含む）の検査はengineの`fit`が行う。
+            let max_iter = options.gmm_max_iter.unwrap_or(DEFAULT_GMM_MAX_ITER);
             FeGmmType::Iterated {
                 weight,
                 max_iter,

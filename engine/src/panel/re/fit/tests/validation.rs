@@ -9,6 +9,7 @@ use crate::panel::re::ReCovType;
 use crate::panel::re::ReEffects;
 use crate::panel::re::ReEstimator;
 use crate::panel::re::ReInput;
+use crate::panel::re::VarianceMethod;
 use crate::panel::re::test_support::*;
 use crate::shared::error::CommonError;
 use crate::shared::error::ErrorInfo;
@@ -408,6 +409,63 @@ fn re_estimator_fit_propagates_fe_singleton_error_from_variance_components() {
             n_dropped_rows: 1,
         }
     );
+}
+
+/// 範囲外の`confidence_level`は、分散成分の推定が行うデータを見る検査（singleton）より先に報告される。
+#[test]
+fn re_estimator_fit_reports_an_invalid_confidence_level_before_the_data_checks() {
+    // entity "c"は1観測のみ（singleton）。
+    let entity = strings(&["a", "a", "a", "b", "b", "c"]);
+    let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0];
+    let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0];
+    let build = || {
+        ReInput::from_columns(
+            &y,
+            std::slice::from_ref(&x1),
+            vec!["x1".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap()
+    };
+
+    for method in [
+        VarianceMethod::SwamyArora,
+        VarianceMethod::WallaceHussain,
+        VarianceMethod::Amemiya,
+    ] {
+        let err = ReEstimator::fit_with_variance_method(
+            build(),
+            ReEffects::OneWay,
+            ReCovType::Classical,
+            method,
+            1.5,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            PanelError::WithinRegressionFailed {
+                source: crate::linear::common::LeastSquaresError::Common(
+                    CommonError::InvalidConfidenceLevel {
+                        confidence_level: 1.5,
+                    }
+                ),
+            },
+            "{method:?}"
+        );
+        assert!(matches!(
+            ReEstimator::fit_with_variance_method(
+                build(),
+                ReEffects::OneWay,
+                ReCovType::Classical,
+                method,
+                0.95,
+            )
+            .unwrap_err(),
+            PanelError::SingletonGroup { .. }
+        ));
+    }
 }
 
 #[test]

@@ -7,6 +7,21 @@ use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::{column_is_zero_variance, column_is_zero_variance_with_noise};
 
+/// `confidence_level`が`(0, 1)`の範囲外（NaNを含む）ならエラーにする。FE・RE・FEIVの`fit`が、他のどの
+/// 検査より先（`tol`・`max_iter`より前）に呼ぶ。回帰の失敗を包む[`PanelError::WithinRegressionFailed`]で返す
+/// （`stage_allowed=false`の`code`なので`stage`は付かない）。
+///
+/// # Errors
+/// `confidence_level`が範囲外: `CommonError::InvalidConfidenceLevel`
+pub(crate) fn validate_confidence_level(confidence_level: f64) -> Result<(), PanelError> {
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(PanelError::WithinRegressionFailed {
+            source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
+        });
+    }
+    Ok(())
+}
+
 /// `FeInput::from_group_codes`/`ReInput::from_group_codes`の入力検証（FE/REで共通）。
 /// 検査の順序は、各`x_columns`の行数（`y`との不一致は`CommonError::DimensionMismatch`）、
 /// 効果の各次元の長さ（`PanelError::IdentifierDimensionMismatch`。`effects`の先頭から）、

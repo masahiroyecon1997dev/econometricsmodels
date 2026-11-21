@@ -1,9 +1,11 @@
-//! 2SLS/GMMの`fit()`冒頭で行う入力の検証（識別の順序条件・観測数・クラスター数・被説明変数の定数）。
+//! 2SLS/GMMの`fit()`冒頭で行う入力の検証（`confidence_level`・GMMの反復設定・識別の順序条件・観測数・
+//! クラスター数・被説明変数の定数）。
 
 use super::error::IvError;
 use super::input::{IvInput, mat_column_to_vec};
 use crate::linear::ols::CovType;
 use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::gmm_iteration::GmmType;
 use crate::shared::validation::{
     has_no_variation, validate_cluster_count_covers_slopes, validate_cluster_groups,
 };
@@ -82,18 +84,34 @@ fn validate_outcome_not_constant(input: &IvInput) -> Result<(), CommonError> {
     Ok(())
 }
 
-/// 第一段階より前に、入力だけから分かる構造方程式の検証を行う（`TwoSlsEstimator::fit`・
-/// `GmmEstimator::fit`・`engine_pybind`の`fit`が共有する）。順序は識別の順序条件
-/// （`len(instruments) >= len(x_endog)`）→ `validate_observation_counts`（観測数）→
-/// `validate_structural_cluster_count`（`cov_type=Cluster`のクラスター数）→
-/// `validate_outcome_not_constant`（被説明変数が定数）で、第一段階の失敗に構造方程式側の
-/// `k`・`q`が隠れないよう、いずれも`compute_first_stage`より前に呼ぶ（理由は各関数のdocコメント）。
+/// 第一段階より前に、入力だけから分かる検証を行う（`TwoSlsEstimator::fit`・`GmmEstimator::fit`・
+/// `engine_pybind`の`fit`が共有する）。順序は`confidence_level`の範囲 → `gmm_type`の反復設定
+/// （`gmm_max_iter`→`gmm_tol`。`None`なら2SLS）→ 識別の順序条件（`len(instruments) >= len(x_endog)`）→
+/// `validate_observation_counts`（観測数）→ `validate_structural_cluster_count`
+/// （`cov_type=Cluster`のクラスター数）→ `validate_outcome_not_constant`（被説明変数が定数）で、
+/// OLS・Logit・Probit・Tobitと同じく、設定値の検査をデータの大きさに依る検査より先に行う。
+/// 構造方程式の検証は、第一段階の失敗に構造方程式側の`k`・`q`が隠れないよう、いずれも
+/// `compute_first_stage`より前に呼ぶ（理由は各関数のdocコメント）。
 /// 過小識別（`l < k`）を先に弾くのは、観測数の検証が`l >= k`を前提にするため。
 ///
 /// # Errors
+/// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+/// - `gmm_type`が`Iterated`で`max_iter`・`tol`が範囲外: `CommonError::InvalidGmmMaxIter`・
+///   `CommonError::InvalidGmmTol`
 /// - 識別の順序条件を満たさない: `IvError::InsufficientInstruments`
 /// - その他は各関数のdocコメント参照。
-pub fn validate_iv_fit_inputs(input: &IvInput, cov_type: &CovType) -> Result<(), IvError> {
+pub fn validate_iv_fit_inputs(
+    input: &IvInput,
+    cov_type: &CovType,
+    confidence_level: f64,
+    gmm_type: Option<&GmmType>,
+) -> Result<(), IvError> {
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+    }
+    if let Some(gmm_type) = gmm_type {
+        gmm_type.validate()?;
+    }
     if input.k_instruments() < input.k_endog() {
         return Err(IvError::InsufficientInstruments {
             n_instruments: input.k_instruments(),

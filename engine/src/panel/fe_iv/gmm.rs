@@ -18,7 +18,8 @@
 //!
 //! # `fit`のパイプライン
 //!
-//! 1. `gmm_type`を共有の`GmmType`に直し、`max_iter`・`tol`の範囲を検証する（`GmmType::validate`）。
+//! 1. 設定値の検査: `confidence_level` → `max_iter` → `tol`（交互射影）→ `gmm_type`を共有の`GmmType`に直し
+//!    `gmm_max_iter` → `gmm_tol`の範囲を検証する（`GmmType::validate`）。
 //! 2. `FeTwoSlsEstimator`と同じ前段（`prepare_within`）: 操作変数の数・singleton・定数列の検査、全列の
 //!    within変換（1回だけ）、自由度の検証（`n > k + neffects`、`n > l + neffects`）、変換後に分散が
 //!    残らない列の検査。
@@ -158,8 +159,10 @@ impl FeGmmEstimator {
     /// 種類（重みとは独立）、`confidence_level`は信頼区間の水準。
     ///
     /// # Errors
+    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（他のどの検査より先。
+    ///   続けて交互射影の`max_iter`・`tol`）
     /// - `Iterated`の`max_iter`・`tol`が範囲外なら`CommonError::InvalidGmmMaxIter`・`InvalidGmmTol`
-    ///   （`PanelError::Common`）
+    ///   （`PanelError::Common`。交互射影の設定の次）
     /// - 操作変数が内生変数より少なければ`PanelError::InsufficientInstruments`
     /// - 2-wayで`effects`が1つなら`PanelError::TwoWayRequiresTime`
     /// - singleton（`PanelError::SingletonGroup`）、生の値が全ての行で同じ列

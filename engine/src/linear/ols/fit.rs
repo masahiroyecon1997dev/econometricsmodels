@@ -21,7 +21,7 @@ use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
 
-/// QR分解より前に、入力だけから判定できる検査を行う（回帰変数の有無・信頼水準・観測数・クラスター数・
+/// QR分解より前に、入力だけから判定できる検査を行う（信頼水準・回帰変数の有無・観測数・クラスター数・
 /// 被説明変数の順）。`fit_ols`と`AuxiliaryFit::fit`が同じ検査を同じ順序で行うための共通部分で、
 /// どちらかだけ検査や順序を変えてしまうことを避ける。
 ///
@@ -37,14 +37,15 @@ pub(super) fn preflight(
     allow_undefined_f_test: bool,
     check_outcome: bool,
 ) -> Result<bool, LeastSquaresError> {
-    validate_has_regressors(input.nobs(), input.k())?;
-
     // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
     crate::shared::parallelism::ensure_serial();
 
+    // 設定値（`confidence_level`）の検査は、データの大きさに依る検査（回帰変数の有無・観測数）より先に行う。
     if !(confidence_level > 0.0 && confidence_level < 1.0) {
         return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
     }
+
+    validate_has_regressors(input.nobs(), input.k())?;
 
     let (n, k) = (input.nobs(), input.k());
     if n <= k {

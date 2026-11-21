@@ -9,7 +9,7 @@ use super::options::IVOptions;
 
 /// `gmm_max_iter`/`gmm_tol`の実効既定値（`IVOptions`の既定値は`None`のため、使われる
 /// モードでここに解決する。`gmm_type`/`gmm_weight_type`の既定値は[`parse_iv_option_values`]）。
-pub(super) const DEFAULT_GMM_MAX_ITER: usize = 100;
+pub(super) const DEFAULT_GMM_MAX_ITER: i64 = 100;
 pub(super) const DEFAULT_GMM_TOL: f64 = 1e-6;
 
 /// `IVOptions.estimator`の種類。

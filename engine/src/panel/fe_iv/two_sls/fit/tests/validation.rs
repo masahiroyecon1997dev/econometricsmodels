@@ -126,6 +126,38 @@ fn an_invalid_absorption_setting_is_rejected() {
     assert!(matches!(err, PanelError::InvalidTol { .. }));
 }
 
+/// 設定値は、データを見る検査（singleton）より先に、`confidence_level` → `max_iter` → `tol`の順で報告される。
+#[test]
+fn settings_are_reported_in_order_before_the_data_checks() {
+    // 個体0の行を1つだけ残す（singleton）。
+    let rows: Vec<usize> = std::iter::once(0).chain(4..40).collect();
+    let fit_with = |confidence_level: f64, tol: f64, max_iter: i64| {
+        error_of(FeTwoSlsEstimator::fit_with_absorption(
+            input_with(&rows, &[entity_labels()]),
+            FeEffects::OneWay,
+            FeCovType::Classical,
+            confidence_level,
+            &FeAbsorption { tol, max_iter },
+        ))
+    };
+    assert!(matches!(
+        fit_with(0.95, 1e-8, 10),
+        PanelError::SingletonGroup { .. }
+    ));
+    assert!(matches!(
+        fit_with(1.5, -1.0, 0),
+        PanelError::WithinRegressionFailed { .. }
+    ));
+    assert_eq!(
+        fit_with(0.95, -1.0, 0),
+        PanelError::InvalidMaxIter { max_iter: 0 }
+    );
+    assert!(matches!(
+        fit_with(0.95, -1.0, 10),
+        PanelError::InvalidTol { .. }
+    ));
+}
+
 // ── singleton・定数列（役割つき） ───────────────────────────────────
 
 #[test]

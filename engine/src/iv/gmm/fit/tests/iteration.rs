@@ -32,7 +32,7 @@ fn fit_returns_invalid_gmm_max_iter_error_for_values_below_three() {
         .unwrap()
     };
 
-    for invalid in [0_usize, 1, 2, 10_001, 1_000_000] {
+    for invalid in [0_i64, 1, 2, 10_001, 1_000_000, -1, i64::MIN] {
         let result = GmmEstimator::fit(
             build_input(),
             GmmType::Iterated {
@@ -46,9 +46,7 @@ fn fit_returns_invalid_gmm_max_iter_error_for_values_below_three() {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::InvalidGmmMaxIter {
-                max_iter: invalid as i64
-            }),
+            IvError::Common(CommonError::InvalidGmmMaxIter { max_iter: invalid }),
             "max_iter={invalid}"
         );
     }

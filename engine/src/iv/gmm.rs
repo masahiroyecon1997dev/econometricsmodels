@@ -280,18 +280,23 @@ impl GmmEstimator {
     /// 「収束条件」参照）。
     ///
     /// # Errors
+    /// 検査は、`validate_iv_fit_inputs`が次の順に行う（設定値の検査をデータの大きさに依る検査より先に行う）。
+    ///
     /// - `confidence_level`が`(0, 1)`の範囲外:
     ///   `IvError::Common(CommonError::InvalidConfidenceLevel)`
+    /// - `Iterated`の`max_iter`が3以上`MAX_ITER_LIMIT`以下でない（負値を含む）: `CommonError::InvalidGmmMaxIter`
+    /// - `Iterated`の`tol`が正の有限値でない（0以下・NaN・inf）: `CommonError::InvalidGmmTol`
+    /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
+    ///   `IvError::InsufficientInstruments`
     /// - 観測数`n`が`k`（構造方程式の係数の数）以下:
     ///   `IvError::Common(CommonError::InsufficientObservations)`
     /// - 観測数`n`が全操作変数の数`l`（`x_exog ++ instruments`、定数項込み）以下（`n > k`でも）:
-    ///   `IvError::InsufficientObservationsForFirstStage`（`validate_iv_fit_inputs`）
-    /// - `Iterated`の`max_iter`が3未満: `CommonError::InvalidGmmMaxIter`
-    /// - `Iterated`の`tol`が正の有限値でない（0以下・NaN・inf）: `CommonError::InvalidGmmTol`
+    ///   `IvError::InsufficientObservationsForFirstStage`
+    ///
+    /// 以降のエラー:
+    ///
     /// - `raise_on_non_convergence=true`かつ`Iterated`が`max_iter`回
     ///   以内に収束しなかった: `CommonError::GmmNonConvergence`
-    /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
-    ///   `IvError::InsufficientInstruments`
     /// - `TwoStep`/`Iterated`の`weight`が`Hac`で`lags`が不正: `CommonError::InvalidHacLags`
     /// - `TwoStep`/`Iterated`の`weight`が`Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /

@@ -193,6 +193,63 @@ fn fit_returns_invalid_confidence_level_error_out_of_range() {
     }
 }
 
+/// 設定値は、`confidence_level` → `gmm_max_iter` → `gmm_tol` の順に、観測数の検査より先に報告される
+/// （`n <= k`の入力でも、両方が不正なら設定値のエラーが先に出る）。
+#[test]
+fn fit_reports_options_in_order_before_the_observation_count() {
+    // 構造方程式は`k = 3`（定数項・`x1`・`endog1`）で、`n = 3 <= k`。
+    let col = |offset: f64| -> Vec<f64> { (0..3).map(|i| f64::from(i) * 0.7 + offset).collect() };
+    let build = || {
+        IvInput::from_columns(
+            &col(0.0),
+            &[col(1.0)],
+            vec!["x1".to_string()],
+            &[col(2.0)],
+            vec!["endog1".to_string()],
+            &[col(3.0)],
+            vec!["z1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    };
+    let iterated = |max_iter: i64, tol: f64| GmmType::Iterated {
+        weight: WeightType::Classical,
+        max_iter,
+        tol,
+    };
+    let fit = |gmm_type: GmmType, confidence_level: f64| {
+        GmmEstimator::fit(
+            build(),
+            gmm_type,
+            true,
+            CovType::Classical,
+            confidence_level,
+        )
+        .unwrap_err()
+    };
+
+    assert_eq!(
+        fit(iterated(10, 1e-6), 0.95),
+        IvError::Common(CommonError::InsufficientObservations { n: 3, k: 3 })
+    );
+    // 三つとも不正なら`confidence_level`、次に`gmm_max_iter`、最後に`gmm_tol`。
+    assert_eq!(
+        fit(iterated(1, -1.0), 1.5),
+        IvError::Common(CommonError::InvalidConfidenceLevel {
+            confidence_level: 1.5
+        })
+    );
+    assert_eq!(
+        fit(iterated(1, -1.0), 0.95),
+        IvError::Common(CommonError::InvalidGmmMaxIter { max_iter: 1 })
+    );
+    assert_eq!(
+        fit(iterated(10, -1.0), 0.95),
+        IvError::Common(CommonError::InvalidGmmTol { gmm_tol: -1.0 })
+    );
+}
+
 /// 観測数`n`が`k`（構造方程式の係数の数）以下なら`InsufficientObservations`
 /// （`n<=k`のままだと`df_resid=n-k`による除算
 /// 等がNaN/Infinityを静かに生成しうる、`gmm_hc_omega`のdocコメント参照）。

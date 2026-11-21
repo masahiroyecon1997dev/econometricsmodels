@@ -31,6 +31,8 @@ use super::result::IVResult;
 /// 常に`None`（`GmmEstimator`は実装しない、モジュールdocコメント参照）。
 ///
 /// # Errors
+/// - `confidence_level`が`(0, 1)`の範囲外、または`gmm_type="iterated"`で`gmm_max_iter`・`gmm_tol`が
+///   範囲外: `ValidationError`（`validate_iv_fit_inputs`。この順に、他のどの検査より先に行う）
 /// - 観測数が構造方程式の係数の数以下、または第一段階の回帰変数の数以下:
 ///   `ValidationError`（`validate_iv_fit_inputs`、`compute_first_stage`より前）
 /// - `cov_type="cluster"`でクラスター数が構造方程式の傾き係数の数以下（または2未満）:
@@ -85,6 +87,7 @@ fn fit_frame(
         plan,
     } = build_iv_input(df, y, x_exog, x_endog, instruments, options)?;
 
+    // `confidence_level`の範囲・GMMの反復設定（`gmm_max_iter`・`gmm_tol`）に続けて、
     // 識別の順序条件（過小識別な入力で無駄な第一段階回帰を走らせない。この時点で
     // `build_iv_input`の`validate_role_non_empty("x_endog"/"instruments", ...)`を通過しており
     // `k_endog`/`k_instruments`はともに1以上なので、「両方指定されているが数が足りない」
@@ -94,7 +97,13 @@ fn fit_frame(
     // 回帰変数・傾き係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると
     // 構造方程式側のチェックが`FirstStageFailed`（第一段階の`k`・`g`・`q`）に隠れ、
     // エンジン側のチェックがPythonから到達不能になる。
-    validate_iv_fit_inputs(&input, &cov_type).map_err(iv_error_to_pyerr)?;
+    validate_iv_fit_inputs(
+        &input,
+        &cov_type,
+        options.confidence_level,
+        plan.gmm.as_ref().map(|gmm| &gmm.gmm_type),
+    )
+    .map_err(iv_error_to_pyerr)?;
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
     // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。

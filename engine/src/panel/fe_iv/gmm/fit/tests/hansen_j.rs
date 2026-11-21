@@ -154,7 +154,7 @@ fn robust_and_cluster_weights_are_not_rescaled() {
             } else {
                 FeGmmType::Iterated {
                     weight: weight.clone(),
-                    max_iter: estimates,
+                    max_iter: estimates as i64,
                     tol: 1e-300,
                 }
             };

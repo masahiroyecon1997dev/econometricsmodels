@@ -301,17 +301,17 @@ impl FeAbsorption {
     /// 値の範囲を検査する。
     ///
     /// # Errors
-    /// `tol`が正の有限値でなければ`PanelError::InvalidTol`、`max_iter`が範囲外なら
-    /// `PanelError::InvalidMaxIter`。
+    /// `max_iter`が範囲外なら`PanelError::InvalidMaxIter`、次に`tol`が正の有限値でなければ
+    /// `PanelError::InvalidTol`（Logit・Probit・Tobit・GMMと同じく`max_iter`が先）。
     pub(crate) fn validate(&self) -> Result<(), PanelError> {
         use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
-        if !(self.tol.is_finite() && self.tol > 0.0) {
-            return Err(PanelError::InvalidTol { tol: self.tol });
-        }
         if !(MAX_ITER_MIN..=MAX_ITER_LIMIT).contains(&self.max_iter) {
             return Err(PanelError::InvalidMaxIter {
                 max_iter: self.max_iter,
             });
+        }
+        if !(self.tol.is_finite() && self.tol > 0.0) {
+            return Err(PanelError::InvalidTol { tol: self.tol });
         }
         Ok(())
     }

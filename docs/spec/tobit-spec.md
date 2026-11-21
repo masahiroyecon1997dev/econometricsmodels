@@ -107,11 +107,11 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 ### 3.2 最適化・収束判定・病理ケース
 
-- **初期値はOLS推定値**（打ち切りを無視した単純なOLSの`β`とその残差の標本標準偏差、
-  `ols_initial_params`）。ゼロベクトル初期値ではNewtonが`SingularHessian`で失敗するケースが
-  あったため。`ols_initial_params`のQRベースの階数検定が`solver`に関わらず最初に走るため、完全な
-  多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で検出される
-  （`solver`をparametrizeする必要が無い）。
+- **初期値はOLS推定値**（打ち切りを無視した単純なOLSの`β`とその残差の標本標準偏差。標準化した設計行列の
+  直交座標`Q`での`DesignCoordinates::initial_params`）。ゼロベクトル初期値ではNewtonが`SingularHessian`で
+  失敗するケースがあったため。最適化の前に`DesignCoordinates::new`のQR分解とランク判定が`solver`に
+  関わらず最初に走るため、完全な多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で
+  検出される（`solver`をparametrizeする必要が無い）。
 - **`TobitScaling`（`tobit/scaling.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
   使う`common/standardize.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
@@ -203,35 +203,23 @@ Tobit固有の差分:
   両側から適用し、`β`-`σ`間の共分散も含めて`(β, σ)`空間へ変換する（対角成分＝`Var(σ)≈σ²·Var(log σ)`
   だけの変換に留めない。限界効果等での`cov_params`再利用を見据えた設計）。`std_errors()`等は
   `β∪{σ}`の`k+1`長ベクトル（`k`番目が`σ`）として公開する。
-- **直交座標での計算と受け入れ境界（ほぼ共線な傾き）**: 共通の設計は[`orthogonal-coordinates.md`](./orthogonal-coordinates.md)。`cov_params`と全体Wald検定は、標準化空間の
-  `A = -H`のコレスキー因子`A = R'R`で作る（`nonlinear/common/cov.rs`の`orthogonal_inference_for_type`、
-  部品は`shared/orthonormal.rs`の`information_factor`・`solve_upper_from_right`・
-  `covariance_from_factor`）。パラメータを`[切片, logσ, 傾き...]`に並べ替え（`R`が上三角なので
-  末尾の傾きだけを検定できる）、座標`b̃ = Rθ̂`・ミート`M̃`（classical・opgは単位行列、hc0・hc1は
-  `Σ s̃ᵢs̃ᵢ'`、clusterはクラスター和の外積。`s̃ᵢ = R⁻ᵀsᵢ`をスコアの外積和より先に作る）・
-  `V = R⁻¹M̃R⁻ᵀ`・統計量`b̃_S'M̃_SS⁻¹b̃_S`（`wald_chi2_test`）。`-H⁻¹`と`Ψ = Σ sᵢsᵢ'`を作って
-  かけ合わせる従来の式は、傾きの相関が約`1 - 1e-11`以上で桁を失った（`hc0`で`eps = 1e-5`の相対誤差が
-  `9e-4`、`1e-6`で`COEFFICIENT_COVARIANCE`）。`opg`は`-H`を使わず、スコア行列のQR
-  （`OrthonormalDesign::checked_r_factor`）の`R`が因子で、`M̃ = I`。標準化は傾きを対角行列で変換する
-  だけなので、標準化空間の傾きのWaldは元のスケールの`β_S'V_SS⁻¹β_S`と同じ値。
-  **残る誤差**: `H`そのものを倍精度で組む丸め（`cond(X)²`）は残り、統計量の誤差は条件数にほぼ
-  比例する（再パラメータ化との相対差が`eps = 1e-5`で`6e-8`以下、`2.5e-6`で最大`2.5e-6`。傾きの標準誤差は
-  `1e-6`程度）。同じ`H`・`S`を入力にした有理数の厳密値との差は`1e-8`未満（engineの単体テスト）。
-  **受け入れ境界**: `A`を対角で揃えた条件数の**平方根**が`1e6`（`MAX_INFORMATION_CONDITION`）を超えると
-  `SingularHessian`（`MATRIX_NEAR_SINGULAR`、`matrix="HESSIAN"`）。他の手法の設計行列の`5e7`
-  （`R`を揃えた条件数）にそろえなかった理由: `A`の条件数は`1e15`を超え、コレスキー分解は通っても丸めた
-  `A`の最小固有値に有効桁が残らず、`eps = 1e-8`でWaldが`735`のところ`764`になった（分解の成否では
-  検出できない）。そのため因子ができる前に、`A`を対角で揃えた行列の特異値分解で見積もる。上限`1e6`は
-  誤差が`1e-5`程度に収まる最大の値（ユーザーとの合意）。`1e12`を超える（完全な共線）ときも`SingularHessian`に変換する（`eps = 1e-13`でも`fit()`冒頭の列ピボットQRは
-  `SingularDesignMatrix`にせず、`HESSIAN`で止まった。実測）。
-  `opg`は`H`の丸めを含まず
-  スコアの条件数（設計行列とほぼ同じ）で効くので、`5e7`（`SingularOpgMatrix`、`matrix="OPG"`）。
-  検証は`tests/cross_method/test_near_collinear_tobit.py`。厳密値のうち`H`の丸めを含まない部分は
-  `orthogonal_wald_matches_exact_rational_values_for_nearly_collinear_information`。
-  将来、問題を`Q = X R_X⁻¹`の座標で解けば`H`の丸めも設計行列と同じ`cond(X)`の1乗になる
-  （境界も`5e7`にそろえられる）が、最適化の経路を変える大きな変更なので未着手。
+- **`Q`の直交座標での最適化・共分散・全体Wald（ほぼ共線な傾き）**: 標準化した設計行列を`X̃ = QR`に分解し、
+  `Q`を約`√n`の2の冪倍した座標`b = (R/s)β̃`で最適化する（`tobit/coordinates.rs`の`DesignCoordinates`。
+  共通の設計・理由・受け入れ境界は[`orthogonal-coordinates.md`](./orthogonal-coordinates.md)3.2節・4.3節）。
+  `TobitProblem`は`x = sQ`を渡すだけで変更が無い。`cov_type`別の共分散は`cov_params_for_type`を
+  `Q`の座標の`H`・スコア（条件数が共線性に依らない）に適用し、`R⁻¹V_bR⁻ᵀ`（三角行列の後退代入）で
+  標準化空間`(β̃, logσ̃)`に戻して、上の`J·Cov·Jᵀ`で`(β, σ)`空間へ変換する。全体Waldは
+  `wald_chi2_test(b, V_b, k_constant, df_model)`で、`R`が上三角（先頭が切片、末尾が傾き）なので末尾の傾きの
+  統計量は`b_S'V_b,SS⁻¹b_S`、標準化は傾きを対角行列で変換するだけなので元のスケールの
+  `β_S'V_SS⁻¹β_S`と同じ値。`X`の座標で`H`を組んで`-H⁻¹`と`Ψ`をかけ合わせる式は、傾きの相関が
+  約`1 - 1e-11`以上で桁を失った（`hc0`で傾きの差`1e-5`の相対誤差が`9e-4`、`1e-6`で
+  `COEFFICIENT_COVARIANCE`）。**受け入れ境界**は他の手法と同じ（列を単位ノルムに揃えた設計の条件数
+  `5e7`で`DESIGN_GRAM`、`1e12`超・完全共線で列名つきの`DESIGN_MATRIX_SINGULAR`。`cov_type`によらない）。
+  **精度**: 再パラメータ化との相対差は傾きの差`1e-5`〜`5e-8`でWald・`σ`・`σ`のSEが`3.5e-10`以下、傾きの
+  係数・標準誤差が`2e-9`以下。同じ`H`・`S`の有理数の厳密値との差は`1e-8`未満（`coordinates.rs`の
+  単体テスト）。検証は`tests/cross_method/test_near_collinear_tobit.py`。
 - **`cov_type="opg"`が特異になるテストケースの構築**: Logit/Probitは`x`の完全な多重共線性でOPG行列を
-  特異にできるが、Tobitは`ols_initial_params`のQR階数検定が最適化前に走るため同じ手法が使えない。
+  特異にできるが、Tobitは`DesignCoordinates::new`のランク判定が最適化前に走るため同じ手法が使えない。
   実際に`SingularOpgMatrix`を踏むのは`n`が総パラメータ数`k+1`ぎりぎりの小標本での収束点の数値配置
   に依存するケースで、多重共線性とは無関係（実測ベースで検証）。
 

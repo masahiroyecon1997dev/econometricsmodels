@@ -215,8 +215,8 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 
 Logit/Probitはこの列ピボットQR解（標準化空間のLPM最小二乗解）を、nullモデル
 `p≡p̄`起点のIRLS 1反復目に相当するスケール補正を施した値で初期値（warm start）にも使う
-（`ols_based_initial_params`）。Tobitは`ols_initial_params`がQR解を`β`初期値に、残差を
-`σ`初期値にする。`start_params`（ユーザー指定初期値）は現状未対応。
+（`ols_based_initial_params`）。Tobitは標準化した設計行列の直交座標でOLSを解き（`DesignCoordinates`）、その解を
+`β`初期値に、残差を`σ`初期値にする。`start_params`（ユーザー指定初期値）は現状未対応。
 
 ## 2. エラー型（`MleError`、共有）
 

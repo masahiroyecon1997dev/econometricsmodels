@@ -477,7 +477,15 @@ def test_cluster_boundary_needs_as_many_clusters_as_moment_conditions(
     result = _fit(exact, _ONE, estimator="gmm", setting="cluster").c_stat(
         variables=["endog1"]
     )
-    _CLOSE(result.statistic, float(reference.stat), "G = columns")
+    # クラスター数が列数ちょうどで`S_e`がほぼ階数落ちの境界。統計量は0.0016と小さく、
+    # linearmodels側の値が実行環境で1e-10前後動くため、境界用の許容誤差で比べる。
+    assert_close(
+        result.statistic,
+        float(reference.stat),
+        "G = columns",
+        rtol=_RTOL_BOUNDARY,
+        atol=0.0,
+    )
     res_few = _fit(few, _ONE, estimator="gmm", setting="cluster")
     with raises_error("C_STATISTIC_UNDEFINED"):
         res_few.c_stat(variables=["endog1"])

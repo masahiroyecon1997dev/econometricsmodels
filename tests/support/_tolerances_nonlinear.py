@@ -180,7 +180,7 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_predict_closed_form": 1e-9,
     },
     # `predict(new_data=...)`を、同じ推定結果の係数からリンク関数（Logitは`1/(1+e^-z)`、
-    # Probitは`statistics.NormalDist().cdf`）で組み立てた値と比べる
+    # Probitは`scipy.stats.norm.cdf`）で組み立てた値と比べる
     # （`check_predict_with_include_intercept_false_and_x_named_const`）。
     # 確率が極小（実測で1e-3〜1e-16）なので、絶対誤差では裾の誤りを見逃す。
     # 相対誤差だけで比べる（`atol`は0）。
@@ -188,8 +188,11 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     "logit_api": {
         "rtol_predict_closed_form": 1e-12,
     },
-    # Probitは正規分布の累積分布関数の実装差（本実装と`NormalDist`）が出て、実測最大
-    # 相対差は8.0e-11。約12倍のマージンを置く。
+    # Probitは正規分布の累積分布関数の実装差（本実装と`scipy.stats.norm.cdf`）が出て、
+    # 実測最大相対差は8.0e-11。約12倍のマージンを置く。
+    # 基準に`statistics.NormalDist().cdf`は使わない。Python 3.12・3.13では
+    # `0.5 * (1 + erf(x))`で実装されていて、確率が1e-16近くまで小さいと桁落ちで
+    # `2**-53`に丸まり、3.14（`erfc`）と値が変わる。
     "probit_api": {
         "rtol_predict_closed_form": 1e-9,
     },

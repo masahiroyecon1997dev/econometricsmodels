@@ -317,6 +317,27 @@ fn main() {
         &small,
     );
 
+    // `engine_pybind`のOLSが実際に使う、設計行列を手放す経路。
+    for (label, cov) in [
+        ("ols-release/classical", CovType::Classical),
+        ("ols-release/hc1", CovType::Hc1),
+        ("ols-release/hc3", CovType::Hc3),
+    ] {
+        if wanted(&filters, label) {
+            measure(label, n, || {
+                let input = OlsInput::from_columns(
+                    &small.y,
+                    &small.x,
+                    small.names.clone(),
+                    true,
+                    "y".into(),
+                )
+                .expect("ols input");
+                OlsEstimator::fit_releasing_design(input, cov, confidence).expect("ols fit")
+            });
+        }
+    }
+
     for (label, cov) in [
         ("wls/classical", CovType::Classical),
         ("wls/hc1", CovType::Hc1),

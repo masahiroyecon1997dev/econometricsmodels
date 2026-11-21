@@ -68,7 +68,7 @@
 
 - `FeEstimator::fit`は、singleton検出の直後（変換や自由度の検証より前）に、生の値が全ての行で同じ説明変数を`RegressorConstant`、同じ被説明変数を`CommonError::OutcomeConstant`（`OUTCOME_CONSTANT`）にする（固定効果を除く前に分かる事実を、除いた後の分散ゼロと分けるため）。そのうえで、説明変数の分散ゼロ検出の直後に、被説明変数のwithin変換後の分散を同じ相対閾値で調べ、残らなければ`PanelError::OutcomeConstantWithinEntity`（`ValidationError`）にする。2-wayの個体効果+時点効果だけで説明される`y`もこの相対判定で拾う（厳密な等値だと、`0.1`を3回足して3で割った平均が`0.1`と一致しないために見逃す）。
 - QR（`new_checked`）の直後、共分散より前に`is_perfect_fit(ssr, Σỹ², k)`を調べ、完全フィットなら`WithinRegressionFailed { source: PerfectFit }`（`stage=WITHIN_REGRESSION`）にする。
-- REは内部FE（分散成分の推定）がこれらを担い、RE自身は被説明変数を調べない（全ての行で同じ`y`は`OUTCOME_CONSTANT`として素のまま返る）。`WithinRegressionFailed`は`within_for_variance_component`が`VARIANCE_COMPONENT_WITHIN_REGRESSION`を付けて包み、`OutcomeConstantWithinEntity`は`stage_allowed=false`なので包まれず素のまま返る。REの最終回帰とハウスマン補助回帰は`OlsEstimator::fit_auxiliary`（完全フィット・定数の判定なし。被説明変数が準偏差変換後の値で、判定の基準が当てはまらない）。
+- REは内部FE（分散成分の推定）がこれらを担い、RE自身は被説明変数を調べない（全ての行で同じ`y`は`OUTCOME_CONSTANT`として素のまま返る）。`WithinRegressionFailed`は`within_for_variance_component`が`VARIANCE_COMPONENT_WITHIN_REGRESSION`を付けて包み、`OutcomeConstantWithinEntity`は`stage_allowed=false`なので包まれず素のまま返る。REの最終回帰は`OlsEstimator::fit_auxiliary`、ハウスマン補助回帰は`AuxiliaryFit::fit(.., false)`（どちらも完全フィット・定数の判定なし。被説明変数が準偏差変換後の値で、判定の基準が当てはまらない）。
 
 ## 踏んだ罠: エンティティ平均が全て一致する退化データ
 

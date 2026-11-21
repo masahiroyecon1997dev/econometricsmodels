@@ -52,6 +52,33 @@ NESTED_LOOKALIKE_DTYPES = [
     (pl.Struct({"a": pl.Enum(["UInt128", "b"])}), "Struct"),
 ]
 
+
+class RegisteredExt(pl.BaseExtension):
+    """`register_extension_type`で登録する拡張型。登録後は、`Extension`の列のdtypeが
+    この利用者のクラスのインスタンスになり、クラス名が`Extension`ではなくなる。
+    登録はプロセスの間有効（このモジュールをimportしたときに1度だけ行う）。
+    """
+
+    def __init__(self) -> None:
+        super().__init__("registered_ext", pl.Int64)
+
+
+pl.register_extension_type("registered_ext", RegisteredExt)
+
+# `Extension`（ストレージ型によらず取り込めない）と、それを中に持つネスト型。メッセージに出る
+# dtype名は、`Extension`そのものは`Extension`、ネスト型は最外の型名。登録した拡張型も
+# `Extension`として拒否する。
+EXTENSION_DTYPES = [
+    (pl.Extension("my_ext", pl.Int64), "Extension"),
+    (RegisteredExt(), "Extension"),
+    (pl.List(RegisteredExt()), "List"),
+    (pl.Extension("my_ext", pl.UInt128), "Extension"),
+    (pl.List(pl.Extension("my_ext", pl.Int64)), "List"),
+    (pl.Array(pl.Extension("my_ext", pl.Int64), 2), "Array"),
+    (pl.Struct({"a": pl.Extension("my_ext", pl.Int64)}), "Struct"),
+    (pl.List(pl.Struct({"a": pl.Extension("my_ext", pl.Int64)})), "List"),
+]
+
 # 推定に使わない列に置いても`fit()`を壊してはいけないdtype。
 UNUSED_COLUMN_DTYPES = [
     *NUMERIC_DTYPES,
@@ -75,6 +102,7 @@ UNUSED_COLUMN_DTYPES = [
     pl.Struct({"UInt128": pl.Int64}),
     *(dtype for dtype, _ in NESTED_UINT128_DTYPES),
     *(dtype for dtype, _ in NESTED_LOOKALIKE_DTYPES),
+    *(dtype for dtype, _ in EXTENSION_DTYPES),
     pl.Null,
 ]
 
@@ -96,6 +124,7 @@ NON_NUMERIC_DTYPES = [
     (pl.Struct({"UInt128": pl.Int64}), "Struct"),
     *NESTED_UINT128_DTYPES,
     *NESTED_LOOKALIKE_DTYPES,
+    *EXTENSION_DTYPES,
 ]
 
 
@@ -141,10 +170,15 @@ def unused_column(dtype: pl.DataType) -> pl.Series:
         return pl.Series("unused", [[1, 2]] * N, dtype=dtype)
     if dtype == pl.Struct({"a": pl.UInt128}):
         return pl.Series("unused", [{"a": 1}] * N, dtype=dtype)
-    if any(dtype == nested for nested, _ in NESTED_UINT128_DTYPES) or any(
-        dtype == nested for nested, _ in NESTED_LOOKALIKE_DTYPES
+    if any(
+        dtype == nested
+        for nested, _ in (
+            *NESTED_UINT128_DTYPES,
+            *NESTED_LOOKALIKE_DTYPES,
+            *EXTENSION_DTYPES,
+        )
     ):
-        # `UInt128`を中に持つ値は作れる形が限られるので、全行が欠損の列にする
+        # `UInt128`・`Extension`を中に持つ値は作れる形が限られるので、全行が欠損の列にする
         # （dtypeの検査は欠損値の検査より先に行われる）。
         return pl.Series("unused", [None] * N, dtype=dtype)
     return pl.Series("unused", np.arange(N) % 100, dtype=pl.Int64).cast(dtype)

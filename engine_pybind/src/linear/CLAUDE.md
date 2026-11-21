@@ -43,7 +43,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 `fit_*`と`predict()`/`augment()`の`new_data`は、`PyDataFrame`への変換（`pyo3-polars`が全列をArrow経由で取り込む）を直接行わない。
 `shared/column_extraction/`の`check_dataframe`で`polars.DataFrame`かを調べ（`TypeError`）、
 `select_columns`で**推定に指名された列だけ**を取り込んだ`DataFrame`（`SelectedData.frame`）と、元のPythonオブジェクト（`SelectedData.source`）を得る。
-指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こす（取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
+指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こし、`Extension`列（登録した拡張型を含む）が`ComputeError`で失敗する（どちらも取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
 指名される列は`fit_*`（`lib.rs`）が`y`・`x`等と各`*Options::data_columns()`（`cluster`・`hac_time`・`time`・`dk_time`）から組み立てる。
 **オプションに列名を持つフィールドを足したら、`data_columns()`に足す**（足さないと、その列が取り込まれず`COLUMN_NOT_FOUND`になる）。
 存在しない列は選ばず、列を引く側（`extract_f64_column`等）が`COLUMN_NOT_FOUND`にする。取り込めないdtypeの列は、`Null`型の目印の列

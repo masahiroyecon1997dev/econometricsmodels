@@ -39,12 +39,33 @@ pub fn check_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<()> 
     )))
 }
 
-/// polarsの`DataFrame`の全列を取り込もうとすると、polars-coreがpanicするdtype（Pythonの
+/// polarsの`DataFrame`の全列を取り込もうとすると、panicまたは失敗するdtype（Pythonの
 /// クラス名）。取り込めないので、推定に使う列として指名されたときは`ValidationError`にし、
 /// 指名されなければ読まない（`docs/guide/accepted-data.md`「指名した列だけ読む」）。
 /// `pyo3-polars`が列の取り込みで使うpolarsの機能（`engine_pybind/Cargo.toml`の`dtype-*`）に
 /// 合わせて保つ。
-const UNREADABLE_DTYPES: &[&str] = &["UInt128"];
+///
+/// `Extension`（`pl.Extension(name, storage)`）は、`dtype-*`の機能とは関係なく、ストレージ型に
+/// かかわらず取り込めない（`pyo3-polars`が使うFFIの取り込みで、polarsが`ComputeError`にする）
+/// ので、全体を1つのdtypeとして拒否する。
+const UNREADABLE_DTYPES: &[&str] = &["UInt128", EXTENSION_LABEL];
+
+/// `Extension`のdtypeの呼び名（エラーメッセージに出す）。
+const EXTENSION_LABEL: &str = "Extension";
+
+/// `class`（dtypeのクラス）が、`register_extension_type`で登録された拡張型か。登録した型は
+/// `BaseExtension`を継承した利用者のクラスで、`base_type().__name__`が利用者のクラス名になり
+/// 名前では`Extension`と判定できないため、継承関係（MRO）のクラス名で見る
+/// （`polars.BaseExtension`のimportに依存せず、下限の版にも依らない）。
+fn is_registered_extension(class: &Bound<'_, PyAny>) -> PyResult<bool> {
+    for base in class.getattr("__mro__")?.try_iter()? {
+        let base_name: String = base?.getattr("__name__")?.extract()?;
+        if base_name == "BaseExtension" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
 
 /// polarsのdtype（Pythonのオブジェクト）が、取り込めないdtype（[`UNREADABLE_DTYPES`]）そのもの、
 /// または`List`・`Array`の内側の型・`Struct`のフィールドの型として含んでいれば、エラーに出す
@@ -54,17 +75,20 @@ const UNREADABLE_DTYPES: &[&str] = &["UInt128"];
 /// dtypeの文字列表現（`str(dtype)`）の部分一致では判定しない。`Enum`のカテゴリ名や`Struct`の
 /// フィールド名のように、利用者が決めた文字列が表現に入るdtypeがあり、`UInt128`という名前の
 /// カテゴリを持つ`Enum`を取り込めないdtypeと取り違えるため。クラス名と型の構造だけを見る。
-/// 内側の型を持つのは組み込みの`List`・`Array`・`Struct`だけで、`Extension`は辿らない。
+/// 内側の型を持つのは組み込みの`List`・`Array`・`Struct`だけ。`Extension`はストレージ型を
+/// 辿らずに拒否し（登録した拡張型も`Extension`として）、`List`・`Array`・`Struct`の中にあれば
+/// 外側の型名で拒否する。
 ///
 /// Pythonのオブジェクトを受けるので、Rustの単体テストは書けない。検証は
 /// `tests/cross_method/test_key_columns.py`と`tests/cross_method/test_input_dtypes.py`にある。
 fn unreadable_label(dtype: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
-    let name: String = dtype
-        .call_method0("base_type")?
-        .getattr("__name__")?
-        .extract()?;
+    let class = dtype.call_method0("base_type")?;
+    let name: String = class.getattr("__name__")?.extract()?;
     if UNREADABLE_DTYPES.contains(&name.as_str()) {
         return Ok(Some(name));
+    }
+    if is_registered_extension(&class)? {
+        return Ok(Some(EXTENSION_LABEL.to_string()));
     }
     // `List`・`Array`は`inner`、`Struct`は`fields`（各`Field`の`dtype`）に内側の型を持つ。
     // 型名で絞るのは、他のdtypeにたまたま同名の属性があっても辿らないため。

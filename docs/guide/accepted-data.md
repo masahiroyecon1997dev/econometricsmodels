@@ -7,7 +7,7 @@ This page describes what kind of data and arguments the estimators accept: the i
 The data must be an eager `polars.DataFrame`. Nothing else is accepted: not pandas, not a `polars.LazyFrame`, not a `polars.Series`, not a dictionary or a NumPy array.
 
 - Anything else raises `TypeError` (see [Argument types](#argument-types)). The message for a pandas DataFrame shows how to convert it with `polars.from_pandas(df)`, and the message for a `LazyFrame` tells you to call `.collect()` first.
-- Only the columns you name are read. Every other column is ignored, whatever its dtype, including nested columns (`List`, `Array`, `Struct`) and columns of types the estimators cannot use (for example `UInt128`). `augment()` returns the data you passed with the prediction column added, so the columns that were not read are kept.
+- Only the columns you name are read. Every other column is ignored, whatever its dtype, including nested columns (`List`, `Array`, `Struct`) and columns of types the estimators cannot use (for example `UInt128` or `Extension`). `augment()` returns the data you passed with the prediction column added, so the columns that were not read are kept.
 
 ## Column types by role
 
@@ -22,7 +22,7 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 
 In `FE`, `FEIV` and `RE`, the role of a column in `effects` follows its position, not its content: the first column is read as a group identity (an entity) and the second as a time period, and the order is not checked. A *group* is one level of a column of `effects`, for example one entity. If you pass the time column first, it is treated as the entity, including for the default clustering column.
 
-Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`; nor, as a time period, `Boolean`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
+Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`, `Extension`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`, `Extension`; nor, as a time period, `Boolean`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
 
 If the numbers you want to use are stored as strings or as dates, convert them yourself so that the intent is explicit:
 

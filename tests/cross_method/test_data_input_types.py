@@ -11,6 +11,7 @@ import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import (
+    EXTENSION_DTYPES,
     NESTED_LOOKALIKE_DTYPES,
     NESTED_UINT128_DTYPES,
     UNUSED_COLUMN_DTYPES,
@@ -358,6 +359,7 @@ def test_new_data_accepts_boolean_and_dummy_columns(
         (pl.UInt128, "UInt128"),
         *NESTED_UINT128_DTYPES,
         *NESTED_LOOKALIKE_DTYPES,
+        *EXTENSION_DTYPES,
     ],
     ids=lambda v: str(v) if not isinstance(v, str) else None,
 )

@@ -13,6 +13,7 @@ import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import (
+    EXTENSION_DTYPES,
     NESTED_LOOKALIKE_DTYPES,
     NESTED_UINT128_DTYPES,
     make_frame,
@@ -194,6 +195,7 @@ UNSUPPORTED_IDENTITY_DTYPES = [
     (pl.Struct({"UInt128": pl.Int64}), "Struct"),
     *NESTED_UINT128_DTYPES,
     *NESTED_LOOKALIKE_DTYPES,
+    *EXTENSION_DTYPES,
 ]
 UNSUPPORTED_TIME_DTYPES = [
     (pl.Boolean, "Boolean"),
@@ -284,6 +286,41 @@ def test_unsupported_dtype_as_cluster_raises(frame, method, dtype, label):
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
         column="cluster",
         dtype=label,
+        argument="cluster",
+        data_argument="data",
+    ):
+        CLUSTER_FITS[method](df)
+
+
+@pytest.mark.parametrize("method", list(CLUSTER_FITS))
+@pytest.mark.parametrize(
+    ("storage", "name"),
+    [
+        (pl.Int64, "my_ext"),
+        (pl.UInt128, "my_ext"),
+        (pl.Int64, "registered_ext"),
+    ],
+    ids=["Int64", "UInt128", "registered"],
+)
+def test_extension_cluster_with_values_is_a_validation_error(
+    frame, method, storage, name
+):
+    """値の入った`Extension`の列（`register_extension_type`で登録した型を含む）を
+    `cluster`に渡すと、ストレージ型によらず`COLUMN_UNSUPPORTED_DTYPE`
+    （列の取り込み時の`INTERNAL_ERROR`にならない）。
+    """
+    extension = (
+        pl.col("cluster")
+        .cast(pl.Int64)
+        .cast(storage)
+        .cast(pl.Extension(name, storage))
+    )
+    df = frame.with_columns(extension.alias("cluster"))
+
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="cluster",
+        dtype="Extension",
         argument="cluster",
         data_argument="data",
     ):

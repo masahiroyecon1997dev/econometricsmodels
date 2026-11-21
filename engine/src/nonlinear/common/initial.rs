@@ -22,8 +22,9 @@ use crate::shared::linear_algebra::{
 /// 利用者に報告するのは元の設計の列なので、判定は`x_std`、列の特定は`x`で行う（`x`と`x_std`は
 /// 同じ列名`names`を共有する）。
 ///
-/// Logit/Probit（`ols_based_initial_params`）が`fit()`冒頭で共有する（Tobitは
-/// 直交座標`Q`の`OrthonormalDesign::new_checked`でランク判定する）。Newton法が一度も反復していない段階での検出のため、エラーは
+/// Logit/Probit（`ols_based_initial_params`）が`fit()`冒頭で共有する（Tobitは直交座標`Q`の
+/// `OrthonormalDesign::new_checked`でランク判定する）。Newton法が一度も反復していない段階での
+/// 検出のため、エラーは
 /// `SingularHessian`（最適化中・収束後のHessian逆行列計算）ではなく`SingularDesignMatrix`
 /// （後者のdocコメント参照。`solver`（newton/bfgs/lbfgs）に関わらず同じこの単一経路で
 /// 多重共線性を検出するのが本関数を共有する目的）。

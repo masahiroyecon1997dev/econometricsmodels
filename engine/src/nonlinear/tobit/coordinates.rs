@@ -294,63 +294,22 @@ mod tests {
             "{err:?}"
         );
     }
-    /// 傾きの2列がほぼ共線な設計（`eps = 2⁻¹⁴`〜`2⁻²⁴`。列を揃えた条件数は`1.5e4`〜`1.5e7`）で、
-    /// `Q`の座標の`H`・スコアから作る全体Wald統計量を、有理数演算の厳密値と照合する。
-    /// モデルは`情報行列 A = Σ wᵢvᵢvᵢ'`、`vᵢ = (1, aᵢ, aᵢ + eps·bᵢ, gᵢ)`（最後が`σ`の方向）、
-    /// スコア`sᵢ = eᵢvᵢ`で、全要素が倍精度で厳密に表せる2進小数。`Q`の座標では`vᵢ`の先頭3成分を
+
+    /// `Q`の座標の`H`・スコアから作る全体Wald統計量を有理数演算の厳密値と照合する。
+    /// `has_intercept`で、先頭が切片列の設計（検定しない先頭列が1つ）と、傾きだけの設計
+    /// （`k_constant = 0`）の両方のレイアウトを検証する。
+    ///
+    /// モデルは`情報行列 A = Σ wᵢvᵢvᵢ'`、`vᵢ = ([1,] aᵢ, aᵢ + eps·bᵢ, gᵢ)`（最後が`σ`の方向）、
+    /// スコア`sᵢ = eᵢvᵢ`で、全要素が倍精度で厳密に表せる2進小数。`Q`の座標では`vᵢ`の`X`部分を
     /// `Q`の行に置き換えて同じ式で組む（`TobitProblem`が`x = Q`で評価するのと同じ構造）。
-    /// `X`の座標で`-H⁻¹`を作って`Ψ`とかけ合わせる式は、同じ入力で`hc0`の相対誤差が`eps = 2⁻¹⁴`で
-    /// 約`4e-6`、`2⁻¹⁸`で約`4e-2`、`2⁻²²`以降は全く合わなくなる。
-    #[test]
-    fn overall_wald_in_q_coordinates_matches_exact_rational_values() {
+    fn assert_exact_wald(has_intercept: bool, cases: &[(i32, [f64; 5])]) {
         use crate::nonlinear::common::{CovType, cov_params_for_type};
         use crate::shared::group_codes::GroupCodes;
         use crate::shared::wald::wald_quadratic_form;
 
-        // (指数, [classical, hc0, hc1, cluster, opg])
-        let cases: [(i32, [f64; 5]); 4] = [
-            (
-                14,
-                [
-                    717.7934482516522,
-                    2829.7053115066637,
-                    2546.7347803559974,
-                    4106.038910034186,
-                    179.40214877699057,
-                ],
-            ),
-            (
-                18,
-                [
-                    717.7565572618128,
-                    2829.5663118357706,
-                    2546.6096806521937,
-                    4105.836464190011,
-                    179.3934491614713,
-                ],
-            ),
-            (
-                22,
-                [
-                    717.7542516857172,
-                    2829.5576248143907,
-                    2546.6018623329514,
-                    4105.823811961406,
-                    179.39290545505867,
-                ],
-            ),
-            (
-                24,
-                [
-                    717.7541364072546,
-                    2829.5571904647363,
-                    2546.6014714182625,
-                    4105.823179351942,
-                    179.39287826979842,
-                ],
-            ),
-        ];
         let n = 40;
+        let k_constant = usize::from(has_intercept);
+        let k = 2 + k_constant;
         let groups =
             GroupCodes::from_labels(&(0..n).map(|i| format!("g{}", i % 8)).collect::<Vec<_>>());
         let cov_types = [
@@ -362,41 +321,193 @@ mod tests {
             },
             CovType::Opg,
         ];
-        let theta = [0.5, 2.0, -1.0, -0.25];
-        for (exponent, expected) in cases {
+        // `[切片,] x1, x2, logσ`の係数。
+        let theta: Vec<f64> = if has_intercept {
+            vec![0.5, 2.0, -1.0, -0.25]
+        } else {
+            vec![2.0, -1.0, -0.25]
+        };
+        for &(exponent, expected) in cases {
             let eps = 0.5_f64.powi(exponent);
             let a = |i: usize| ((7 * i) % 13) as f64 - 6.0;
             let b = |i: usize| ((5 * i) % 11) as f64 - 5.0;
             let g = |i: usize| (((3 * i) % 7) as f64 - 3.0) / 8.0;
             let e = |i: usize| (((i * 5) % 9) as f64 - 4.0) / 4.0 + 0.125;
             let w = |i: usize| (4 + i % 3) as f64 / 4.0;
-            let x = Mat::from_fn(n, 3, |i, j| match j {
+            // 列の並び`[切片, x1, x2]`のうち、切片なしでは先頭を除く。
+            let x = Mat::from_fn(n, k, |i, j| match j + usize::from(!has_intercept) {
                 0 => 1.0,
                 1 => a(i),
                 _ => a(i) + eps * b(i),
             });
-            let names = ["const", "x1", "x2"].map(String::from);
+            let names: Vec<String> = if has_intercept {
+                ["const", "x1", "x2"].map(String::from).to_vec()
+            } else {
+                ["x1", "x2"].map(String::from).to_vec()
+            };
             let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
             // `Q`の座標の観測ごとの行`(q_i, g_i)`。
-            let v = Mat::from_fn(n, 4, |i, j| if j < 3 { *q.get(i, j) } else { g(i) });
-            let hessian = Mat::from_fn(4, 4, |r, c| {
+            let v = Mat::from_fn(n, k + 1, |i, j| if j < k { *q.get(i, j) } else { g(i) });
+            let hessian = Mat::from_fn(k + 1, k + 1, |r, c| {
                 -(0..n)
                     .map(|i| w(i) * *v.get(i, r) * *v.get(i, c))
                     .sum::<f64>()
             });
-            let scores = Mat::from_fn(n, 4, |i, j| e(i) * *v.get(i, j));
+            let scores = Mat::from_fn(n, k + 1, |i, j| e(i) * *v.get(i, j));
             // `θ`の`β`部分に対応する`Q`の座標`b = Rβ`（`Q`の倍率を含む`R`）。
-            let b_q: Vec<f64> = (0..3)
-                .map(|i| (i..3).map(|j| *coordinates.r.get(i, j) * theta[j]).sum())
-                .collect();
-            let b_mat = Mat::from_fn(3, 1, |i, _| b_q[i]);
+            let b_mat = Mat::from_fn(k, 1, |i, _| {
+                (i..k)
+                    .map(|j| *coordinates.r.get(i, j) * theta[j])
+                    .sum::<f64>()
+            });
             for (cov_type, expected) in cov_types.iter().zip(expected) {
-                let cov = cov_params_for_type(cov_type, &hessian, Some(&scores), n, 4).unwrap();
-                let wald = wald_quadratic_form(&b_mat, &cov, 1, 2).unwrap();
+                let cov = cov_params_for_type(cov_type, &hessian, Some(&scores), n, k + 1).unwrap();
+                let wald = wald_quadratic_form(&b_mat, &cov, k_constant, 2).unwrap();
                 assert!(
                     (wald / expected - 1.0).abs() < 1e-8,
-                    "eps=2^-{exponent} {cov_type:?}: {wald} vs {expected}"
+                    "intercept={has_intercept} eps=2^-{exponent} {cov_type:?}: {wald} vs {expected}"
                 );
+            }
+        }
+    }
+
+    /// 傾きの2列がほぼ共線な設計（`eps = 2⁻¹⁴`〜`2⁻²⁴`。列を揃えた条件数は`1.5e4`〜`1.5e7`）、切片あり。
+    /// `X`の座標で`-H⁻¹`を作って`Ψ`とかけ合わせる式は、同じ入力で`hc0`の相対誤差が`eps = 2⁻¹⁴`で
+    /// 約`4e-6`、`2⁻¹⁸`で約`4e-2`、`2⁻²²`以降は全く合わなくなる。
+    #[test]
+    fn overall_wald_in_q_coordinates_matches_exact_rational_values() {
+        // (指数, [classical, hc0, hc1, cluster, opg])
+        assert_exact_wald(
+            true,
+            &[
+                (
+                    14,
+                    [
+                        717.7934482516522,
+                        2829.7053115066637,
+                        2546.7347803559974,
+                        4106.038910034186,
+                        179.40214877699057,
+                    ],
+                ),
+                (
+                    18,
+                    [
+                        717.7565572618128,
+                        2829.5663118357706,
+                        2546.6096806521937,
+                        4105.836464190011,
+                        179.3934491614713,
+                    ],
+                ),
+                (
+                    22,
+                    [
+                        717.7542516857172,
+                        2829.5576248143907,
+                        2546.6018623329514,
+                        4105.823811961406,
+                        179.39290545505867,
+                    ],
+                ),
+                (
+                    24,
+                    [
+                        717.7541364072546,
+                        2829.5571904647363,
+                        2546.6014714182625,
+                        4105.823179351942,
+                        179.39287826979842,
+                    ],
+                ),
+            ],
+        );
+    }
+
+    /// 切片なし（検定しない先頭の列が無い、`k_constant = 0`）の同じ照合。
+    #[test]
+    fn overall_wald_in_q_coordinates_matches_exact_rational_values_without_an_intercept() {
+        assert_exact_wald(
+            false,
+            &[
+                (
+                    14,
+                    [
+                        718.5145677835646,
+                        2855.62789083642,
+                        2641.455799023689,
+                        4288.8809658127475,
+                        180.66922161576133,
+                    ],
+                ),
+                (
+                    22,
+                    [
+                        718.4752769244974,
+                        2855.472585759808,
+                        2641.312141827823,
+                        4288.654683878729,
+                        180.65926046466674,
+                    ],
+                ),
+                (
+                    24,
+                    [
+                        718.475161368711,
+                        2855.472129004337,
+                        2641.31171932901,
+                        4288.65401837657,
+                        180.65923116844425,
+                    ],
+                ),
+            ],
+        );
+    }
+
+    /// 切片ありの標準化は非切片列の平均を引くので、ダミー変数の罠（`d1 + d2 = 切片`）は標準化後の
+    /// 行列では`const`を含まない形（`d1`と`d2`が逆符号）に見える。報告する列は元の設計の
+    /// `const, d1, d2`（標準化後の行列から特定すると`d1, d2`だけになる）。
+    #[test]
+    fn collinearity_hidden_by_centering_is_reported_with_the_original_columns() {
+        let n = 30;
+        let d1 = |i: usize| f64::from(u8::from(i.is_multiple_of(3)));
+        let x = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => d1(i),
+            _ => 1.0 - d1(i),
+        });
+        let mean = (0..n).map(d1).sum::<f64>() / n as f64;
+        let sd = ((0..n).map(|i| (d1(i) - mean).powi(2)).sum::<f64>() / n as f64).sqrt();
+        let x_std = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => (d1(i) - mean) / sd,
+            _ => ((1.0 - d1(i)) - (1.0 - mean)) / sd,
+        });
+        let names = ["const", "d1", "d2"].map(String::from);
+        let err = DesignCoordinates::new(&x_std, &x, &names).unwrap_err();
+        assert!(
+            matches!(&err, MleError::SingularDesignMatrix { columns } if columns == &["const", "d1", "d2"]),
+            "{err:?}"
+        );
+    }
+
+    /// 観測数が列数に近い小標本でも、`Q`の倍率は`√n`に近い2の冪（`n = 5`で`2`）で、`Q'Q`が単位行列の
+    /// 定数倍になる。
+    #[test]
+    fn the_scale_is_a_power_of_two_even_for_a_tiny_sample() {
+        let x = Mat::from_fn(5, 3, |i, j| match j {
+            0 => 1.0,
+            1 => i as f64,
+            _ => ((i * i) % 5) as f64,
+        });
+        let names = ["const", "a", "b"].map(String::from);
+        let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+        assert_eq!(coordinates.scale, 2.0);
+        let gram = q.transpose() * &q;
+        for i in 0..3 {
+            for j in 0..3 {
+                let expected = if i == j { 4.0 } else { 0.0 };
+                assert!((gram.get(i, j) - expected).abs() < 1e-12, "({i}, {j})");
             }
         }
     }

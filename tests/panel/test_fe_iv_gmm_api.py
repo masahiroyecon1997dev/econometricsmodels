@@ -11,12 +11,10 @@ import numpy as np
 import polars as pl
 import pytest
 from _assertions import assert_option_case_insensitive
-from _errors import raises_error
 from _helpers import CASE_SPELLINGS
 from econometricsmodels import (
     FEIV,
     CStatisticResult,
-    ErrorCode,
     FEIVOptions,
     FEIVResults,
     _lib,
@@ -183,12 +181,13 @@ def test_r_squared_properties_are_floats(data):
         assert isinstance(value, float)
 
 
-def test_what_the_gmm_engine_does_not_compute_is_none_or_an_error(data):
-    """第一段階・弱操作変数診断・Wu-Hausman・固定効果の推定値は、GMMでは持たない
-    （プロパティは`None`、メソッドは`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`）。"""
+def test_gmm_provides_the_first_stage_and_its_diagnostics(data):
+    """第一段階・弱操作変数診断・Wu-Hausmanは第一段階だけに依存するので、GMMでも持つ
+    （どの項目も`None`にならない）。"""
     result = _fit(data, ["a"])
+    assert list(result.first_stage()) == ["a"]
+    assert list(result.weak_instrument_f_statistics) == ["a"]
     for name in (
-        "weak_instrument_f_statistics",
         "weak_instrument_f_df_num",
         "weak_instrument_f_df_denom",
         "wu_hausman_statistic",
@@ -196,36 +195,30 @@ def test_what_the_gmm_engine_does_not_compute_is_none_or_an_error(data):
         "wu_hausman_df_num",
         "wu_hausman_df_denom",
     ):
-        assert getattr(result, name) is None, name
-    for name, call in (
-        ("first_stage()", lambda: result.first_stage()),
-        ("fixed_effects()", lambda: result.fixed_effects()),
-        ("cragg_donald()", lambda: result.cragg_donald()),
-        ("kleibergen_paap()", lambda: result.kleibergen_paap()),
-        ("effective_f()", lambda: result.effective_f()),
-    ):
-        with raises_error(
-            ErrorCode.METHOD_NOT_AVAILABLE_FOR_ESTIMATOR,
-            method=name,
-            estimator="gmm",
-            supported="2sls",
-        ):
-            call()
+        assert getattr(result, name) is not None, name
+    assert result.cragg_donald().statistic > 0.0
+    assert result.kleibergen_paap().rk_wald_f is not None
+    assert result.effective_f().statistic > 0.0
 
 
-def test_effective_f_checks_the_estimator_before_its_argument(data):
-    """GMMの結果では、`alpha`の型によらず`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`になる。"""
+def test_gmm_provides_the_fixed_effects(data):
+    """固定効果の復元もGMMで使える（GMMの係数で復元する）。"""
     result = _fit(data, ["a"])
-    with raises_error(
-        ErrorCode.METHOD_NOT_AVAILABLE_FOR_ESTIMATOR,
-        method="effective_f()",
-        estimator="gmm",
-        supported="2sls",
-    ):
+    effects = result.fixed_effects()
+    assert list(effects) == ["entity"]
+    assert len(effects["entity"]) == data["entity"].n_unique()
+
+
+def test_effective_f_checks_its_argument_for_gmm_too(data):
+    """GMMの結果でも、`alpha`の型の誤りは`TypeError`になる。"""
+    result = _fit(data, ["a"])
+    with pytest.raises(TypeError):
         result.effective_f(alpha="0.05")  # type: ignore[arg-type]
 
 
-def test_c_stat_is_not_available_for_two_stage_least_squares(data):
+def test_c_stat_is_available_for_two_stage_least_squares(data):
+    """2SLSの`c_stat()`も使える（重みは`cov_type`の系統から決まる。数値の照合は
+    `test_fe_iv_c_statistic_2sls.py`）。"""
     result = FEIV(
         data,
         y="y",
@@ -234,13 +227,7 @@ def test_c_stat_is_not_available_for_two_stage_least_squares(data):
         instruments=["z1", "z2"],
         effects=["entity"],
     ).fit()
-    with raises_error(
-        ErrorCode.METHOD_NOT_AVAILABLE_FOR_ESTIMATOR,
-        method="c_stat()",
-        estimator="2sls",
-        supported="gmm",
-    ):
-        result.c_stat(variables=["a"])
+    assert result.c_stat(variables=["a"]).df == 1
 
 
 # ── C統計量 ──────────────────────────────────────────────────────────────

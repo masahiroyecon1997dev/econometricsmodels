@@ -1,4 +1,9 @@
-//! FEIVの弱操作変数診断。部分F統計量（`fit()`時）と、Cragg-Donald・Kleibergen-Paap・有効F（推定後のメソッド）。
+//! FEIVの弱操作変数診断（FE-2SLSと固定効果つきGMMが共有）。部分F統計量（`fit()`時）と、Cragg-Donald・
+//! Kleibergen-Paap・有効F（推定後のメソッド）。
+//!
+//! 診断は第一段階だけに依存し、第二段階の推定量（2SLSかGMMか）には依らない。構造残差は有効Fの被説明変数
+//! `ỹ = e + X̃β̂`の復元にだけ使い、`e = ỹ − X̃β̂`なので`β̂`が何でも同じ`ỹ`に戻る。`cov_type`は`fit`に渡した
+//! もの（GMMの重みとは独立）。
 //!
 //! 計算は行列を受け取る共有関数（`shared::instrumental_variables::partial_f_statistic`・
 //! `shared::weak_instruments::cragg_donald`・`shared::kleibergen_paap`・`shared::effective_f`）で、ここは
@@ -17,11 +22,12 @@
 
 use faer::Mat;
 
-use super::FeTwoSlsEstimator;
+use super::first_stage::FirstStageWithin;
+use super::input::FeIvInput;
 use crate::panel::common::{
     PanelError, absorbed_parameters, fe_cluster_k_correction, leverage_full,
 };
-use crate::panel::fe::{FeCovType, FeEstimator};
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator};
 use crate::shared::covariance::HcVariant;
 use crate::shared::effective_f::{EffectiveF, effective_f};
 use crate::shared::error::CommonError;
@@ -74,10 +80,27 @@ struct Matrices {
     z: Mat<f64>,
 }
 
-impl FeTwoSlsEstimator {
+/// 推定量が持つ、診断が読む量の借用。`FeTwoSlsEstimator`・`FeGmmEstimator`が自分のフィールドから作る。
+pub(in crate::panel::fe_iv) struct WeakInstrumentView<'a> {
+    pub(in crate::panel::fe_iv) input: &'a FeIvInput,
+    pub(in crate::panel::fe_iv) effects: FeEffects,
+    pub(in crate::panel::fe_iv) cov_type: &'a FeCovType,
+    /// 吸収した効果の次元ごとの水準数（`effects`の順）。
+    pub(in crate::panel::fe_iv) n_groups: &'a [usize],
+    pub(in crate::panel::fe_iv) dk_bandwidth_used: Option<usize>,
+    /// 構造式の係数`β̂`（k, 1）。
+    pub(in crate::panel::fe_iv) params: &'a Mat<f64>,
+    /// 構造残差`ỹ − X̃β̂`（n, 1）。
+    pub(in crate::panel::fe_iv) residuals: &'a Mat<f64>,
+    /// 内生変数が無ければ`None`。
+    pub(in crate::panel::fe_iv) first_stage_within: Option<&'a FirstStageWithin>,
+    pub(in crate::panel::fe_iv) weak_instrument_f: &'a [(String, f64)],
+}
+
+impl WeakInstrumentView<'_> {
     fn matrices(&self, statistic: &'static str) -> Result<Matrices, PanelError> {
         // 第一段階が無い（内生変数が無い）と、診断は定義できない。
-        let Some(within) = &self.first_stage_within else {
+        let Some(within) = self.first_stage_within else {
             return Err(undefined(statistic));
         };
         let (k_exog, k_instruments) = (self.input.k_exog(), self.input.k_instruments());
@@ -90,12 +113,12 @@ impl FeTwoSlsEstimator {
 
     /// 吸収した効果の数`neffects`。
     fn neffects(&self) -> usize {
-        absorbed_parameters(&self.n_groups)
+        absorbed_parameters(self.n_groups)
     }
 
-    /// 部分F統計量のF分布の自由度（[`FeTwoSlsEstimator::weak_instrument_f_df`]の本体）。`n > l + neffects`は
+    /// 部分F統計量のF分布の自由度（`weak_instrument_f_df`の本体）。`n > l + neffects`は
     /// `fit`の第一段階の自由度の検査が保証する。
-    pub(super) fn compute_weak_instrument_f_df(&self) -> Option<(usize, usize)> {
+    pub(in crate::panel::fe_iv) fn weak_instrument_f_df(&self) -> Option<(usize, usize)> {
         if self.weak_instrument_f.is_empty() {
             return None;
         }
@@ -165,8 +188,8 @@ impl FeTwoSlsEstimator {
         })
     }
 
-    /// Cragg-Donald統計量とStock-Yogoの臨界値（[`FeTwoSlsEstimator::cragg_donald`]の本体）。
-    pub(super) fn compute_cragg_donald(&self) -> Result<CraggDonald, PanelError> {
+    /// Cragg-Donald統計量とStock-Yogoの臨界値（`cragg_donald`の本体）。
+    pub(in crate::panel::fe_iv) fn cragg_donald(&self) -> Result<CraggDonald, PanelError> {
         crate::shared::parallelism::ensure_serial();
         let m = self.matrices(CRAGG_DONALD_LABEL)?;
         let statistic = cragg_donald(&m.y_endog, &m.x_exog, &m.z, self.neffects())
@@ -178,8 +201,8 @@ impl FeTwoSlsEstimator {
         ))
     }
 
-    /// Kleibergen-Paap統計量（[`FeTwoSlsEstimator::kleibergen_paap`]の本体）。
-    pub(super) fn compute_kleibergen_paap(&self) -> Result<KleibergenPaap, PanelError> {
+    /// Kleibergen-Paap統計量（`kleibergen_paap`の本体）。
+    pub(in crate::panel::fe_iv) fn kleibergen_paap(&self) -> Result<KleibergenPaap, PanelError> {
         crate::shared::parallelism::ensure_serial();
         let m = self.matrices(KLEIBERGEN_PAAP_LABEL)?;
         let statistics = self
@@ -198,8 +221,11 @@ impl FeTwoSlsEstimator {
         })
     }
 
-    /// 有効F統計量と臨界値（[`FeTwoSlsEstimator::effective_f`]の本体）。
-    pub(super) fn compute_effective_f(&self, alpha: f64) -> Result<EffectiveF, PanelError> {
+    /// 有効F統計量と臨界値（`effective_f`の本体）。
+    pub(in crate::panel::fe_iv) fn effective_f(
+        &self,
+        alpha: f64,
+    ) -> Result<EffectiveF, PanelError> {
         crate::shared::parallelism::ensure_serial();
         if self.input.k_endog() != 1 {
             return Err(PanelError::EffectiveFEndogenousCount {

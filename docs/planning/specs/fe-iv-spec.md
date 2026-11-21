@@ -9,10 +9,7 @@ FEIV（FE-2SLS・FE-GMM。`estimator`で切り替え）の実装・テスト・�
 
 ## A. 実装されていない機能（後続Issueの候補）
 
-- **`estimator="gmm"`への`first_stage()`・弱操作変数診断（`weak_instrument_f_*`・`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）・Wu-Hausman・`fixed_effects()`の追加**。
-  engine側の追加が要る（GMMの係数での固定効果の復元、第一段階の共有）。現状は、GMMでこれらのメソッドを呼ぶと`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`、プロパティは`None`
-  （IVでは両推定量で使えるので、IVとの差は残る。`usage/fe_iv.md`の「What each estimator provides」の表）。
-- **`estimator="2sls"`への`c_stat()`**（IVは両推定量で使える。FEIVの2SLSでは`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`）。重みを`cov_type`から決める規則（IVの`weight_type_for_cov_type`）が要る。
+- **IVの`estimator="gmm"`でも`wu_hausman_*`を計算する**（FEIVはGMMでも計算するようになったので、IVだけが`None`で残る差。#679）。
 - **FEIVへの頑健な過剰識別検定**（IV本体の2SLSへの頑健なHansen J（#636）にFE-2SLSを含めるか）。FEIVのSarganは等分散前提で`cov_type`に依らない。
 - 公開docsの`docs/guide/performance*.md`・`README.md`「Performance」へのFE-IV・FE-GMMの行（リリース準備時にCIの計測値から再生成。`compare_fe_iv.py`の`extra_methods`にGMMを足す件は#663に起票済み）。
 

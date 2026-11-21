@@ -248,13 +248,13 @@ class FEIVResults:
       `wald_dist`, `wald_df_num`, `wald_df_denom`.
     - Estimator actually used: `estimator`, `gmm_type`,
       `gmm_weight_type`, `n_iter`, `converged`.
-    - Weak instruments (`estimator="2sls"` only, `None` with GMM):
+    - Weak instruments (the same for both estimators):
       `weak_instrument_f_statistics`, `weak_instrument_f_df_num`,
       `weak_instrument_f_df_denom`.
     - Overidentification (Sargan with `estimator="2sls"`, Hansen J with
       `estimator="gmm"`; all `None` when just identified):
       `overid_statistic`, `overid_p_value`, `overid_df`.
-    - Endogeneity (`estimator="2sls"` only, `None` with GMM):
+    - Endogeneity (the same for both estimators, under `cov_type`):
       `wu_hausman_statistic`, `wu_hausman_p_value`, `wu_hausman_df_num`,
       `wu_hausman_df_denom`.
     - Fit: `r_squared_within`, `r_squared_between`,
@@ -266,18 +266,19 @@ class FEIVResults:
     - Residuals: `residuals` (structural residuals of the
       within-transformed data).
     - Methods: `first_stage()` (one `FEResults` per endogenous
-      variable), `fixed_effects()` (the estimated effect of every group,
-      for each effects column of the model), `params_table()`. The first
-      two are available with `estimator="2sls"` only.
-    - Weak-instrument diagnostics (methods, computed when called, with
-      `estimator="2sls"` only): `cragg_donald()`, `kleibergen_paap()`,
-      `effective_f()`.
-    - Exogeneity and orthogonality (a method, computed when called, with
-      `estimator="gmm"` only): `c_stat()`.
+      variable; the same for both estimators), `fixed_effects()` (the
+      estimated effect of every group, for each effects column of the
+      model), `params_table()`.
+    - Weak-instrument diagnostics (methods, computed when called, the
+      same for both estimators): `cragg_donald()`,
+      `kleibergen_paap()`, `effective_f()`.
+    - Exogeneity and orthogonality (a method, computed when called, the
+      same for both estimators; not available for `estimator="2sls"`
+      with `cov_type="dk"`): `c_stat()`.
 
-    A method that the estimator does not support raises a
-    `ValidationError`, and a property that it does not support is
-    `None`.
+    Both estimators provide the same fields and methods, except that
+    `c_stat()` is not available with `cov_type="dk"` for
+    `estimator="2sls"`.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -513,26 +514,26 @@ class FEIVResults:
         return self._raw.r_squared_overall
 
     @property
-    def weak_instrument_f_statistics(self) -> dict[str, float] | None:
+    def weak_instrument_f_statistics(self) -> dict[str, float]:
         """Weak-instrument diagnostic: partial F-statistic for each
         endogenous variable, keyed by variable name in the order of
-        `x_endog`. `None` for `estimator="gmm"`.
+        `x_endog`.
 
         Tests the excluded instruments' joint significance after
         partialling out `x_exog` and the fixed effects, always under the
         classical (homoskedastic) formula regardless of `cov_type`.
         `first_stage()` has no overall F-statistic to compare it with.
+        Computed the same way for both `estimator="2sls"` and
+        `estimator="gmm"`.
         """
         stats = self._raw.weak_instrument_f_statistics
-        if stats is None:
-            return None
         return {name: stats[name] for name in self._x_endog}
 
     @property
     def weak_instrument_f_df_num(self) -> int | None:
         """Numerator degrees of freedom of the weak-instrument F
         statistics (the number of excluded instruments; the same for
-        every endogenous variable). `None` for `estimator="gmm"`."""
+        every endogenous variable). The same for both estimators."""
         return self._raw.weak_instrument_f_df_num
 
     @property
@@ -540,7 +541,7 @@ class FEIVResults:
         """Denominator degrees of freedom of the weak-instrument F
         statistics (residual degrees of freedom of the first-stage
         regressions after the absorbed fixed effects; the same for every
-        endogenous variable). `None` for `estimator="gmm"`."""
+        endogenous variable). The same for both estimators."""
         return self._raw.weak_instrument_f_df_denom
 
     @property
@@ -590,14 +591,17 @@ class FEIVResults:
 
     @property
     def wu_hausman_statistic(self) -> float | None:
-        """Wu-Hausman endogeneity test statistic (regression-based;
-        `estimator="2sls"` only, `None` for `estimator="gmm"`).
+        """Wu-Hausman endogeneity test statistic (regression-based).
 
         Adds the first-stage residuals to the structural equation and
         tests their joint significance in a fixed-effects regression,
         jointly over all endogenous variables. Unlike
         `weak_instrument_f_statistics`, this is always computed under
-        the `cov_type` in `options`.
+        the `cov_type` in `options`. The auxiliary regression is a
+        least-squares regression, so it does not depend on the GMM
+        weight: for the same data and `cov_type`, `estimator="2sls"` and
+        `estimator="gmm"` give the same value. `c_stat()` is the
+        endogeneity test that uses the GMM weight.
 
         `None` when the augmented regression cannot be estimated (the
         augmented design is singular, `y` is exactly explained by the
@@ -648,8 +652,10 @@ class FEIVResults:
         return params_table_rows(self._raw)
 
     def first_stage(self) -> dict[str, FEResults]:
-        """Per-endogenous-variable first-stage regression results
-        (`estimator="2sls"` only).
+        """Per-endogenous-variable first-stage regression results.
+
+        The first stage does not depend on the second-stage estimator,
+        so it is the same for `estimator="2sls"` and `estimator="gmm"`.
 
         Each first-stage regression is `x_endog[i] ~ x_exog +
         instruments` with the same fixed effects and `cov_type` as the
@@ -664,10 +670,6 @@ class FEIVResults:
         Returns:
             A dictionary keyed by endogenous variable name, in the order
             of `x_endog`; the values are the first-stage `FEResults`.
-
-        Raises:
-            ValidationError: The model was fitted with
-                `estimator="gmm"`.
         """
         stages = self._raw.first_stage()
         return {name: FEResults(stages[name]) for name in self._x_endog}
@@ -686,15 +688,11 @@ class FEIVResults:
         This is a post-estimation computation: it is never done by
         `fit()`. It re-reads the variables from the data passed to
         `fit()` and estimates the model again on every call, so it costs
-        about as much as `fit()`. Available with `estimator="2sls"`
-        only.
+        about as much as `fit()`. The coefficients are those of the
+        estimator used (`estimator="2sls"` or `estimator="gmm"`).
 
         Returns:
             The fixed effects, shaped as described above.
-
-        Raises:
-            ValidationError: The model was fitted with
-                `estimator="gmm"`.
         """
         return self._raw.fixed_effects()
 
@@ -718,7 +716,8 @@ class FEIVResults:
         `fit()`. It re-reads the variables from the data passed to
         `fit()` and estimates the model again on every call.
 
-        Available with `estimator="2sls"` only.
+        It depends on the first stage only, so it is the same for
+        `estimator="2sls"` and `estimator="gmm"`.
 
         Returns:
             A `CraggDonaldResult` with the statistic, the numbers of
@@ -726,8 +725,6 @@ class FEIVResults:
             critical values (`None` where not tabulated).
 
         Raises:
-            ValidationError: The model was fitted with
-                `estimator="gmm"`.
             ComputationError: The statistic is undefined for these data,
                 for example because the instruments are collinear with
                 the exogenous variables or a first stage fits perfectly.
@@ -749,7 +746,8 @@ class FEIVResults:
         `fit()`. It re-reads the variables from the data passed to
         `fit()` and estimates the model again on every call.
 
-        Available with `estimator="2sls"` only.
+        Available with both estimators: it follows `cov_type`, not the
+        GMM weight.
 
         Returns:
             A `KleibergenPaapResult`. Either statistic is `None` when
@@ -757,8 +755,6 @@ class FEIVResults:
             than the LM).
 
         Raises:
-            ValidationError: The model was fitted with
-                `estimator="gmm"`.
             ComputationError: Neither statistic is defined for these
                 data, for example because the instruments are collinear
                 with the exogenous variables or the covariance of the
@@ -778,7 +774,11 @@ class FEIVResults:
         `dk_bandwidth`) of the options passed to `fit()`; with
         `cov_type="classical"` it equals the Cragg-Donald statistic.
         With one or two excluded instruments, prefer the simplified
-        critical values (see `EffectiveFResult`).
+        critical values (see `EffectiveFResult`). Available with both
+        estimators: it follows `cov_type`, not the GMM weight. The bias
+        bounds of the critical values describe two-stage least squares,
+        so with `estimator="gmm"` read the statistic as a measure of
+        instrument strength, not as a bound on the GMM bias.
 
         This is a post-estimation diagnostic: it is never computed by
         `fit()`. It re-reads the variables from the data passed to
@@ -794,10 +794,8 @@ class FEIVResults:
 
         Raises:
             TypeError: `alpha` is not a real number.
-            ValidationError: `alpha` is not strictly between 0 and 1, the
-                model does not have exactly one endogenous variable, or
-                the model was fitted with `estimator="gmm"` (the
-                diagnostic is available with `estimator="2sls"` only).
+            ValidationError: `alpha` is not strictly between 0 and 1, or
+                the model does not have exactly one endogenous variable.
             ComputationError: The statistic is undefined for these data,
                 for example because the covariance of the scores is
                 singular (too few clusters or observations, or, with
@@ -812,35 +810,46 @@ class FEIVResults:
         variables: list[str] | None = None,
         instruments: list[str] | None = None,
     ) -> CStatisticResult:
-        """C statistic (difference-in-Hansen test), for
-        `estimator="gmm"` only.
+        """C statistic (difference-in-Hansen test).
 
         Tests whether endogenous variables in `variables` are in fact
         exogenous, and whether excluded instruments in `instruments` are
-        uncorrelated with the error. The model is estimated by two-step GMM
-        on the within-transformed data with and without the tested moment
-        conditions, and the statistic is the difference of the two Hansen J
-        statistics, which is chi-squared distributed under the null that
+        uncorrelated with the error. The statistic is the difference of
+        two Hansen J statistics, computed on the within-transformed data
+        from a two-step GMM estimate with and without the tested moment
+        conditions. It is chi-squared distributed under the null that
         the tested moment conditions are valid. The test is conditional:
-        the remaining instruments are taken as valid. Both J statistics use
-        the same estimate of the covariance of the moment conditions, so
-        the statistic is never negative. Pass `variables`, `instruments`
-        or both.
+        the remaining instruments are taken as valid. Both J statistics
+        use the same estimate of the covariance of the moment conditions,
+        so the statistic is never negative. Pass `variables`,
+        `instruments` or both.
 
-        The covariance of the moment conditions follows `gmm_weight_type`
-        (grouped by `cluster` for the cluster weight) when `gmm_type` is
-        `"two_step"` or `"iterated"`,
-        and is the classical one for `gmm_type="one_step"`, which has no
-        weight type. It does not depend on `cov_type`, `gmm_max_iter` or
+        With `estimator="gmm"`, the covariance of the moment conditions
+        follows `gmm_weight_type` (grouped by `cluster` for the cluster
+        weight) when `gmm_type` is `"two_step"` or `"iterated"`, and is
+        the classical one for `gmm_type="one_step"`, which has no weight
+        type. It does not depend on `cov_type`, `gmm_max_iter` or
         `gmm_tol`, and a model fitted with `gmm_type="one_step"` or
-        `"iterated"` gets the two-step statistic. As for the Hansen J
-        statistic, only the classical weight is adjusted by `n - n_absorbed`
-        for the absorbed fixed effects. The cluster weight needs no
-        adjustment when every column of `effects` is nested in the
-        clusters, but only approximately when an effect crosses the
-        clusters and not at all for clusters that cross the entities (for
-        example the time periods), and with a robust weight on a short
-        panel the statistic over-rejects.
+        `"iterated"` gets the two-step statistic.
+
+        With `estimator="2sls"`, which has no weight choice, the
+        covariance follows `cov_type`: the classical one for
+        `"classical"`, the robust one for `"hc1"`, `"hc2"` and `"hc3"`
+        (the small-sample corrections of those types do not apply to the
+        weight), and the one grouped by `cluster` (by default the first
+        column of `effects`) for `"cluster"`. `cov_type="dk"` has no
+        corresponding weight matrix, so the statistic is not available;
+        use another `cov_type` or `estimator="gmm"`.
+
+        As for the Hansen J statistic, only the classical weight is
+        adjusted by `n - n_absorbed` for the absorbed fixed effects. The
+        cluster weight needs no adjustment when every column of `effects`
+        is nested in the clusters, but only approximately when an effect
+        crosses the clusters and not at all for clusters that cross the
+        entities (for example the time periods), and with a robust
+        weight on a short panel the statistic over-rejects. With
+        `estimator="2sls"` the default `cov_type="cluster"` (clusters
+        nested in the entities) is the safe choice on a short panel.
 
         This is a post-estimation diagnostic: it is never computed by
         `fit()`. It re-reads the variables from the data passed to
@@ -864,10 +873,11 @@ class FEIVResults:
         Raises:
             TypeError: `variables` or `instruments` is not a list of str.
             ValidationError: The model was fitted with
-                `estimator="2sls"`, neither argument is given, a list is
-                empty or repeats a name, a name in `variables` is not in
-                `x_endog`, a name in `instruments` is not among the
-                excluded instruments, or so many instruments are tested
+                `estimator="2sls"` and `cov_type="dk"`, neither argument
+                is given, a list is empty or repeats a name, a name in
+                `variables` is not in `x_endog`, a name in `instruments`
+                is not among the excluded instruments, or so many
+                instruments are tested
                 that fewer excluded instruments than endogenous variables
                 remain.
             ComputationError: The statistic is undefined for these data, for

@@ -91,6 +91,12 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # 係数・標準誤差・共分散行列と比べる。許容誤差は`fe_iv_reference`・`fe_iv_plm_crosscheck`と同じ。
     # 実測の最大: fixestに対して係数 1e-13（相対）、標準誤差 1e-12、共分散行列 2e-12、Sargan 3e-12、plmに対して
     # 係数 5e-14、標準誤差 3e-13、共分散行列 6e-13。
+    # 同じキーを、GMMの第一段階・弱操作変数診断・Wu-Hausman・固定効果の整合性テスト
+    # （`test_fe_iv_gmm_first_stage.py`・`test_fe_iv_gmm_fixed_effects.py`。同じ共有実装をFE-2SLSと
+    # GMMから呼んだ結果の比較）と、2SLSの`c_stat()`のテスト（`test_fe_iv_c_statistic_2sls.py`）が使う。
+    # 実測の最大（`reduction_cases()`の全ケース）: 第一段階の係数・標準誤差・t値、部分F、Cragg-Donald、rk LM、
+    # rk Wald F、有効F、Wu-Hausmanの統計量とp値はFE-2SLSとビット一致（相対誤差 0）、固定効果は絶対誤差 3e-15。
+    # fixestに対する部分F・rk Wald F・Wu-Hausmanは上のFE-2SLSの実測（4e-11以下）と同じ。
     "fe_iv_gmm_reduction": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

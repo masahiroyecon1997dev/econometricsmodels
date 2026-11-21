@@ -27,13 +27,14 @@ IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、�
 ### 2.1 2SLSとGMMは1つのクラスにする（IVと同じ）
 
 `FEIVOptions.estimator`（`"2sls"`既定・`"gmm"`）で切り替え、`FEIV`・`FEIVResults`は1組にする。IVとのインターフェースが大きく異なると利用者が分かりにくくなるため、IVと同じ形にする（IVで推定量ごとにクラスを分けなかったのも同じ理由）。
-`FeGmmEstimator`は第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`を持たないので、推定量が持たないものは次のとおり扱う
-（IVの`wu_hausman_*`がGMMで`None`になるのと同じ形）:
+2SLSとGMMで結果の項目・メソッドは同じにする（IVのGMMだけが`wu_hausman_*`を持たない差は別Issueで解消する）。**推定量が持たない項目・メソッドは無く**、
+`None`やエラーで表す差は設けない。違いは次のとおり:
 
-- **プロパティ**は`None`（`weak_instrument_f_*`・`wu_hausman_*`）。型は`int | None`・`dict | None`。
-- **メソッド**は`ValidationError`（`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`。`method`・`estimator`・`supported`を`params`に持つ）。GMMの`first_stage()`・`fixed_effects()`・
-  `cragg_donald()`・`kleibergen_paap()`・`effective_f()`、2SLSの`c_stat()`。
-- 将来GMMに第一段階・弱操作変数診断・`fixed_effects()`を足せば、このエラーを外すだけで済む（engine側の追加が要る）。FE-2SLSの`c_stat()`も同様。
+- 推論の分布（2SLSはt・F、GMMは正規・χ²）、過剰識別検定（Sargan・Hansen J）。
+- `c_stat()`の重み: GMMは`fit()`の重み（`one_step`は`Classical`）、2SLSは`cov_type`の系統（3.5）。2SLSの`cov_type="dk"`はDK型の重みが型に無いので
+  `C_STATISTIC_COV_TYPE_NOT_SUPPORTED`（`ValidationError`）で弾く（近似を黙って返さない。IVの`hac`は重みに対応があるが、FE-GMMは`Hac`・DKの重みを型に持たない）。
+- 第一段階・弱操作変数診断・Wu-Hausmanは第一段階（と最小二乗の補助回帰）だけに依存し、GMMの点推定にも重みにも依らない。`cov_type`は`fit`のもので、GMMの重みとは独立。
+  同じデータ・同じ`cov_type`なら2SLSと同じ値になる（3.4）。
 
 ### 2.2 `FEIVOptions`
 
@@ -63,9 +64,8 @@ IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、�
 Wald F（`wald_*`）、`first_stage()`（`dict[str, FEResults]`）、`weak_instrument_f_*`・`overid_*`（Sargan）・`wu_hausman_*`、R²3つ、`fixed_effects()`、
 診断メソッド`cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha)`（3.4）を持つ。`log_likelihood`・AIC・BICは出さない。
 
-`estimator="gmm"`の結果の公開面は**engineが持つものだけ**: 係数・推論（`stat_dist="normal"`、`stat_df`は`None`）・`wald_*`（`wald_dist="chi2"`、`wald_df_denom`は`None`、`wald_df_num`は`k`。
-Waldは`k`で割らない）・R²3つ・`overid_*`（Hansen J）・`gmm_type`・`gmm_weight_type`・`n_iter`・`converged`・`n_groups`・`c_stat()`。
-第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`は持たない（engineの`FeGmmEstimator`に無い。上の2.1の扱い）。
+`estimator="gmm"`の結果の推論は`stat_dist="normal"`（`stat_df`は`None`）、`wald_*`は`wald_dist="chi2"`（`wald_df_denom`は`None`、`wald_df_num`は`k`。Waldは`k`で割らない）、
+`overid_*`はHansen J。それ以外（R²3つ・`n_groups`・`c_stat()`・第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`）は2SLSと同じ形。
 
 統計量の命名はIVに合わせる（`wald_*`＋`stat_dist`）。FEの`f_statistic`系ではない。`estimator="2sls"`は`stat_dist="t"`・`wald_dist="f"`、`"gmm"`は
 `"normal"`・`"chi2"`（型は`Literal["t", "normal"]`・`Literal["f", "chi2"]`）。
@@ -80,8 +80,8 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 
 診断の公開形は`CLAUDE.md`の規約（推定量の妥当性・識別に属するものは`fit()`時に計算してプロパティ、利用者の選択が入るものは独立メソッド）に従う。
 
-- `fit()`時に計算してプロパティ: 部分F（弱操作変数）・Sargan・Wu-Hausman（2SLS）、Hansen J（GMM）。
-- 事後診断のメソッド: `cragg_donald()`・`kleibergen_paap()`・`effective_f()`（2SLS）、`c_stat()`（GMM）、`fixed_effects()`（2SLS）。
+- `fit()`時に計算してプロパティ: 部分F（弱操作変数）・Wu-Hausman（両推定量）、Sargan（2SLS）、Hansen J（GMM）。
+- 事後診断のメソッド: `cragg_donald()`・`kleibergen_paap()`・`effective_f()`・`c_stat()`・`fixed_effects()`（いずれも両推定量）。
   `fit()`では計算しない（`fit()`の計算量を増やさない）。`cov_type`は`fit()`のものを使い、メソッドの引数にしない。
 - メソッドのために結果が`fit()`に渡した`DataFrame`への参照（`source_data`。コピーしない）・列の役割・解決済みのオプションを保持し、**呼び出しのたびに再推定する**
   （設計行列を結果に持たせない）。呼び出しの間にそのデータを変えないことをdocstringに書く。
@@ -92,15 +92,18 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
   `WEAK_INSTRUMENT_STATISTIC_UNDEFINED`（`ComputationError`）、`C_STATISTIC_UNDEFINED`（`ComputationError`）。原因（共線・完全フィット・共分散のランク落ち・レバレッジ1）は
   1つのコードにまとめ、文面の括弧内に列挙するだけで区別しない。
 
-### 2.6 `first_stage()`と`fixed_effects()`（`estimator="2sls"`）
+### 2.6 `first_stage()`と`fixed_effects()`（両推定量）
 
-- 第一段階は内生変数ごとに`FeEstimator`の後半（変換済みの列を受け取る内部経路）で1回だけ推定し、`X̂`の作成と`first_stage()`の両方に使う
-  （IVの第一段階が二重に計算される問題を最初から避ける）。
+- 第一段階は内生変数ごとに`FeEstimator`の後半（変換済みの列を受け取る内部経路）で1回だけ推定し、`X̂`の作成（2SLS）と`first_stage()`の両方に使う
+  （IVの第一段階が二重に計算される問題を最初から避ける）。ループは`fe_iv/common/first_stage.rs`の`run_first_stages`で、FE-2SLSとFE-GMMが共有する。
+  GMMは第一段階を**点推定・共分散・Waldの後**に回す（GMMのエラーを先に返し、点推定に使った行列は第一段階の前に手放す）。GMMの`fit()`は第一段階の分だけ重くなる。
 - `first_stage()`は既存の`FEResults`を返す（`f_statistic`等は`None`）。結果を作るとき、**固定効果の辞書をその場で計算して`LazyFixedEffects::Computed`にする**
   （`FeEstimator`を保持しない。辞書は個体数に比例する小さなもの）。残るのは内生変数ごとの残差（8nバイト）とスカラー・係数類だけで、第一段階側でも
   `fixed_effects()`が使える。`FeEstimator`から`FEResult`を作る変換は`engine_pybind`内の`pub(crate)`関数で、Pythonから見える面は増えない。
 - `fixed_effects()`は`α_i = ȳ_i − x̄_i'β̂`（`β̂`は構造の係数、`X`は実際の内生変数）。`fixest`の`fixef`は`mean(y − Xβ̂)`と中心化の差を除いて一致する。
-  基準化はFEと同じ（連結成分ごと）。
+  基準化はFEと同じ（連結成分ごと）。GMMでは`β̂`がGMMの係数になるだけで同じ復元（`fixed_effects_of`）を呼ぶ。2SLSの推定量は構造式の`y`・`X`の`FeInput`を保持するが、
+  GMMは保持せず、呼び出し時に`structural_fe_input`で`input`から組み立てる（`fixed_effects()`は再推定を伴うので追加のコストは小さく、`fit()`後に`n(1+k)`個の複製を持たない）。
+  交互射影が引いた効果（`absorbed`）だけ保持する。
 
 ### 2.7 pickle
 
@@ -163,10 +166,16 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 
 ### 3.4 診断（FEIV）
 
+弱操作変数診断（部分F・CD・KP・有効F）とWu-Hausmanは、第一段階（Wu-Hausmanは第一段階の残差を足した最小二乗の補助回帰）だけに依存し、第二段階の推定量にもGMMの重みにも依らない。
+実装は`fe_iv/common/`（`first_stage.rs`・`weak_instruments.rs`・`wu_hausman.rs`）にあり、FE-2SLSとFE-GMMが共有する（診断は推定量が自分のフィールドから作る借用ビュー`WeakInstrumentView`を介して呼ぶ）。
+有効Fの被説明変数は構造残差から`ỹ = e + X̃β̂`で作るが、`e = ỹ − X̃β̂`なので`β̂`が何でも同じ`ỹ`に戻る（GMMの係数でも同じ）。`cov_type`は`fit`のもので、GMMの重みとは独立。
+同じデータ・`cov_type`ならGMMと2SLSで同じ値になる（engineの`gmm/fit/tests/first_stage.rs`が構造6種×`cov_type`×GMM方式で確かめる）。
+
+
 - **Sargan**: 構造残差を`Z̃ = [x̃_exog, z̃]`に回帰した`n·R²`相当。**`σ̂² = e'e/(n − n_absorbed)`**（`fixest`の`sargan`は`e'e/n`で、小`T`で過剰に棄却する。
   実測の棄却率（名目5%、`N=100`）は`e'e/n`で`T=3`が10.5%・`T=6`が7.3%・`T=20`が5.2%、`e'e/(n−N)`で4.8%・5.1%・4.7%。within残差の二乗和の期待値が`σ²(n−N)`なので、
   `n`で割ると統計量が`T/(T−1)`倍になる）。自由度は`len(instruments) − len(x_endog)`で、丁度識別と内生変数なしは`None`（IV本体は内生変数なしで`df = len(instruments)`だが、
-  FEIVは第一段階が無い構成を対象にしない）。等分散前提で`cov_type`に依らない。`fixest`との差は文書で説明する。
+  FEIVは内生変数が無い構成を対象にしない）。等分散前提で`cov_type`に依らない。`fixest`との差は文書で説明する。
 - **Wu-Hausman**: 補助FE回帰`ỹ ~ [x̃_exog, x̃_endog, v̂]`（`v̂`は第一段階の残差）を`cov_type`と同じ共分散で回し、`v̂`列のWald F。分母自由度は補助回帰のもの
   （Clusterは`G−1`、DKは`T−1`、それ以外は`n − k − k_endog − neffects`）。`fixest`の`wh`はiid前提なので、classical以外は一致しない（参照の作り方は6.2）。
   補助回帰は`tests_slopes=false`なので、`G`が`k+1`〜`k+k_endog`でも`v̂`の`k_endog × k_endog`部分行列で検定でき値を持つ（IV本体との違い）。
@@ -210,6 +219,10 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
   公開の形は事後診断で、呼び出し時に`prepare_within`で変換し直す（設計行列を保持しない）。クラスター数が`Z_full`の列数に足りないと`CStatisticUndefined`（`ComputationError`）。
   `fit()`の`GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL`（`ValidationError`、過剰識別は`G < l`、丁度識別は`G ≤ l`）とはクラスが違う。検査の順は`fit`と同じ
   （`prepare_within`が先、`target`・`weight`の検査が後）。
+  **FE-2SLSの`c_stat()`**: engineに2SLS用の関数は足さず、同じ`fe_gmm_c_statistic`を`bindings`が決めた`FeWeightType`で呼ぶ（核は重みだけに依存し、点推定にも`cov_type`にも依らない）。
+  重みはIVの`weight_type_for_cov_type`と同じ規則: `Classical`→`Classical`、`Hc1`〜`Hc3`→`Robust`（`S`にHCの小標本補正は無い）、`Cluster`→`Cluster`（`cluster`列、無ければ`effects[0]`）。
+  **`Dk`は重みを持たない**（DK型の重みは型に無く、ミクロパネルで実用にならない）。近似（時点でのクラスター・`Robust`）を黙って返さず、`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`
+  （`ValidationError`。`cov_type`・`allowed`を`params`に持つ）で弾く。引数の誤り（`C_STATISTIC_NOTHING_TO_TEST`等）の後、再推定の前に検査する。2SLSの`c_stat()`は、対応する重みの2段階GMMの`c_stat()`と一致する。
 
 ### 3.6 エラー
 
@@ -220,7 +233,7 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 説明変数側の2つに`role`パラメータ（`x`（FE）・`x_exog`・`x_endog`・`instruments`）を持たせ、文面とhintを`{role}`で書く。個体内で一定の操作変数（時間不変）が典型的な誤りなので、
 hintで指摘する。変換後の分散ゼロ検出は全役割に対しこの2分類で報告する。
 
-GMMに第一段階は無いので、共線な外生変数・操作変数は`MATRIX_NEAR_SINGULAR`（`DESIGN_MATRIX_SINGULAR`＋`stage`ではない）。エラーの`model`は`"FEIV"`（推定量によらない。IVの`"IV"`と同じ）。
+GMMは第一段階を点推定・共分散・Waldの後に回すので、共線な外生変数・操作変数は先に`MATRIX_NEAR_SINGULAR`（`DESIGN_MATRIX_SINGULAR`＋`stage`ではない）になる。点推定が通ったうえで第一段階が失敗する入力（例えば内生変数を操作変数が完全に説明する）は、2SLSと同じく`stage=FIRST_STAGE`つきで返る。エラーの`model`は`"FEIV"`（推定量によらない。IVの`"IV"`と同じ）。
 `C_STATISTIC_UNKNOWN_VARIABLE`・`C_STATISTIC_UNDEFINED`のhintはIV・FEIVで通じる中立な文面にしてある。
 
 `test_validation_order`での検査順（FEIV。`feiv`・`feiv_gmm`）: `effects`の列数 → `x_endog`の空 → 役割の重複 → 内の重複 → `dk_time`の役割。`INSUFFICIENT_INSTRUMENTS`はエンジンの`fit`の中
@@ -231,7 +244,9 @@ GMMに第一段階は無いので、共線な外生変数・操作変数は`MATR
 - `FEIVOptions`・`FEIVResult`、`fit_fe_iv`（`estimator`で2SLSとGMMに振り分ける）。`PanelModel::FeIv`、`validate_fe_iv_roles`、`FeIvColumns`。
   `FEResult`は`Clone`（`LazyFixedEffects`が`FeEstimator`を`Arc`で共有）。`fe_result_fields`（借用で`FEResult`を作る）・`fixed_effects_dict`・`resolve_fe_cov_type`を`panel/fe.rs`から切り出して共有する。
 - IVの診断の出力型（`diagnostics.rs`の`from_engine`）・`c_stat`の引数検査と結果の組み立て（`iv::common::diagnostics`の`resolve_c_stat_target`・`CStatisticOutput::from_engine`）はFEIVが再利用する。
-- `estimator="gmm"`の`c_stat`は`fit`の重み（`one_step`は`Classical`）を`FeWeightType`に組み立て、検定する変数の名前を`x_endog`・`instruments`の位置に写す。空の`target`の検査はバインディングとengineの両方にある（IVと同じ）。
+- `c_stat`の重みは`estimator="gmm"`なら`fit`の重み（`one_step`は`Classical`、`c_statistic_weight`）、`"2sls"`なら`cov_type`の系統（`c_statistic_weight_for_cov_type`。`Dk`は`None`で、
+  `FEIVResult::c_stat`が再推定の前に`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`にする）。検定する変数の名前を`x_endog`・`instruments`の位置に写す。空の`target`の検査はバインディングとengineの両方にある（IVと同じ）。
+- 診断・`fixed_effects()`の再推定は`fit.rs`の`Estimated`（`TwoSls`・`Gmm`）で両推定量を扱う（メソッドは両アームを書く）。`fit()`の結果は両推定量とも`first_stage`（`FEResult`、固定効果は計算済み）を持つ。
 
 ## 5. 公開ドキュメント
 
@@ -244,9 +259,14 @@ GMMに第一段階は無いので、共線な外生変数・操作変数は`MATR
 ### 6.1 構成
 
 `tests/panel/test_fe_iv_{api,binding,reference,dummy_crosscheck,plm_crosscheck,weak_diagnostics_crosscheck,validation}.py`、
-`test_fe_iv_gmm_{api,binding,reference,crosscheck,c_statistic,reduction,validation}.py`、`tests/support/_fe_iv_helpers.py`・`_fe_iv_gmm_helpers.py`、許容誤差は`_tolerances_panel.py`のキー。
+`test_fe_iv_gmm_{api,binding,reference,crosscheck,c_statistic,reduction,validation,first_stage,fixed_effects}.py`、`test_fe_iv_c_statistic_2sls.py`、`tests/support/_fe_iv_helpers.py`（`overidentified_panel`: 過剰識別の合成パネル）・`_fe_iv_gmm_helpers.py`、許容誤差は`_tolerances_panel.py`のキー。
 `test_*_binding.py`は`_lib`を直接見る（ダミー変数を明示したnumpy実装との照合・配線）、`test_*_validation.py`は入力検証。engineの単体テストは`engine/src/panel/fe_iv/`の`mod tests`
 （`fe_iv/fit/tests/`の`lsdv`・`sargan`・`wu_hausman`・`weak_instruments`、`gmm/`）。
+
+GMMの第一段階・弱操作変数診断・Wu-Hausman・固定効果と2SLSの`c_stat()`の照合: `test_fe_iv_gmm_first_stage.py`はFE-2SLSの全ケース（`reduction_cases()`）で、fixestの参照値（部分F・rk Wald F・Wu-Hausman）とFE-2SLSの結果
+（第一段階・CD・rk LM・有効F）に一致することを確かめる。`test_fe_iv_gmm_fixed_effects.py`はFE-2SLSと係数が同じGMMでFE-2SLSの効果と、ロバスト重み（係数が違う）では手計算・正規方程式と照合する。
+`test_fe_iv_c_statistic_2sls.py`は2SLSの`c_stat()`が対応する重みの2段階GMMと一致すること（全`cov_type`・検定の対象・1-way/2-way）、`classical`がダミー変数を明示した`IV`の`c_stat()`に`(n − n_absorbed)/n`を掛けた値と一致すること、`dk`の拒否と検査の順。
+engineの単体テスト（`gmm/fit/tests/first_stage.rs`・`fixed_effects.rs`）は構造6種×`cov_type`×GMM方式で同じ軸を確かめる（変異: `neffects`を0にする・重みの写像を取り違える、で失敗することを確認済み）。
 
 engineの単体テストの軸（FE-GMM）: FE-2SLSへの還元、ダミー変数を明示した`iv::gmm`との照合（FWL）、手計算（素朴な平均除去とダミーへの回帰の残差。1-wayと2-way・不均衡・3次元）、検出力。
 変異（HC2・HC3のダミーのレバレッジを外す、再スケールを外す・全重みに適用する、`S_c`の行の取り違え等）で失敗することを確認してある。

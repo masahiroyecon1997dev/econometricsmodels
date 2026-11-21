@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 from econometricsmodels import FEIV, FEIVOptions
 
@@ -59,3 +60,38 @@ def leaf(fixtures: dict, case: Case) -> dict:
     for key in case.path:
         node = node[key]
     return node
+
+
+def overidentified_panel(
+    n_entities: int = 30, n_periods: int = 6
+) -> pl.DataFrame:
+    """内生変数1個・除外操作変数3個（過剰識別）の合成パネル（均衡）。
+
+    列: `y`・`x1`（外生）・`w`（内生）・`z1`〜`z3`（操作変数）・`entity`・`time`・
+    `region`（個体を入れ子に含むクラスター。5個体ずつ）。誤差は不均一分散で、ロバスト重みの
+    GMMの係数が2SLSから離れる（個体効果が内生変数と相関する）。
+    """
+    rng = np.random.default_rng(20261121)
+    n = n_entities * n_periods
+    entity = np.repeat(np.arange(n_entities), n_periods)
+    time = np.tile(np.arange(n_periods), n_entities)
+    alpha = rng.normal(size=n_entities)
+    gamma = rng.normal(size=n_periods)
+    z1, z2, z3, x1 = rng.normal(size=(4, n))
+    v = rng.normal(size=n)
+    endog = 0.8 * z1 + 0.5 * z2 + 0.3 * z3 + v + alpha[entity]
+    noise = (1.0 + np.abs(z1)) * rng.normal(size=n)
+    y = x1 + 1.5 * endog + alpha[entity] + gamma[time] + 0.7 * v + noise
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "w": endog,
+            "z1": z1,
+            "z2": z2,
+            "z3": z3,
+            "entity": [f"e{e:02d}" for e in entity],
+            "time": [f"t{t}" for t in time],
+            "region": [f"r{e // 5}" for e in entity],
+        }
+    )

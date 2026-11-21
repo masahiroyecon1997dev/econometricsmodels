@@ -94,7 +94,7 @@ print(list(two_way.fixed_effects()))  # ["firm", "year"]
 
 ## Diagnostics and first-stage results
 
-The diagnostics are the same as in [IV](iv.md#diagnostics-and-first-stage-results): the weak-instrument partial F statistic, the Sargan overidentification test and the Wu-Hausman endogeneity test are computed by `fit()` and read as fields, and the Cragg-Donald, Kleibergen-Paap and effective F statistics are methods that you call afterwards.
+The diagnostics are the same as in [IV](iv.md#diagnostics-and-first-stage-results) (except that FEIV also reports the Wu-Hausman test with GMM): the weak-instrument partial F statistic, the overidentification test and the Wu-Hausman endogeneity test are computed by `fit()` and read as fields, and the Cragg-Donald, Kleibergen-Paap and effective F statistics are methods that you call afterwards. The first stage, the weak-instrument diagnostics and the Wu-Hausman test depend only on the first stage (and, for Wu-Hausman, on a least-squares auxiliary regression), so they are the same with `estimator="2sls"` and with `estimator="gmm"`: for the same data and `cov_type` the two estimators return the same values. Only the overidentification test differs (Sargan with two-stage least squares, Hansen J with GMM; see [GMM estimator](#gmm-estimator)).
 
 ```python
 print(result.weak_instrument_f_statistics)  # {"endog": ...}
@@ -188,7 +188,7 @@ The covariance of the moment conditions in J is the one of the weight used for t
 
 ### Exogeneity and instrument validity, post-estimation
 
-`c_stat()` is a method, not a field: `fit()` never computes it. It tests whether endogenous regressors in `variables` are in fact exogenous and whether excluded instruments in `instruments` are valid, as the difference of two Hansen J statistics. It re-reads the data passed to `fit()` and estimates the model twice, so it costs about as much as `fit()`. Keep that data unchanged.
+`c_stat()` is a method, not a field: `fit()` never computes it. It tests whether endogenous regressors in `variables` are in fact exogenous and whether excluded instruments in `instruments` are valid, as the difference of two overidentification statistics (Hansen J statistics with GMM; for two-stage least squares the same construction, with the weight that follows `cov_type`). It re-reads the data passed to `fit()` and estimates the model twice, so it costs about as much as `fit()`. Keep that data unchanged.
 
 ```python
 exogeneity = gmm.c_stat(variables=["endog"])
@@ -201,22 +201,24 @@ print(validity.j_with_tested, validity.j_without_tested)
 
 A small p-value rejects the null that the tested moment conditions are valid: for `variables` that the tested regressors are exogenous, for `instruments` that the tested instruments are uncorrelated with the error (given that the remaining instruments are valid). `df` is the number of tested variables plus the number of tested instruments.
 
-It returns a `CStatisticResult`, the same type as [`IVResults.c_stat()`](iv.md#exogeneity-and-instrument-validity-post-estimation), and is read in the same way. Two things are specific to FE-GMM. First, the covariance of the moment conditions follows `gmm_weight_type` (the classical one for `gmm_type="one_step"`), not `cov_type`. Second, with the cluster weight the statistic needs at least as many clusters as the columns of the full instrument set (the exogenous regressors, the tested endogenous variables and all excluded instruments). `fit()` checks the clusters needed for the weight of the fit, and a shortfall raises a `ValidationError`. `c_stat()` can only find out while computing, and raises a `ComputationError`.
+It returns a `CStatisticResult`, the same type as [`IVResults.c_stat()`](iv.md#exogeneity-and-instrument-validity-post-estimation), and is read in the same way. The covariance of the moment conditions (the weight) follows `gmm_weight_type` (the classical one for `gmm_type="one_step"`), not `cov_type`. With the cluster weight the statistic needs at least as many clusters as the columns of the full instrument set (the exogenous regressors, the tested endogenous variables and all excluded instruments). `fit()` checks the clusters needed for the weight of the fit, and a shortfall raises a `ValidationError`. `c_stat()` can detect this only while computing, and raises a `ComputationError`.
+
+`c_stat()` is also available with `estimator="2sls"`. Two-stage least squares has no weight to choose, so the weight follows `cov_type`, as in [IV](iv.md#exogeneity-and-instrument-validity-post-estimation): the classical weight for `"classical"`, the robust weight for `"hc1"`, `"hc2"` and `"hc3"` (the small-sample corrections of those types do not apply to the weight), and the cluster weight for `"cluster"`, grouped by `cluster` (by default the first column of `effects`). `cov_type="dk"` has no corresponding weight matrix, and `c_stat()` raises a `ValidationError` (`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`); use another `cov_type` or `estimator="gmm"`. With the robust weight on a short panel the statistic rejects too often, as Hansen J does. The default cluster weight does not have this problem when every column of `effects` is nested in the clusters; with other clusters the same caveats as for Hansen J apply (see [Definitions: FEIV](../methods/fe_iv.md#exogeneity-and-instrument-validity-post-estimation-c_stat)).
 
 ### What each estimator provides
 
-Not every result is available for both estimators. A method that the estimator does not support raises a `ValidationError` (`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`), and a field that it does not support is `None`.
+Every field and method is available with both estimators. They differ in the test distributions, in the overidentification test and in how `c_stat()` chooses its weight:
 
 | | `estimator="2sls"` | `estimator="gmm"` |
 |---|---|---|
-| `first_stage()`, `fixed_effects()` | yes | no |
-| `weak_instrument_f_statistics`, `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | no |
-| `wu_hausman_statistic` and its p-value | yes | no |
+| `first_stage()`, `fixed_effects()` | yes (the coefficients of the estimator used for `fixed_effects()`) | yes |
+| `weak_instrument_f_statistics`, `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | yes, the same values |
+| `wu_hausman_statistic` and its p-value | yes | yes, the same values |
 | `overid_statistic` | Sargan | Hansen J |
-| `c_stat()` | no | yes |
+| `c_stat()` weight | follows `cov_type` (not `"dk"`) | follows `gmm_weight_type` |
 | `stat_dist`, `wald_dist` | `"t"`, `"f"` | `"normal"`, `"chi2"` |
 
-To see the first stage and the weak-instrument diagnostics of the same model, fit it with `estimator="2sls"` and the same `x_exog`, `x_endog`, `instruments` and `effects`: the first-stage coefficients are the same, because both estimators use the same within-transformed variables. The structural R² statistics are computed from the structural residuals with both estimators.
+The first-stage coefficients, the weak-instrument diagnostics and the Wu-Hausman test do not depend on the second-stage estimator: both estimators use the same within-transformed variables. They follow `cov_type` (or are homoskedastic, as described above), never the GMM weight. The structural R² statistics are computed from the structural residuals with both estimators.
 
 ## Covariance matrix of the coefficients
 

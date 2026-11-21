@@ -48,12 +48,12 @@ FE/REとも、IVの「データ抽出・pyclass定義」→「engine呼び出し
 - `fit.rs`: `FeTwoSlsEstimator`・`FeGmmEstimator`の推定（`estimator`で振り分ける）と、診断の再計算用の`estimate_two_sls`・`compute_c_statistic`。`fit`は`#[cfg(test)]`から呼べないので、
   `tests/panel/test_fe_iv_binding.py`・`test_fe_iv_gmm_binding.py`が`_lib.fit_fe_iv`を直接呼び、数値を照合する。
 - `result.rs`: `FEIVResult`（FEの項目に、IVの命名の`wald_*`（2SLSは`f`、GMMは`chi2`）・`weak_instrument_f_*`・`overid_*`（2SLSはSargan、GMMはHansen J）・`wu_hausman_*`・`estimator`・`gmm_type`・`gmm_weight_type`（`one_step`と2SLSは`None`）・`n_iter`・`converged`を足したもの）。
-  `log_likelihood`・AIC/BICは出さない。`first_stage()`は`dict[str, FEResult]`（`LazyFixedEffects::Computed`を持つ）。**推定量が持たないものは、プロパティが`None`（`weak_instrument_f_*`・`wu_hausman_*`）、メソッドが
-  `METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`**（`require_estimator`。`first_stage()`・`fixed_effects()`・`cragg_donald()`・`kleibergen_paap()`・`effective_f()`は2SLSだけ、`c_stat()`はGMMだけ）。
-  GMMに足すには、engineの追加（GMMの係数での固定効果の復元、第一段階の共有）が要る。
-- **診断・`fixed_effects()`・`c_stat()`は呼び出し時に再計算**: `fit()`に渡した`DataFrame`（`source_data`）・`FEIVOptions`・列名を結果が保持し、`with_estimator`が`fit()`と同じ`build_fe_iv_input`から`FeTwoSlsEstimator`を作り直して呼ぶ
-  （IVの`Rebuilt`と同じ。1回呼ぶごとに推定が1回走る）。診断の出力型はIVの`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`・`CStatisticOutput`を使い回す（`from_engine`で作る）。
-  `c_stat`の引数の検査・名前→位置は`iv::common::resolve_c_stat_target`（IVの`c_stat`と共有。型 → 空・重複 → 名前の順）。重みは`fit()`の重み（`one_step`は`Classical`）で、`Classical`のときだけ`S`の分母が`n − neffects`
+  `log_likelihood`・AIC/BICは出さない。`first_stage()`は`dict[str, FEResult]`（`LazyFixedEffects::Computed`を持つ）。**両推定量で項目・メソッドは同じ**（推定量ごとに`None`やエラーで表す差は設けない）。`first_stage`は両推定量で`fit()`が`FEResult`を作って持つ
+  （`FeGmmEstimator::fit_with_first_stages`の`consume`。`estimate_built`が`consume`を1つ作って両アームへ渡す）。`c_stat()`の2SLSの`Dk`だけ`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`
+  （`FEIVResult::require_c_statistic_cov_type`が再推定の前に弾く）。
+- **診断・`fixed_effects()`・`c_stat()`は呼び出し時に再計算**: `fit()`に渡した`DataFrame`（`source_data`）・`FEIVOptions`・列名を結果が保持し、`with_estimator`が`fit()`と同じ`build_fe_iv_input`から推定量（`estimator`の指す方。`fit.rs`の`Estimated`）を作り直して呼ぶ
+  （IVの`Rebuilt`と同じ。1回呼ぶごとに推定が1回走る。診断・`fixed_effects()`は`Estimated`のメソッドで、両アームを書く）。診断の出力型はIVの`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`・`CStatisticOutput`を使い回す（`from_engine`で作る）。
+  `c_stat`の引数の検査・名前→位置は`iv::common::resolve_c_stat_target`（IVの`c_stat`と共有。型 → 空・重複 → 名前の順）。重みは、GMMなら`fit()`の重み（`one_step`は`Classical`）、2SLSなら`cov_type`の系統（`gmm_setup.rs`の`c_statistic_weight_for_cov_type`。IVの`weight_type_for_cov_type`と同じ規則で、`Dk`は`None`）。`Classical`のときだけ`S`の分母が`n − neffects`
   （engineの`fe_gmm_c_statistic`の規則）。
 - **検証**: 入力・オプションの検証は`test_fe_iv_validation.py`・`test_fe_iv_gmm_validation.py`、オプションの判定表は`option_values.rs`の`mod tests`。GMMの数値は固定効果をダミーへの回帰の残差で除いたnumpy実装と照合する
   （`test_fe_iv_gmm_binding.py`。FE-2SLSへの還元も確かめる）。`cluster`・`dk`のSEの数値はengineの単体テスト（手計算）が担い、バインディングでは配線（`cluster`の共用・既定）だけを見る。

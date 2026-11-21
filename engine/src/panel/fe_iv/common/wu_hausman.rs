@@ -1,4 +1,7 @@
-//! FEIVのWu-Hausman内生性検定（回帰ベース）。
+//! FEIVのWu-Hausman内生性検定（回帰ベース。FE-2SLSと固定効果つきGMMが共有）。
+//!
+//! 補助回帰は第一段階の残差を足した最小二乗で、第二段階の推定量（2SLSかGMMか）にも、GMMの重みにも依らない。
+//! `cov_type`は`fit`に渡したものを使う。
 
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::PanelError;
@@ -9,42 +12,35 @@ use crate::shared::instrumental_variables::wu_hausman_columns;
 use crate::shared::orthonormal::WaldCoordinates;
 use crate::shared::wald::wald_f_test;
 
-use crate::panel::fe_iv::common::{FeIvInput, abs_max};
+use super::first_stage::FirstStageSummary;
+use super::input::FeIvInput;
+use super::prepare::abs_max;
 
 /// [`fe_wu_hausman_test`]の戻り値。
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct FeWuHausmanTest {
-    pub(super) statistic: f64,
-    pub(super) p_value: f64,
+pub(in crate::panel::fe_iv) struct FeWuHausmanTest {
+    pub(in crate::panel::fe_iv) statistic: f64,
+    pub(in crate::panel::fe_iv) p_value: f64,
     /// F分布の自由度`(分子, 分母)`。
-    pub(super) df: (usize, usize),
+    pub(in crate::panel::fe_iv) df: (usize, usize),
 }
 
-/// [`fe_wu_hausman_test`]に渡す、`fit_fe_two_sls`が持つ材料。
-pub(super) struct WuHausmanContext<'a> {
-    pub(super) input: &'a FeIvInput,
-    pub(super) effects: FeEffects,
-    pub(super) cov_type: &'a FeCovType,
-    pub(super) confidence_level: f64,
+/// [`fe_wu_hausman_test`]に渡す、`fit`が持つ材料。
+pub(in crate::panel::fe_iv) struct WuHausmanContext<'a> {
+    pub(in crate::panel::fe_iv) input: &'a FeIvInput,
+    pub(in crate::panel::fe_iv) effects: FeEffects,
+    pub(in crate::panel::fe_iv) cov_type: &'a FeCovType,
+    pub(in crate::panel::fe_iv) confidence_level: f64,
     /// 効果の各次元の索引と列名。
-    pub(super) groups: &'a [crate::shared::group_codes::GroupCodes],
-    pub(super) effect_names: &'a [String],
+    pub(in crate::panel::fe_iv) groups: &'a [crate::shared::group_codes::GroupCodes],
+    pub(in crate::panel::fe_iv) effect_names: &'a [String],
     /// within変換した列（順は`y`、`x_exog`、`x_endog`、`instruments`）。
-    pub(super) tilde: &'a [Vec<f64>],
+    pub(in crate::panel::fe_iv) tilde: &'a [Vec<f64>],
     /// 内生変数ごとの第一段階から取り出した係数・残差（`x_endog`の順）。残差は補助回帰の列へ
     /// 複製せず移すので、`fe_wu_hausman_test`の後は空になる（係数は残る）。
-    pub(super) first_stages: &'a mut [FirstStageSummary],
+    pub(in crate::panel::fe_iv) first_stages: &'a mut [FirstStageSummary],
     /// 変換が残す誤差（完全適合の判定に使う）。
-    pub(super) noise: f64,
-}
-
-/// 第一段階の推定量から、Wu-Hausmanが読む量だけを取り出したもの（推定量は設計行列を持つので、
-/// `fit`の終わりまで持たない）。
-pub(super) struct FirstStageSummary {
-    /// 第一段階の係数（`[x_exog, instruments]`の順）。
-    pub(super) params: Vec<f64>,
-    /// 第一段階の残差`v̂`（within空間）。
-    pub(super) residuals: Vec<f64>,
+    pub(in crate::panel::fe_iv) noise: f64,
 }
 
 /// 補助回帰の失敗のうち、この検定だけの問題として`None`にするもの（構造式・第一段階の推定とは無関係）。
@@ -112,7 +108,7 @@ fn wu_hausman_wald(
 ///
 /// # Errors
 /// 補助回帰の、`None`にしない失敗（`is_expected_failure`以外）。
-pub(super) fn fe_wu_hausman_test(
+pub(in crate::panel::fe_iv) fn fe_wu_hausman_test(
     context: WuHausmanContext<'_>,
 ) -> Result<Option<FeWuHausmanTest>, PanelError> {
     let WuHausmanContext {

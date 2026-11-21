@@ -4,6 +4,7 @@
 //! 重みの種類は`FeWeightType`（`hac`を型で持たない）。
 
 use engine::panel::common::PanelError;
+use engine::panel::fe::FeCovType;
 use engine::panel::fe_iv::gmm::{FeGmmType, FeWeightType};
 use engine::shared::error::CommonError;
 use engine::shared::group_codes::GroupCodes;
@@ -73,6 +74,28 @@ pub(super) fn c_statistic_weight(gmm_type: &FeGmmType) -> FeWeightType {
     }
 }
 
+/// `estimator="2sls"`の`c_stat`が受け付ける`cov_type`（エラーの`allowed`に載せる）。
+pub(super) const C_STATISTIC_2SLS_COV_TYPES: [&str; 5] =
+    ["classical", "hc1", "hc2", "hc3", "cluster"];
+
+/// `estimator="2sls"`の`c_stat`の重み。2SLSには重みの選択が無いので、`cov_type`の系統から決める
+/// （IVの`weight_type_for_cov_type`と同じ規則）: `Classical`は`Classical`、`Hc1`〜`Hc3`は`Robust`
+/// （`S`にHC1・HC2・HC3の補正は無い）、`Cluster`は同じクラスター（`cluster`列が無ければ`effects[0]`、
+/// `entity_groups`）。`Dk`は重み行列を持たない（`FeWeightType`にDK型の重みは無い）ので`None`。
+pub(super) fn c_statistic_weight_for_cov_type(
+    cov_type: &FeCovType,
+    entity_groups: &GroupCodes,
+) -> Option<FeWeightType> {
+    match cov_type {
+        FeCovType::Classical => Some(FeWeightType::Classical),
+        FeCovType::Hc1 | FeCovType::Hc2 | FeCovType::Hc3 => Some(FeWeightType::Robust),
+        FeCovType::Cluster { groups } => Some(FeWeightType::Cluster {
+            groups: groups.clone().unwrap_or_else(|| entity_groups.clone()),
+        }),
+        FeCovType::Dk { .. } => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +119,30 @@ mod tests {
                 tol: 1e-6
             }),
             FeWeightType::Classical
+        );
+    }
+
+    #[test]
+    fn two_sls_c_statistic_weight_follows_the_cov_type_family() {
+        let entity = GroupCodes::from_labels_without_keys(&["a", "a", "b", "b"].map(String::from));
+        let time = GroupCodes::from_labels_without_keys(&["x", "y", "x", "y"].map(String::from));
+        let weight = |cov_type: FeCovType| c_statistic_weight_for_cov_type(&cov_type, &entity);
+        assert_eq!(weight(FeCovType::Classical), Some(FeWeightType::Classical));
+        for hc in [FeCovType::Hc1, FeCovType::Hc2, FeCovType::Hc3] {
+            assert_eq!(weight(hc), Some(FeWeightType::Robust));
+        }
+        // `cluster`列が無ければ`effects[0]`、あればその列。
+        assert_eq!(
+            weight(FeCovType::Cluster { groups: None }),
+            Some(FeWeightType::Cluster {
+                groups: entity.clone()
+            })
+        );
+        assert_eq!(
+            weight(FeCovType::Cluster {
+                groups: Some(time.clone())
+            }),
+            Some(FeWeightType::Cluster { groups: time })
         );
     }
 }

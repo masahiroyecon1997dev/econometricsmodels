@@ -24,6 +24,7 @@
 
 ## 全体に共通する決定
 
+- **`fit()`の先頭で設定値を検査する**（`confidence_level` → `max_iter` → `tol`。GMMは続けて`gmm_max_iter` → `gmm_tol`）: FE（`fit_fe`。`absorbed_levels`の直後）・RE（`fit_re`）・FEIV（`prepare_within`と`fit_fe_gmm`）は`panel::common::validate_confidence_level`（`WithinRegressionFailed{InvalidConfidenceLevel}`。`stage_allowed=false`なので`stage`は付かない）をsingleton・定数列・within変換・自由度より前に呼ぶ。入れ子の回帰（REの内部FE・FEIVの第一段階）にある同じ検査は通らない備えとして残す。`FeAbsorption::validate`は`max_iter` → `tol`の順（MLE・GMMと同じ）。理由・全手法の順序は`docs/spec/error-handling.md`5.2節。
 - **`fit()`の冒頭で`crate::shared::parallelism::ensure_serial()`を呼ぶ**（faerのグローバル並列度を`Par::Seq`に固定する。理由は`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。回帰ガード（`fe_estimator_fit_pins_faer_global_parallelism_to_seq`等）を他系統に倣って入れる。
 - **`engine`はpolars非依存**。グループ集約は、コード化済みの`entity`（`GroupCodes`、長さ`n`、行はパネル観測順）を受け取る（`from_group_codes`。ラベルの`String`列から作る`from_columns`は`#[cfg(test)]`の簡便版）。
 - **整数コード（`GroupCodes`、`shared/group_codes.rs`。OLS・nonlinear・IVのクラスター集計とも共有）**: entity・timeは`engine_pybind`が行ごとの`String`を作らずに整数コード化して渡し、within変換・準偏差変換・エンティティ平均/R²・θ計算・singleton/件数チェック・cluster/DKの集計はコードで配列を直接引く。`String`キーの`HashMap`/`BTreeMap`で列ごと・統計量ごとに引き直すとn=1,000,000で1列約0.2秒かかり、FE/REの計算時間の大半になる（コード化後はRE約4秒→約0.9秒、FE約1.5秒→約0.25秒）。**コードはキーの辞書順に振る**（`BTreeMap`の反復順と同じ。グループ間加算の順（クラスターの`Σ_g S_g S_g'`）・between回帰の行順を固定するため。時点だけは`TimeKeys`が値の順序のコードを振る）。グループ内の行は観測順（`group_indices`は安定な計数ソート）。グループ間加算があるパネル系の実装は、このコード順で回すこと。

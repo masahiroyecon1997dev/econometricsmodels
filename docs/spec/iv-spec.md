@@ -30,6 +30,11 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   判断し、`OLS`への切り替えなしにそのまま`IV`に渡せる利便性よりも誤用防止を優先した。
   `x_endog`/`instruments`は独立に検証するため、「操作変数はあるが対応する内生変数が無い」
   誤用も検出できる。
+- **`fit()`冒頭の検査順**（`engine::iv::common::validate_iv_fit_inputs`。2SLS・GMM・`engine_pybind`が共有する）:
+  `confidence_level`の範囲 → `gmm_type="iterated"`の`gmm_max_iter` → `gmm_tol` → 識別の順序条件 → 観測数 →
+  クラスター数 → 被説明変数の定数。設定値の検査をデータの大きさに依る検査より先に行い、OLS・Logit・Probit・Tobitと
+  順序を揃える（`error-handling.md`5.2節）。2SLSの`confidence_level`は段階の包みが付かない（以前は第一段階・第二段階の
+  `OlsEstimator`が検査し、観測数などの後に報告されていた）。
 - **識別の順序条件**（`len(instruments) >= len(x_endog)`）を満たさない場合は`fit()`冒頭
   （第一段階回帰の前）で`IvError::InsufficientInstruments`（`ValidationError`）にする。
 - **観測数**（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_observation_counts`）は`fit()`冒頭（第一段階回帰の前）で、

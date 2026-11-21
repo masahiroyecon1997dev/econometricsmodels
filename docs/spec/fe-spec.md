@@ -156,8 +156,9 @@ polarsではなく`engine`側は抽出済みのコード（`GroupCodes`）を直
     0にする（そのぶんを個体の効果に足す）。入れ子の次元など、基準化しても分離できない効果があるため、
     識別されるのは行ごとの効果の和だけ（`FixedEffects::MultiWay`）。
 
-`FeEstimator::fit`のパイプラインは「打ち切り設定の検査 → 吸収する次元の解決（`absorbed_levels`） →
-singleton検出（全次元） → within変換 → 自由度検証 → 分散ゼロ検出 → QR（`new_checked`。Frisch-Waugh-Lovell定理により
+`FeEstimator::fit`のパイプラインは「吸収する次元の解決（`absorbed_levels`） → 設定値の検査
+（`confidence_level` → `max_iter` → `tol`。データを見る検査より先に行い、Logit・Probit・Tobit・IVと順序を揃える） →
+singleton検出（全次元） → 生の定数列の検査 → within変換 → 自由度検証 → 分散ゼロ検出 → QR（`new_checked`。Frisch-Waugh-Lovell定理により
 within変換後の最小二乗点推定はFE推定量と数学的に一致） → `cov_type`別の共分散行列計算 →
 自由度調整後の統計量再計算」の順。`OlsEstimator`は経由しない（FEが使うのは`β̂`・残差・
 `(X̃'X̃)⁻¹`・適合度だけで、`cov_type`ごとの標準誤差・F検定はFE自身が計算し直すため）。

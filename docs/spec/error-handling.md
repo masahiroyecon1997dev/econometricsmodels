@@ -94,6 +94,23 @@
 - **探索は失敗しない**。診断が本来のエラーを隠さないよう`Result`を返さず、必ず空でない集合を返す。順序つきの探索で見つからなければ列ピボットQRが小さいと判定した列に、それも無ければ全列にフォールバックする。数値的に境界の入力では集合が近似になりうる。順序つきの探索の許容誤差（相対`1e-7`、Rの`lm`と同じ）はQRの特異判定より緩いため、完全な従属とは別に、ほぼ共線な列の組（例: 平均に比べて変動が極小の列）が先に見つかると、その組が報告されることがある。このとき、報告された列を直して再実行しても、次の従属が出る。
 - 計算は失敗経路でだけ走る。直交化は最初の従属の位置`j`で打ち切るので`O(n·j²)`で、元のQRと同じ次数。検出は`engine/src/shared/linear_algebra.rs`の`collinear_columns`で、系統に依存しない（名前を知らない）。呼び出し側が自分の設計の列名に直す。ランク落ちの判定（`RankDeficient`）は列を持たず、列名が要る呼び出し側（`LeastSquaresError::from_rank_deficient`・`ols_based_initial_params`）だけが`collinear_columns`を呼ぶ。エラーを捨てる経路（IVのWu-Hausman拡張回帰、Newton法のHessian）では計算しない。
 
+## 5.2 engineの検査順（公開ガイドのstep 8）
+
+`fit()`のengineの検査は、全手法で**設定値 → データの大きさに依る検査**の順に並べる（公開側の記述は`docs/guide/validation.md`の「Order in which errors are reported」step 8）。設定値は入力のデータを見ずに判定でき、データを見る検査（singleton・定数列・within変換・観測数・クラスター数）より先に報告しても、他の検査の相対順を変えない。手法ごとに検査を呼ぶ関数が違うため、新しい手法・検査を足すときは次の順に合わせる。
+
+1. `confidence_level`（`(0, 1)`。NaNを含む）
+2. `max_iter` → `tol`（MLE・FEとFEIVの交互射影）。GMMは続けて`gmm_max_iter` → `gmm_tol`（`gmm_type="iterated"`）
+3. `y`の値・打ち切り境界（Logit・Probit・Tobit）
+4. 観測数・自由度、クラスター数・時点数、定数のy、特異行列
+
+理由と実装上の注意:
+
+- **同じ検査を複数箇所に重ねてよいが、順序は先頭の1か所が決める**。IVは`validate_iv_fit_inputs`（`confidence_level`・`gmm_type`の反復設定を引数に取る）、FE・RE・FEIVは`panel::common::validate_confidence_level`をそれぞれの`fit`の先頭で呼ぶ。FEIVの第一段階やREの内部FEのように、入れ子の回帰が`confidence_level`をもう一度検査する箇所は、先頭で検査済みなので通らない（残してあるのは`fit_fe_from_within`などを単独で呼ぶ経路への備え）。
+- `confidence_level`の範囲違反は`stage_allowed=false`の`code`なので、`WithinRegressionFailed`・`SecondStageFailed`のような回帰の包みで返しても`stage`は付かず、Pythonから見える`code`・`params`は包みの有無によらず同じ。
+- `max_iter`は全手法で`i64`のままengineに渡し、負値もengineが範囲違反にする（pybindで`usize`へ変換しない）。GMMの`gmm_max_iter`もMLEの`max_iter`と同じ。
+- Tobitの打ち切り境界は`TobitInput::from_columns`ではなく、`fit()`が上の順で呼ぶ`validate_censoring_bounds`で検査する（`from_columns`は次元だけ）。
+- 行数が足りない入力と範囲外の`confidence_level`が重なる場合の順序は、`tests/cross_method/test_validation_order.py`の`test_confidence_level_is_reported_before_the_observation_count`が全手法で固定する。故障の組合せ（`FAULTS`の段階7）が`confidence_level` → `max_iter` → `tol` → `gmm_max_iter` → `gmm_tol` → `y`の値・境界の順位を固定する。
+
 ## 6. 実装
 
 ### engine（PyO3非依存）

@@ -28,7 +28,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - デフォルト（`lower=0.0, upper=None`）は標準的な左打ち切り0のTobit。右打ち切りのみにしたい場合は
   `lower=None`を明示的に渡す（Pythonのキーワード引数デフォルトと明示的`None`渡しの区別を利用）。
-- **打ち切り境界のバリデーション**（engine層 `TobitInput::from_columns`）:
+- **打ち切り境界のバリデーション**（engine層 `TobitInput::validate_censoring_bounds`。`from_columns`は次元だけを検証し、`fit()`が`confidence_level` → `max_iter` → `tol`の直後、観測数の前に呼ぶ。設定値の検査をデータに依る検査より先に行う順序を、他の手法と揃えるため）:
   - `lower`/`upper`が両方`None`は`CensoringBoundsMissing`、両方`Some`で`lower >= upper`は`CensoringBoundsNotOrdered`、NaN・無限大は`CensoringBoundNotFinite`
     （「境界設定自体が不正」、`ValidationError`）。
   - `y`の実測値が指定境界と矛盾する場合（`lower`指定時に`y < lower`の行、または`upper`指定時に

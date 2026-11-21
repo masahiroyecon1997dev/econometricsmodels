@@ -43,7 +43,8 @@
 
 以下はいずれも`compute_first_stage`より前に`fit_frame`で行う。第一段階の回帰変数・クラスター係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると構造方程式側の検査が第一段階の`FirstStageFailed`に隠れてPythonから到達不能になるため（`compute_first_stage`自体はこれらを検証しない）。
 
-- **識別の順序条件（`k_instruments < k_endog`）**（`engine::iv::common::validate_iv_fit_inputs`の先頭）: 過小識別な入力で無駄な第一段階回帰が走るのも防ぐ。`build_iv_input`が`x_endog`/`instruments`の非空を既に検証しているため、ここでの`<`判定は「両方指定されているが数が足りない」ケースのみを扱う。
+- **設定値（`confidence_level` → `gmm_type="iterated"`の`gmm_max_iter` → `gmm_tol`）**（`engine::iv::common::validate_iv_fit_inputs`の先頭。`plan.gmm`の`GmmType`を渡す）: 設定値の検査はデータの大きさに依る検査より先で、OLS・Logit・Probit・Tobitと同じ順序。`gmm_max_iter`は`i64`でengineに渡す（負値もengineが`GMM_MAX_ITER_OUT_OF_RANGE`にする。pybindでは`usize`へ変換しない）。以前は`confidence_level`が第一段階の中、`gmm_max_iter`が観測数などの後だった。
+- **識別の順序条件（`k_instruments < k_endog`）**（`engine::iv::common::validate_iv_fit_inputs`の設定値の次）: 過小識別な入力で無駄な第一段階回帰が走るのも防ぐ。`build_iv_input`が`x_endog`/`instruments`の非空を既に検証しているため、ここでの`<`判定は「両方指定されているが数が足りない」ケースのみを扱う。
 - **観測数（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_observation_counts`）**: 構造方程式の`n <= k`を先に`CommonError::InsufficientObservations`（構造方程式の`k`）で、次に`n <= l`（`l = k_exog + k_instruments`、定数項込みの第一段階の回帰変数の数）を`IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で弾く。`n == l`では`X̂ = X`で2SLSがOLSに縮退し（GMMの`W₀ = (Z'Z)⁻¹`も同様）、`n < l`では`Z'Z`が特異のため、第一段階を診断としてdegradeする余地はなく拒否する（`tests/iv/test_iv_validation.py`の`test_observation_count_boundaries`で固定）。
 - **`cov_type=Cluster`の構造方程式の`G <= q`**（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_structural_cluster_count`。`q`の式はエンジン側に集約し、pybindに複製しない）: 構造方程式で`G>q`でも第一段階の`q`が`G`以下なら、`fit`は失敗せず、その第一段階の`OLSResult`（`first_stage()`）の`f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`だけが`None`になる（`test_cluster_count_between_structural_and_first_stage_slopes_leaves_first_stage_f_undefined`/`test_cluster_count_boundaries`で固定）。`OLSResult`のF系列は全手法（OLS/WLS/FE/RE）で`Option<f64>`。
 
@@ -54,7 +55,7 @@
 
 ## オプションの検査（値・組合せ・列）と報告順
 
-`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造（`x_endog`・`instruments`が空でない → ロール間の重複 → ロール内の重複 → `"const"`の衝突。FEIVの`validate_fe_iv_roles`・OLS等の`validate_roles`と同じく空の検査が先）→ `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値`BuiltIvInput`の`plan`（`IvPlan`: `IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`が負値のときの変換エラーは`resolve_gmm_setup`で起きるが、範囲（3以上・上限）と`gmm_tol`の検証はengineが行う。
+`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造（`x_endog`・`instruments`が空でない → ロール間の重複 → ロール内の重複 → `"const"`の衝突。FEIVの`validate_fe_iv_roles`・OLS等の`validate_roles`と同じく空の検査が先）→ `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値`BuiltIvInput`の`plan`（`IvPlan`: `IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`の範囲（負値を含む。3以上・上限）と`gmm_tol`の検証は、`resolve_gmm_setup`ではなくengineが行う（`confidence_level`の次）。
 
 ## `IVResult.test_stats`と`stat_dist`/`stat_df`
 

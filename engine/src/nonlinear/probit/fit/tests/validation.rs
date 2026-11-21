@@ -298,7 +298,7 @@ fn fit_returns_singular_design_matrix_error_for_constant_column_with_intercept()
 }
 
 /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
-/// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`solver`・
+/// ランクチェック（`nonlinear::common::ols_based_initial_params`）で`solver`・
 /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる
 /// （`LogitEstimator`の対応するテストと同じ設計・同じ経緯）。
 ///

@@ -134,7 +134,7 @@ impl LogitEstimator {
     /// IRLS 1ステップ相当のスケール補正（`p̄=ȳ`での `1/(p̄(1-p̄))` 倍＋切片補正）を施した
     /// もの（`ols_based_initial_params`。従来のゼロベクトルから変更）。前段で
     /// `standardize_columns`後の設計行列を列ピボットQRしランク落ちを検出する
-    /// （`checked_design_matrix_qr`、`solver`によらず単一経路で`SingularDesignMatrix`）。
+    /// （`ols_based_initial_params`、`solver`によらず単一経路で`SingularDesignMatrix`）。
     /// `start_params`によるユーザー指定初期値は引き続き未対応（`docs/spec/
     /// nonlinear-common.md`7章では確定オプションだが、現状は見送っている）。
     ///

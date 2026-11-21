@@ -55,7 +55,7 @@ pub(super) fn fit_probit(
     let initial_params = {
         let normal = Normal::standard();
         ols_based_initial_params(
-            &x_std,
+            x_std,
             input.x(),
             input.y(),
             input.has_intercept(),
@@ -67,6 +67,9 @@ pub(super) fn fit_probit(
             },
         )?
     };
+    // 初期値の計算が`x_std`をその場でQR分解して壊すので、最適化に使う標準化済みの設計行列は元の`x`から
+    // 作り直す（`n·k`の複製を、初期値のためだけに持たないため）。
+    let (x_std, _) = standardize_columns(input.x(), input.has_intercept());
     let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
 
     let (output, problem) = run_solver_keeping_problem(

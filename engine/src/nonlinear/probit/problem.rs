@@ -524,7 +524,7 @@ mod tests {
                 .unwrap();
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let initial_params = ols_based_initial_params(
-            &x_std,
+            x_std.clone(),
             input.x(),
             input.y(),
             input.has_intercept(),

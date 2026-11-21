@@ -67,7 +67,7 @@ pub use cov::{
 pub(crate) use cov::{cov_params_for_type, scores_needed};
 pub use error::MleError;
 pub use goodness_of_fit::{GoodnessOfFit, goodness_of_fit, log_likelihood_null};
-pub use initial::{checked_design_matrix_qr, ols_based_initial_params};
+pub use initial::ols_based_initial_params;
 pub use marginal_effects::{
     FittedModelForMarginalEffects, MarginalEffects, MarginalEffectsAt, column_means,
     column_medians, dydx_and_jacobian, marginal_effects_from_w_s,

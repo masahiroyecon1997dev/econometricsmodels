@@ -172,7 +172,7 @@ impl ProbitEstimator {
     /// スケール補正（`p̄=ȳ`での `1/φ(Φ⁻¹(p̄))` 倍＋切片補正）を施したもの
     /// （`ols_based_initial_params`。`LogitEstimator::fit`と同じ設計で、
     /// 従来のゼロベクトルから変更）。前段で`standardize_columns`後の設計行列を列ピボットQR
-    /// しランク落ちを検出する（`checked_design_matrix_qr`、`solver`によらず単一経路で
+    /// しランク落ちを検出する（`ols_based_initial_params`、`solver`によらず単一経路で
     /// `SingularDesignMatrix`）。`start_params`によるユーザー指定初期値は引き続き未対応。
     ///
     /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し、収束後の

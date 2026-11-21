@@ -259,7 +259,7 @@ where
 /// 収束点）は変わらない。
 ///
 /// **設計行列が構造的に特異な入力（完全な多重共線性等）について**:
-/// Logit/Probit/Tobitの`fit()`は`run_solver`を呼ぶ前に`checked_design_matrix_qr`で
+/// Logit/Probit/Tobitの`fit()`は`run_solver`を呼ぶ前に`ols_based_initial_params`で
 /// 設計行列を列ピボットQR分解し、ランク落ちを`SingularDesignMatrix`として弾くように
 /// なった。このためLogit/Probitのこの種の入力は`regularized_newton_step`にそもそも
 /// 到達しない。`newton_step`が`SingularHessian`を返す経路自体は残しており

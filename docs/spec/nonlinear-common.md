@@ -225,7 +225,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 ### 1.4 設計行列のランクチェック・初期値
 
 **多重共線性の検出は`fit()`冒頭の列ピボットQRランクチェックに一本化**: `solver`に関わらず、
-`run_solver`を呼ぶ前に`nonlinear::common::checked_design_matrix_qr(x_std)`を必ず通し、
+`run_solver`を呼ぶ前に`nonlinear::common::ols_based_initial_params(x_std)`を必ず通し、
 ランク落ちを`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。旧来のゼロベクトル
 初期値では検出経路が`solver`ごとに分かれ（newtonは`newton_step`内QR、bfgs/lbfgsは収束後の
 `observed_information_cov_params`）、bfgs/lbfgsのみ検出漏れする構造的リスクがあった。

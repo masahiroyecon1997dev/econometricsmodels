@@ -84,7 +84,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 収束点でのHessian評価（SE計算用）は常に解析的に行う。
 
 - **初期値（warm start）と設計行列のランクチェック**: `solver`に関わらず、最適化を開始する前に
-  標準化空間の設計行列を列ピボットQR分解する（`nonlinear::common::checked_design_matrix_qr`）。
+  標準化空間の設計行列を列ピボットQR分解する（`nonlinear::common::ols_based_initial_params`）。
   `R`の対角成分の相対閾値`k·ε·max|R_ii|`（OLS・Newton法と共通の`linear_algebra::checked_col_piv_qr`）でランク落ちを
   検出し、完全な多重共線性等は`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。この
   QR解＝標準化空間のLPM最小二乗解 `b_lpm` に、nullモデル `p≡p̄`（`p̄=ȳ`）を起点にしたIRLSの
@@ -251,7 +251,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   のため、`fit()`冒頭で弾く（従来はsilent-passだった、実質バグ。OLS/WLS/Tobit/IVと横断で統一）。
   少数クラスタ一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で、これは弾かない。
 - 完全な多重共線性等の設計行列のランク落ちは、`solver`に依らず最適化前の列ピボットQR
-  （`checked_design_matrix_qr`、3.2節）で`SingularDesignMatrix`として弾く。前段で弾かれた後に
+  （`ols_based_initial_params`、3.2節）で`SingularDesignMatrix`として弾く。前段で弾かれた後に
   なお発生しうるHessianのランクエラーはHessian自体が特異な場合は`SingularHessian`、OPG行列
   （`Σᵢsᵢsᵢ'`）が特異な場合は`SingularOpgMatrix`（原因が異なるため区別）。
 

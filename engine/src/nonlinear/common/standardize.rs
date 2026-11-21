@@ -7,7 +7,7 @@ use faer::Mat;
 /// 切片ありのモデルでは`x̃ⱼ = (xⱼ - x̄ⱼ)/stdⱼ`（平均0・分散1）、切片なしのモデルでは
 /// `x̃ⱼ = xⱼ/stdⱼ`（分散1のみ）に標準化する。切片列は無変換。標準偏差0の列（定数列）は`std`を`1.0`の
 /// ままにするので、切片なしでは無変換、切片ありでは平均を引いて全ゼロ列になる（切片と共線なので
-/// `checked_design_matrix_qr`が`SingularDesignMatrix`で弾く）。
+/// `ols_based_initial_params`が`SingularDesignMatrix`で弾く）。
 ///
 /// **切片ありのとき平均を引く理由**: 平均を引かないと、平均が標準偏差に比べて大きい列
 /// （例: Wooldridge appleの`ecoprc`は平均÷標準偏差が3.7）が切片列とほぼ同じ方向を向き、

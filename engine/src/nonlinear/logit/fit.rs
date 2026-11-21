@@ -56,7 +56,7 @@ pub(super) fn fit_logit(
     // `bfgs`/`lbfgs`は収束後の`observed_information_cov_params`という`solver`依存の
     // 別経路に分かれていた）。
     let initial_params = ols_based_initial_params(
-        &x_std,
+        x_std,
         input.x(),
         input.y(),
         input.has_intercept(),
@@ -64,6 +64,9 @@ pub(super) fn fit_logit(
         // logit: IRLS重み `w = p̄(1-p̄)`、リンク値 `η₀ = ln(p̄/(1-p̄))`。
         |p_bar| (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln()),
     )?;
+    // 初期値の計算が`x_std`をその場でQR分解して壊すので、最適化に使う標準化済みの設計行列は元の`x`から
+    // 作り直す（`n·k`の複製を、初期値のためだけに持たないため）。
+    let (x_std, _) = standardize_columns(input.x(), input.has_intercept());
     let problem = LogitProblem::from_standardized(x_std, input.y().clone());
 
     let (output, problem) = run_solver_keeping_problem(

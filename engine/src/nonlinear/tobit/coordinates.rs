@@ -294,4 +294,110 @@ mod tests {
             "{err:?}"
         );
     }
+    /// 傾きの2列がほぼ共線な設計（`eps = 2⁻¹⁴`〜`2⁻²⁴`。列を揃えた条件数は`1.5e4`〜`1.5e7`）で、
+    /// `Q`の座標の`H`・スコアから作る全体Wald統計量を、有理数演算の厳密値と照合する。
+    /// モデルは`情報行列 A = Σ wᵢvᵢvᵢ'`、`vᵢ = (1, aᵢ, aᵢ + eps·bᵢ, gᵢ)`（最後が`σ`の方向）、
+    /// スコア`sᵢ = eᵢvᵢ`で、全要素が倍精度で厳密に表せる2進小数。`Q`の座標では`vᵢ`の先頭3成分を
+    /// `Q`の行に置き換えて同じ式で組む（`TobitProblem`が`x = Q`で評価するのと同じ構造）。
+    /// `X`の座標で`-H⁻¹`を作って`Ψ`とかけ合わせる式は、同じ入力で`hc0`の相対誤差が`eps = 2⁻¹⁴`で
+    /// 約`4e-6`、`2⁻¹⁸`で約`4e-2`、`2⁻²²`以降は全く合わなくなる。
+    #[test]
+    fn overall_wald_in_q_coordinates_matches_exact_rational_values() {
+        use crate::nonlinear::common::{CovType, cov_params_for_type};
+        use crate::shared::group_codes::GroupCodes;
+        use crate::shared::wald::wald_quadratic_form;
+
+        // (指数, [classical, hc0, hc1, cluster, opg])
+        let cases: [(i32, [f64; 5]); 4] = [
+            (
+                14,
+                [
+                    717.7934482516522,
+                    2829.7053115066637,
+                    2546.7347803559974,
+                    4106.038910034186,
+                    179.40214877699057,
+                ],
+            ),
+            (
+                18,
+                [
+                    717.7565572618128,
+                    2829.5663118357706,
+                    2546.6096806521937,
+                    4105.836464190011,
+                    179.3934491614713,
+                ],
+            ),
+            (
+                22,
+                [
+                    717.7542516857172,
+                    2829.5576248143907,
+                    2546.6018623329514,
+                    4105.823811961406,
+                    179.39290545505867,
+                ],
+            ),
+            (
+                24,
+                [
+                    717.7541364072546,
+                    2829.5571904647363,
+                    2546.6014714182625,
+                    4105.823179351942,
+                    179.39287826979842,
+                ],
+            ),
+        ];
+        let n = 40;
+        let groups =
+            GroupCodes::from_labels(&(0..n).map(|i| format!("g{}", i % 8)).collect::<Vec<_>>());
+        let cov_types = [
+            CovType::Classical,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            CovType::Opg,
+        ];
+        let theta = [0.5, 2.0, -1.0, -0.25];
+        for (exponent, expected) in cases {
+            let eps = 0.5_f64.powi(exponent);
+            let a = |i: usize| ((7 * i) % 13) as f64 - 6.0;
+            let b = |i: usize| ((5 * i) % 11) as f64 - 5.0;
+            let g = |i: usize| (((3 * i) % 7) as f64 - 3.0) / 8.0;
+            let e = |i: usize| (((i * 5) % 9) as f64 - 4.0) / 4.0 + 0.125;
+            let w = |i: usize| (4 + i % 3) as f64 / 4.0;
+            let x = Mat::from_fn(n, 3, |i, j| match j {
+                0 => 1.0,
+                1 => a(i),
+                _ => a(i) + eps * b(i),
+            });
+            let names = ["const", "x1", "x2"].map(String::from);
+            let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+            // `Q`の座標の観測ごとの行`(q_i, g_i)`。
+            let v = Mat::from_fn(n, 4, |i, j| if j < 3 { *q.get(i, j) } else { g(i) });
+            let hessian = Mat::from_fn(4, 4, |r, c| {
+                -(0..n)
+                    .map(|i| w(i) * *v.get(i, r) * *v.get(i, c))
+                    .sum::<f64>()
+            });
+            let scores = Mat::from_fn(n, 4, |i, j| e(i) * *v.get(i, j));
+            // `θ`の`β`部分に対応する`Q`の座標`b = Rβ`（`Q`の倍率を含む`R`）。
+            let b_q: Vec<f64> = (0..3)
+                .map(|i| (i..3).map(|j| *coordinates.r.get(i, j) * theta[j]).sum())
+                .collect();
+            let b_mat = Mat::from_fn(3, 1, |i, _| b_q[i]);
+            for (cov_type, expected) in cov_types.iter().zip(expected) {
+                let cov = cov_params_for_type(cov_type, &hessian, Some(&scores), n, 4).unwrap();
+                let wald = wald_quadratic_form(&b_mat, &cov, 1, 2).unwrap();
+                assert!(
+                    (wald / expected - 1.0).abs() < 1e-8,
+                    "eps=2^-{exponent} {cov_type:?}: {wald} vs {expected}"
+                );
+            }
+        }
+    }
 }

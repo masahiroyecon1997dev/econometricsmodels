@@ -35,19 +35,16 @@ CROSS_METHOD_TOLERANCES: dict[str, dict[str, float]] = {
     # 止まった。実測の約10倍。IV・FE-IVのGMM（Wald・Hansen J）も同じ許容誤差だが、HAC重み
     # （入力の丸めに敏感）は`eps = 1e-5`、クラスター重み（重みの因子の限界）は`eps = 1e-5, 1e-6`だけ。
     "near_collinear_reparametrization": {"rtol": 1e-7, "atol": 0.0},
-    # Tobitの全体Wald統計量・`σ`・`σ`の標準誤差。傾き2列がほぼ共線（`eps = 1e-4, 1e-5`。`-H`を対角で
-    # 揃えた条件数の平方根は約`1.8e4`〜`1.8e5`、受け入れる上限`1e6`の内側）なとき、`(x1, (x2 - x1)/2^k)`に
-    # 置き換えた設計との相対差。誤差は`-H`の丸め（`cond(X)²`）で決まり、`eps`にほぼ反比例して増える
-    # （classical・hc0・hc1・cluster・opgの実測の最大は6.4e-8、clusterの`eps = 1e-5`。`tol`を
-    # 1e-6にしても1e-10にしても同程度）。実測の約5倍。
-    "near_collinear_tobit_reparametrization": {"rtol": 3e-7, "atol": 0.0},
-    # 同じ比較を受け入れ範囲の境界（`eps = 2.5e-6`、平方根の条件数は約`7e5`）で行う許容誤差。
-    # `eps = 2.5e-6`の実測の最大は1.1e-7（cluster）、`3e-6`では2.5e-6（丸めの偶然で一桁以上動く）。実測の約8倍。
-    "near_collinear_tobit_edge": {"rtol": 2e-5, "atol": 0.0},
-    # 列の単位（2の冪でない倍率`1e±6`・`1e12`）を変えたときの全体Wald統計量の相対差（`eps = 1e-5`）。
-    # 実測の最大は3.2e-7（cluster、片方の列だけを`1e-6`倍）。実測の約3倍。
-    "near_collinear_tobit_unit": {"rtol": 1e-6, "atol": 0.0},
-    # Newton以外のソルバー（bfgs・lbfgs。収束点が`tol`の分だけずれる）での同じ比較（`eps = 1e-4`）。
-    # 実測の最大は2.8e-9（lbfgsのcluster）。実測の約35倍（収束点のずれは`tol`と反復の経路で決まる）。
-    "near_collinear_tobit_solver": {"rtol": 1e-7, "atol": 0.0},
+    # Tobitの全体Wald統計量・`σ`・`σ`の標準誤差。傾き2列がほぼ共線（`eps = 1e-5`〜`5e-8`。受け入れる
+    # 上限の列を揃えた条件数`5e7`の内側）なとき、`(x1, (x2 - x1)/2^k)`に置き換えた設計との相対差
+    # （classical・opg・hc0・hc1・cluster、切片あり・なし、newton・bfgs・lbfgs）。実測の最大は
+    # 3.5e-10（opg、`eps = 5e-8`）。実測の約9倍。
+    "near_collinear_tobit_reparametrization": {"rtol": 3e-9, "atol": 0.0},
+    # 同じ比較での第2の傾き（`x2`）の係数と標準誤差（置き換えた設計の係数・標準誤差を`2^k`で割って
+    # 戻す）。実測の最大は係数2e-9・標準誤差1e-9（`eps = 5e-8`〜`1e-7`。収束点のずれ`tol`が支配する）。
+    # 実測の約10倍。
+    "near_collinear_tobit_slope": {"rtol": 2e-8, "atol": 0.0},
+    # 列の単位（2の冪でない倍率`1e±6`・`1e12`）を変えたときの全体Wald統計量の相対差
+    # （`eps = 1e-5`・`1e-7`）。実測の最大は4.0e-10。実測の約12倍。
+    "near_collinear_tobit_unit": {"rtol": 5e-9, "atol": 0.0},
 }

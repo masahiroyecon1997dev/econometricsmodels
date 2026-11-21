@@ -772,7 +772,7 @@ def test_perfect_multicollinearity_raises_computation_error():
     ことのみを確認する。OLS/WLS/Logit と同じく凍結 CSV
     （`tobit_perfect_multicollinearity.csv`、`x3 = 2·x1 + 3·x2`）を使う。
 
-    Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `solver` に
+    Logit とは異なり、Tobit は設計行列の QR 分解（直交座標）でのランク判定が `solver` に
     関わらず常に最初に実行されるため、完全な多重共線性は常にこの経路で検出される
     （`solver` を parametrize する必要が無い、`docs/spec/tobit-spec.md` 3.2節参照）。
     """

@@ -1,18 +1,15 @@
-"""Tobitの、ほぼ共線な傾きの受け入れ境界と、全体Wald統計量の精度。
+"""Tobitの、ほぼ共線な傾きの受け入れ境界と、全体Wald統計量・係数・標準誤差の精度。
 
-Tobitは`-H`（対数尤度のHessian。`X'WX`の形で条件数が設計行列の2乗になる）を、対角で揃えた
-条件数の平方根が`1e6`以内のときだけ受け入れ（`engine/src/shared/orthonormal.rs`の
-`MAX_INFORMATION_CONDITION`）、超えれば`MATRIX_NEAR_SINGULAR`（`matrix="HESSIAN"`）で止める。
-他の手法の設計行列の上限`5e7`にそろえないのは、`-H`の各要素の丸めで統計量の誤差が条件数に
-比例して増え、`5e7`の近くでは桁違いに外れても分解が失敗しないため（`eps = 1e-8`で、Waldが
-`735`のところ`764`になった）。`cov_type="opg"`は`-H`を使わず、スコア行列の列を揃えた条件数
-（上限`5e7`）で判定する（`matrix="OPG"`）。
+Tobitは標準化した設計行列を`X̃ = QR`に分解し、`Q`の座標`b = Rβ̃`で最適化する
+（`engine/src/nonlinear/tobit/coordinates.rs`）。`Q`の座標では`-H`とスコアの条件数が共線性に依らず、
+`X`の座標で`H`を組む丸め（`cond(X)²`）が無いので、受け入れ範囲も精度もOLS系と同じ水準になる。
+受け入れ境界は他の手法と同じ（列を単位ノルムに揃えた設計の条件数`5e7`を超えると
+`MATRIX_NEAR_SINGULAR`の`DESIGN_GRAM`、`1e12`を超えるか完全な共線なら列名つきの
+`DESIGN_MATRIX_SINGULAR`。`test_collinearity_boundary.py`）。`cov_type`によらず同じ。
 
-統計量は直交座標（`-H = R'R`の`R`で`b̃ = Rθ`・`V = R⁻¹M̃R⁻ᵀ`）で計算するので、`-H⁻¹`と
-スコアの外積和を明示的に作ってかけ合わせる従来の式で失っていた桁（`hc0`・`hc1`・cluster）が
-戻る。同じ`H`・`S`を入力にした有理数の厳密値との照合は、`engine`の単体テスト
-（`orthogonal_wald_matches_exact_rational_values_for_nearly_collinear_information`）が持つ。
-ここでは、モデルを丸めなしに再パラメータ化した設計との一致で、`fit()`全体の精度を確かめる。
+同じ`H`・`S`を入力にした有理数の厳密値との照合は、`engine`の単体テスト
+（`overall_wald_in_q_coordinates_matches_exact_rational_values`）が持つ。ここでは、モデルを丸めなしに
+再パラメータ化した設計との一致で、`fit()`全体の精度を確かめる。
 """
 
 from __future__ import annotations
@@ -30,24 +27,24 @@ from econometricsmodels import ErrorCode, Tobit, TobitOptions
 
 N = 600
 COV_TYPES = ["classical", "opg", "hc0", "hc1", "cluster"]
-# `-H`を使う`cov_type`（`opg`は別の境界）。
-HESSIAN_COV_TYPES = ["classical", "hc0", "hc1", "cluster"]
 
 assert_invariant = partial(
     assert_close, **TOLERANCES["near_collinear_tobit_reparametrization"]
 )
-assert_edge = partial(assert_close, **TOLERANCES["near_collinear_tobit_edge"])
-assert_unit = partial(assert_close, **TOLERANCES["near_collinear_tobit_unit"])
-assert_solver = partial(
-    assert_close, **TOLERANCES["near_collinear_tobit_solver"]
+assert_slope = partial(
+    assert_close, **TOLERANCES["near_collinear_tobit_slope"]
 )
+assert_unit = partial(assert_close, **TOLERANCES["near_collinear_tobit_unit"])
 
-# `-H`の列を揃えた条件数の平方根は`eps`にほぼ反比例し、`eps = 1e-6`で約`1.8e6`。上限`1e6`の
-# 境界は`eps ≈ 1.8e-6`で、`2.5e-6`（約`7e5`）は内側、`1.2e-6`（約`1.5e6`）は外側。
-_INSIDE = [1e-4, 1e-5]
-_NEAR_INSIDE = 2.5e-6
-_NEAR_OUTSIDE = 1.2e-6
-_OUTSIDE = [1e-7, 1e-8, 1e-10]
+# 列を揃えた設計の条件数は`eps`にほぼ反比例し、上限`5e7`の境界は`eps ≈ 3.7e-8`
+# （`test_collinearity_boundary.py`のOLSなどと同じ位置）。`5e-8`は内側（約1.35倍の余裕）、
+# `3e-8`は外側（約1.2倍）。
+_INSIDE = [1e-5, 1e-6, 1e-7]
+_NEAR_INSIDE = 5e-8
+_NEAR_OUTSIDE = 3e-8
+_OUTSIDE = [1e-9, 1e-10]
+# 条件数が約1e12を超える範囲（完全な共線として扱う）。
+_FAR_BEYOND = [1e-12, 1e-13, 1e-14]
 
 
 def _data(
@@ -91,6 +88,10 @@ def _reparametrize(df: pl.DataFrame, eps: float) -> pl.DataFrame:
     return df.with_columns(((pl.col("x2") - pl.col("x1")) / scale).alias("x2"))
 
 
+def _scale(eps: float) -> float:
+    return 2.0 ** round(math.log2(eps))
+
+
 def _statistics(res: object) -> dict[str, float]:
     """傾き2列の置き換えで変わらない量（傾きの係数と標準誤差は変わるので含めない）。"""
     return {
@@ -113,44 +114,35 @@ def test_a_design_inside_the_limit_is_estimated_in_any_unit(
     assert np.isfinite(res.wald_statistic)
 
 
-@pytest.mark.parametrize("cov_type", HESSIAN_COV_TYPES)
+@pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("eps", [_NEAR_OUTSIDE, *_OUTSIDE])
 @pytest.mark.parametrize("scale", [1.0, 1e6, 1e-6])
-def test_a_design_outside_the_limit_raises_near_singular_hessian(
+def test_a_design_outside_the_limit_raises_near_singular_design_gram(
     cov_type, eps, scale
 ):
-    """境界の近く（上限の1.5倍）から遠くまで、同じ`HESSIAN`で止まる（単位に依らない。
-    列を対角で揃えてから判定するため）。収束が先に止まることはない。"""
-    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="HESSIAN"):
+    """境界の近く（上限の約1.2倍）から遠くまで、同じ`DESIGN_GRAM`で止まる（単位に依らない。
+    列を単位ノルムに揃えて判定するため）。`cov_type`にもよらない。"""
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="DESIGN_GRAM"):
         _fit(_data(eps, scale), cov_type)
 
 
-def test_a_design_far_beyond_the_limit_is_reported_as_singular():
-    """条件数が`1e12`を超える（完全な共線）設計は、`HESSIAN`か、列名つきの
-    `DESIGN_MATRIX_SINGULAR`で止まる（内部エラーにならない）。"""
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("eps", _FAR_BEYOND)
+def test_a_design_far_beyond_the_limit_raises_a_design_error_not_an_internal_one(
+    cov_type, eps
+):
+    """条件数が約1e12を超えると、完全な共線として`DESIGN_MATRIX_SINGULAR`（列名つき）になる
+    （境の近くは`DESIGN_GRAM`でもよい。`INTERNAL_ERROR`にはならない）。"""
     with raises_one_of_errors(
         {
-            ErrorCode.MATRIX_NEAR_SINGULAR: {"matrix": "HESSIAN"},
+            ErrorCode.MATRIX_NEAR_SINGULAR: {"matrix": "DESIGN_GRAM"},
             ErrorCode.DESIGN_MATRIX_SINGULAR: {},
         }
     ):
-        _fit(_data(1e-13), "classical")
+        _fit(_data(eps), cov_type)
 
 
-@pytest.mark.parametrize("eps", [1e-6, 1e-7, 5e-8])
-def test_opg_has_its_own_wider_limit_through_the_score_matrix(eps):
-    """`opg`は`-H`を使わないので、スコア行列の条件数（約`1/eps`）の上限`5e7`で判定する
-    （`eps ≈ 4e-8`まで）。"""
-    assert np.isfinite(_fit(_data(eps), "opg").wald_statistic)
-
-
-@pytest.mark.parametrize("eps", [3e-8, 1e-8, 1e-10])
-def test_opg_outside_its_limit_raises_near_singular_opg(eps):
-    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="OPG"):
-        _fit(_data(eps), "opg")
-
-
-@pytest.mark.parametrize("cov_type", HESSIAN_COV_TYPES)
+@pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize(
     ("scale", "scale_b"), [(1e6, 1.0), (1.0, 1e-6), (1e12, 1.0)]
 )
@@ -158,67 +150,82 @@ def test_the_limit_does_not_move_when_only_one_column_is_rescaled(
     cov_type, scale, scale_b
 ):
     _fit(_data(_NEAR_INSIDE, scale, scale_b), cov_type)
-    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="HESSIAN"):
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR, matrix="DESIGN_GRAM"):
         _fit(_data(_NEAR_OUTSIDE, scale, scale_b), cov_type)
+
+
+def test_exact_collinearity_is_reported_with_the_columns():
+    df = _data(1e-5).with_columns((2.0 * pl.col("x1")).alias("x2"))
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["x1", "x2"]):
+        _fit(df, "classical")
 
 
 # ── 精度 ────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("eps", _INSIDE)
-def test_the_overall_wald_is_invariant_to_reparametrization(cov_type, eps):
+def _compare_with_reparametrization(
+    eps: float, cov_type: str, solver: str, include_intercept: bool
+) -> None:
     df = _data(eps)
-    got = _statistics(_fit(df, cov_type))
-    expected = _statistics(_fit(_reparametrize(df, eps), cov_type))
-    for name in got:
-        assert_invariant(got[name], expected[name], f"{cov_type} {name}")
+    if not include_intercept:
+        df = df.with_columns((pl.col("y") + 2.0).alias("y"))
+    got = _fit(df, cov_type, solver, include_intercept)
+    expected = _fit(
+        _reparametrize(df, eps), cov_type, solver, include_intercept
+    )
+    label = f"{cov_type} {solver} eps={eps:g}"
+    stats_got, stats_expected = _statistics(got), _statistics(expected)
+    for name in stats_got:
+        assert_invariant(
+            stats_got[name], stats_expected[name], f"{label} {name}"
+        )
+    # 第2の傾きは、置き換えた設計では`2^k`倍の係数・標準誤差になる。
+    scale = _scale(eps)
+    assert_slope(
+        got.params["x2"], expected.params["x2"] / scale, f"{label} coef x2"
+    )
+    assert_slope(
+        got.std_errors["x2"],
+        expected.std_errors["x2"] / scale,
+        f"{label} se x2",
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_the_overall_wald_is_invariant_to_reparametrization_at_the_limit(
-    cov_type,
+@pytest.mark.parametrize("eps", [*_INSIDE, _NEAR_INSIDE])
+def test_the_overall_wald_and_slopes_are_invariant_to_reparametrization(
+    cov_type, eps
 ):
-    df = _data(_NEAR_INSIDE)
-    got = _statistics(_fit(df, cov_type))
-    expected = _statistics(_fit(_reparametrize(df, _NEAR_INSIDE), cov_type))
-    for name in got:
-        assert_edge(got[name], expected[name], f"{cov_type} {name}")
+    _compare_with_reparametrization(eps, cov_type, "newton", True)
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("eps", [1e-5, 1e-7])
+def test_the_overall_wald_is_invariant_without_an_intercept(cov_type, eps):
+    """切片なし（検定しない先頭の列が無い）でも、`Q`の座標と検定の範囲が合っている。"""
+    _compare_with_reparametrization(eps, cov_type, "newton", False)
 
 
 @pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
 @pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
-def test_the_overall_wald_is_invariant_with_every_solver(cov_type, solver):
-    """Newton以外のソルバー（収束点が`tol`の分だけずれる）でも、受け入れ範囲の内側の統計量は
-    再パラメータ化に依らない。"""
-    df = _data(1e-4)
-    got = _fit(df, cov_type, solver).wald_statistic
-    expected = _fit(_reparametrize(df, 1e-4), cov_type, solver).wald_statistic
-    assert_solver(got, expected, f"{cov_type} {solver}")
+@pytest.mark.parametrize("eps", [1e-5, 1e-7])
+def test_the_overall_wald_is_invariant_with_every_solver(
+    cov_type, solver, eps
+):
+    """Newton以外のソルバー（収束点が`tol`の分だけずれる）でも、同じ精度で再パラメータ化に
+    依らない。"""
+    _compare_with_reparametrization(eps, cov_type, solver, True)
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("eps", [1e-5, 1e-7])
 @pytest.mark.parametrize(
     ("scale", "scale_b"),
     [(1e6, 1e6), (1e-6, 1e-6), (1e6, 1.0), (1.0, 1e-6), (1e12, 1.0)],
 )
 def test_the_overall_wald_does_not_depend_on_the_unit_of_a_column(
-    cov_type, scale, scale_b
+    cov_type, eps, scale, scale_b
 ):
-    expected = _fit(_data(1e-5), cov_type).wald_statistic
-    got = _fit(_data(1e-5, scale, scale_b), cov_type).wald_statistic
+    expected = _fit(_data(eps), cov_type).wald_statistic
+    got = _fit(_data(eps, scale, scale_b), cov_type).wald_statistic
     assert_unit(got, expected, f"{cov_type} scale=({scale}, {scale_b})")
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("eps", _INSIDE)
-def test_the_overall_wald_is_invariant_without_an_intercept(cov_type, eps):
-    """切片なし（検定しない先頭の列が`logσ`だけ）でも、直交座標の並びと検定の範囲が合っている。
-    Waldが小さい（約47）ので相対誤差が大きめ（`eps = 1e-5`のclusterで6e-7）で、緩い許容誤差を使う。"""
-    df = _data(eps).with_columns((pl.col("y") + 2.0).alias("y"))
-    got = _statistics(_fit(df, cov_type, include_intercept=False))
-    expected = _statistics(
-        _fit(_reparametrize(df, eps), cov_type, include_intercept=False)
-    )
-    for name in got:
-        assert_edge(got[name], expected[name], f"{cov_type} {name}")

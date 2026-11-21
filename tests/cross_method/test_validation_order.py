@@ -180,8 +180,8 @@ _IV_ARGS = {
 }
 _PANEL_ARGS = {"y": "y", "x": _X, "effects": ["entity"]}
 _FE_IV_ARGS = {**_IV_ARGS, "effects": ["entity"]}
-# FEIVの`x_endog`・`instruments`の空の検査は`effects`の列数の次。IVの`"const"`の検査
-# （`x_exog`の名前）に当たるものは無い。
+# FEIVの`x_endog`・`instruments`の空の検査は`effects`の列数の次。FEIVは固定効果が切片を
+# 吸収して切片を足さないので、`const_in_x`は当てはめない。
 _FE_IV_FAULTS = (*_PANEL_FAULTS, "missing_instrument")
 _FE_GMM_FAULTS = (
     *_FE_IV_FAULTS,
@@ -634,13 +634,6 @@ _UNUSED_WITHOUT_TIME_COV = frozenset(
 )
 
 
-def rank(method: Method, fault_id: str) -> tuple[int, int]:
-    """`method`での故障の順位。IVの空の`x_endog`は、`"const"`の検査と同じ順位。"""
-    if fault_id == "empty_x" and method.name.startswith("iv"):
-        return FAULTS[fault_id].rank[0], 6
-    return FAULTS[fault_id].rank
-
-
 def changes(method: Method, fault_id: str) -> Changes:
     """故障を入力に混ぜるための、`(引数の差分, オプションの差分)`。"""
     x_role = method.x_role
@@ -816,7 +809,7 @@ def _pairs(method: Method) -> list[tuple[str, str]]:
     return [
         (a, b)
         for a, b in itertools.permutations(method.faults, 2)
-        if rank(method, a) < rank(method, b) and compose(method, a, b)
+        if FAULTS[a].rank < FAULTS[b].rank and compose(method, a, b)
     ]
 
 
@@ -914,7 +907,7 @@ def test_every_method_covers_every_stage_boundary(method):
     故障の定義を変えて、ある手法の境界の組がすべて消えたときに気づくための検査。
     """
     covered = {
-        (rank(method, a)[0], rank(method, b)[0]) for a, b in _pairs(method)
+        (FAULTS[a].rank[0], FAULTS[b].rank[0]) for a, b in _pairs(method)
     }
     for boundary in BOUNDARIES:
         assert boundary in covered, boundary

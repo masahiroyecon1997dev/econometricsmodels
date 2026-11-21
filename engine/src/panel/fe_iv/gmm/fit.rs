@@ -8,10 +8,12 @@ use crate::panel::common::{
     PanelCovType, PanelError, PanelMoment, PanelMomentInput, panel_moment_covariance,
 };
 use crate::panel::fe::{
-    FeAbsorption, FeCovType, FeEffects, fe_r_squared_between, fe_r_squared_overall,
+    FeAbsorption, FeCovType, FeEffects, FeEstimator, fe_r_squared_between, fe_r_squared_overall,
 };
 use crate::panel::fe_iv::common::{
-    FeIvInput, WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
+    FeIvInput, FirstStageArgs, FirstStageWithin, FirstStages, WithinPrepared, WuHausmanContext,
+    effect_names, fe_wu_hausman_test, mat_from_columns, prepare_within, run_first_stages,
+    structural_fit_is_perfect,
 };
 use crate::shared::error::CommonError;
 use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
@@ -20,8 +22,12 @@ use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::wald::wald_chi2_test;
 use statrs::distribution::Normal;
 
-/// [`FeGmmEstimator::fit_with_absorption`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
-pub(super) fn fit_fe_gmm(
+/// [`FeGmmEstimator::fit_with_first_stages`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
+///
+/// 第一段階の`FeEstimator`は、GMMの点推定・共分散・Waldの後に内生変数ごとに推定し、部分F統計量と
+/// Wu-Hausmanに要る量を取り出した直後に`consume`へ渡して手放す（FE-2SLSと同じ。`common/first_stage.rs`）。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fit_fe_gmm<T>(
     input: FeIvInput,
     effects: FeEffects,
     gmm_type: FeGmmType,
@@ -29,7 +35,8 @@ pub(super) fn fit_fe_gmm(
     cov_type: FeCovType,
     confidence_level: f64,
     absorption: &FeAbsorption,
-) -> Result<FeGmmEstimator, PanelError> {
+    consume: impl FnMut(&str, FeEstimator) -> T,
+) -> Result<(FeGmmEstimator, Vec<T>), PanelError> {
     // faerのグローバル並列度を`Par::Seq`に固定する（`FeEstimator::fit`と同じ理由）。
     crate::shared::parallelism::ensure_serial();
 
@@ -46,7 +53,7 @@ pub(super) fn fit_fe_gmm(
     let WithinPrepared {
         levels,
         tilde,
-        absorbed: _,
+        absorbed,
         noise,
         n_groups,
         neffects,
@@ -132,6 +139,9 @@ pub(super) fn fit_fe_gmm(
         }
         .into());
     }
+    // 点推定に使った行列は、以降の共分散・診断では使わない（共分散は`solution`の白色化した`Z̃`から作る）。
+    // 第一段階を回す前に手放して、ピークメモリを増やさない。
+    drop((z, x, y, ztz));
 
     // Hansen J過剰識別検定（内生変数が無い・丁度識別のときは検定しない）。`Classical`・`OneStep`の`S`は
     // `σ̂²Z̃'Z̃`なので、`σ̂²`の分母を`n − neffects`に直す（`hansen_j.rs`）。
@@ -209,7 +219,47 @@ pub(super) fn fit_fe_gmm(
     let r_squared_between = fe_r_squared_between(input.y(), &structural_x, &beta, &groups[0]);
     let r_squared_overall = fe_r_squared_overall(input.y(), &structural_x, &beta);
 
-    Ok(FeGmmEstimator {
+    // 第一段階と、第一段階だけに依存する診断（弱操作変数・Wu-Hausman）。GMMの点推定・共分散・Waldの後に
+    // 回す（GMMのエラーを先に返す。Wu-Hausmanは構造式のエラーが補助回帰のエラーに隠れないよう最後）。
+    let effect_names = effect_names(&input);
+    let FirstStages {
+        consumed,
+        weak_instrument_f,
+        summaries: mut first_stage_summaries,
+    } = run_first_stages(
+        &FirstStageArgs {
+            input: &input,
+            effects,
+            cov_type: &cov_type,
+            confidence_level,
+            effect_names: &effect_names,
+            tilde: &tilde,
+            absorbed: &absorbed,
+            noise,
+            neffects,
+            exog_range: &exog_range,
+            instrument_range: &instrument_range,
+        },
+        consume,
+    )?;
+    let wu_hausman = fe_wu_hausman_test(WuHausmanContext {
+        input: &input,
+        effects,
+        cov_type: &cov_type,
+        confidence_level,
+        groups,
+        effect_names: &effect_names,
+        tilde: &tilde,
+        first_stages: &mut first_stage_summaries,
+        noise,
+    })?;
+    drop(first_stage_summaries);
+    // 弱操作変数診断（Cragg-Donald・Kleibergen-Paap・有効F）が使う、第一段階のwithin変換済みの行列。
+    let first_stage_within =
+        FirstStageWithin::from_tilde(n, &tilde, &exog_range, &endog_range, &instrument_range);
+    drop(tilde);
+
+    let estimator = FeGmmEstimator {
         input,
         effects,
         gmm_type,
@@ -235,7 +285,11 @@ pub(super) fn fit_fe_gmm(
         r_squared_between,
         r_squared_overall,
         hansen_j,
-    })
+        first_stage_within,
+        weak_instrument_f,
+        wu_hausman,
+    };
+    Ok((estimator, consumed))
 }
 
 #[cfg(test)]

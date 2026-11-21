@@ -50,14 +50,13 @@
 //!
 //! - `fit.rs`: `fit_fe_two_sls`（上のパイプライン）
 //! - `sargan.rs`: Sargan過剰識別検定
-//! - `wu_hausman.rs`: Wu-Hausman内生性検定（補助FE回帰）
-//! - `weak_instruments.rs`: 弱操作変数診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）
 //!
-//! 入力型`FeIvInput`と推定の前段（`prepare_within`）は`common/`にあり、固定効果つきGMM（`gmm.rs`）と共有する。
+//! 入力型`FeIvInput`・推定の前段（`prepare_within`）・第一段階（`run_first_stages`）・弱操作変数診断・
+//! Wu-Hausman内生性検定（補助FE回帰）は`common/`にあり、固定効果つきGMM（`gmm.rs`）と共有する。
 
 use faer::Mat;
 
-use super::common::FeIvInput;
+use super::common::{FeIvInput, FeWuHausmanTest, FirstStageWithin, WeakInstrumentView};
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use crate::shared::effective_f::EffectiveF;
@@ -66,16 +65,6 @@ use crate::shared::weak_instruments::CraggDonald;
 
 mod fit;
 mod sargan;
-mod weak_instruments;
-mod wu_hausman;
-
-/// 第一段階のwithin変換済みの行列。`x`は`[x̃_exog, z̃]`（全ての第一段階で同じ）、`y_endog`は
-/// `x̃_endog`の各列（`x_endog`の順）。
-#[derive(Debug)]
-struct FirstStageWithin {
-    x: Mat<f64>,
-    y_endog: Mat<f64>,
-}
 
 /// FEIVの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
 #[derive(Debug)]
@@ -115,7 +104,7 @@ pub struct FeTwoSlsEstimator {
     /// Sargan過剰識別検定。丁度識別、または内生変数が無いときは`None`。
     sargan: Option<sargan::FeSarganTest>,
     /// Wu-Hausman内生性検定。内生変数が無い、または補助回帰が診断だけの理由で失敗したときは`None`。
-    wu_hausman: Option<wu_hausman::FeWuHausmanTest>,
+    wu_hausman: Option<FeWuHausmanTest>,
     /// 構造式の`y`・実際の`X = [x_exog, x_endog]`（変換前）。`fixed_effects()`が使う。
     structural: FeInput,
     /// 交互射影が`y`・`x_exog`・`x_endog`の列から引いた各次元の効果（`structural`の列と同じ順）。
@@ -209,6 +198,21 @@ impl FeTwoSlsEstimator {
             absorption,
             consume,
         )
+    }
+
+    /// 弱操作変数診断が読む量の借用（診断の計算は`common/weak_instruments.rs`で、固定効果つきGMMと共有する）。
+    fn weak_view(&self) -> WeakInstrumentView<'_> {
+        WeakInstrumentView {
+            input: &self.input,
+            effects: self.effects,
+            cov_type: &self.cov_type,
+            n_groups: &self.n_groups,
+            dk_bandwidth_used: self.dk_bandwidth_used,
+            params: &self.params,
+            residuals: &self.residuals,
+            first_stage_within: self.first_stage_within.as_ref(),
+            weak_instrument_f: &self.weak_instrument_f,
+        }
     }
 
     /// 入力データ（within変換前）。
@@ -337,7 +341,7 @@ impl FeTwoSlsEstimator {
     /// 部分F統計量のF分布の自由度`(除外操作変数の数, n − l − neffects)`（`l = k_exog + k_instruments`）。
     /// 内生変数が無ければ`None`。
     pub fn weak_instrument_f_df(&self) -> Option<(usize, usize)> {
-        self.compute_weak_instrument_f_df()
+        self.weak_view().weak_instrument_f_df()
     }
 
     /// Cragg-Donald Wald F統計量とStock-Yogoの臨界値（吸収した効果の分を自由度から引く。等分散前提で
@@ -347,7 +351,7 @@ impl FeTwoSlsEstimator {
     /// 統計量が定義できないとき（内生変数が無い、内生変数が共線、第一段階が完全フィット、外生変数と
     /// 除外操作変数の共線など）`PanelError::WeakInstrumentStatisticUndefined`。
     pub fn cragg_donald(&self) -> Result<CraggDonald, PanelError> {
-        self.compute_cragg_donald()
+        self.weak_view().cragg_donald()
     }
 
     /// `fit`に渡した`cov_type`に頑健なKleibergen-Paap統計量（rk LMとrk Wald F）。LMとWald Fは独立に
@@ -358,7 +362,7 @@ impl FeTwoSlsEstimator {
     /// 両方とも定義できないとき（`Dk`で時点数が除外操作変数の数`− 内生変数の数 + 1`以下の場合を含む）
     /// `PanelError::WeakInstrumentStatisticUndefined`。
     pub fn kleibergen_paap(&self) -> Result<KleibergenPaap, PanelError> {
-        self.compute_kleibergen_paap()
+        self.weak_view().kleibergen_paap()
     }
 
     /// `fit`に渡した`cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、単純版・一般化版TSLSの
@@ -369,7 +373,7 @@ impl FeTwoSlsEstimator {
     ///   `PanelError::AlphaOutOfRange`
     /// - 統計量が定義できないとき`PanelError::WeakInstrumentStatisticUndefined`
     pub fn effective_f(&self, alpha: f64) -> Result<EffectiveF, PanelError> {
-        self.compute_effective_f(alpha)
+        self.weak_view().effective_f(alpha)
     }
 
     /// Sargan過剰識別検定の統計量。丁度識別（`len(instruments) == len(x_endog)`）では`None`。

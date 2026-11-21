@@ -3,12 +3,13 @@
 //! - `basic.rs`: 基本挙動（getter・推定回数と収束・係数名・自由度）
 //! - `c_statistic.rs`: C統計量（`fe_gmm_c_statistic`。ダミー変数を明示した`iv::gmm`との照合、手計算、Hansen Jとの整合、検証）
 //! - `cov_type.rs`: `cov_type`別の標準誤差（FE-2SLSへの還元、ダミー変数を明示したGMM、手計算との照合）・推論・Wald・R²・検証
+//! - `first_stage.rs`: 第一段階・弱操作変数診断・Wu-Hausman（FE-2SLSと共有する計算。同じデータ・`cov_type`ならFE-2SLSと一致）
 //! - `hansen_j.rs`: Hansen J過剰識別検定（FE-2SLSのSarganへの還元、ダミー変数を明示したGMM、手計算、`None`の条件）
 //! - `reference.rs`: FE-2SLSへの還元、ダミー変数を明示したGMM（FWL）、クラスター重みの手計算との照合
 //! - `validation.rs`: 入力検証・エラー返却・検証順序・クラスター数の境界
 
 use crate::panel::common::PanelError;
-use crate::panel::fe::{FeCovType, FeEffects};
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator};
 use crate::panel::fe_iv::common::FeIvInput;
 use crate::panel::fe_iv::gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
 use crate::shared::group_codes::GroupCodes;
@@ -16,6 +17,7 @@ use crate::shared::group_codes::GroupCodes;
 mod basic;
 mod c_statistic;
 mod cov_type;
+mod first_stage;
 mod hansen_j;
 mod reference;
 mod validation;
@@ -43,6 +45,25 @@ pub(super) fn fit_with(
     cov_type: FeCovType,
 ) -> Result<FeGmmEstimator, PanelError> {
     FeGmmEstimator::fit(input, effects, gmm_type, true, cov_type, 0.95)
+}
+
+/// [`fit_with`]と同じ推定を、内生変数ごとの第一段階の`FeEstimator`も一緒に返す形で行う。
+pub(super) fn fit_with_stages(
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: FeGmmType,
+    cov_type: FeCovType,
+) -> Result<(FeGmmEstimator, Vec<(String, FeEstimator)>), PanelError> {
+    FeGmmEstimator::fit_with_first_stages(
+        input,
+        effects,
+        gmm_type,
+        true,
+        cov_type,
+        0.95,
+        &Default::default(),
+        |name, stage| (name.to_string(), stage),
+    )
 }
 
 pub(super) fn two_step(weight: FeWeightType) -> FeGmmType {

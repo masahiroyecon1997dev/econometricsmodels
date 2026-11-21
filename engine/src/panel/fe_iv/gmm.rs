@@ -71,9 +71,12 @@
 
 use faer::Mat;
 
-use super::common::FeIvInput;
+use super::common::{FeIvInput, FeWuHausmanTest, FirstStageWithin, WeakInstrumentView};
 use crate::panel::common::PanelError;
-use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects};
+use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator};
+use crate::shared::effective_f::EffectiveF;
+use crate::shared::kleibergen_paap::KleibergenPaap;
+use crate::shared::weak_instruments::CraggDonald;
 
 mod c_statistic;
 mod fit;
@@ -119,6 +122,13 @@ pub struct FeGmmEstimator {
     r_squared_overall: f64,
     /// Hansen J過剰識別検定。丁度識別、または内生変数が無いときは`None`。
     hansen_j: Option<hansen_j::FeHansenJ>,
+    /// 弱操作変数診断が使う、第一段階のwithin変換済みの行列。内生変数が無ければ`None`。第一段階の
+    /// 推定量そのものは持たない（`fit_with_first_stages`が呼び出し側へ渡して手放す）。
+    first_stage_within: Option<FirstStageWithin>,
+    /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順。名前つき）。内生変数が無ければ空。
+    weak_instrument_f: Vec<(String, f64)>,
+    /// Wu-Hausman内生性検定。内生変数が無い、または補助回帰が診断だけの理由で失敗したときは`None`。
+    wu_hausman: Option<FeWuHausmanTest>,
 }
 
 impl FeGmmEstimator {
@@ -190,7 +200,58 @@ impl FeGmmEstimator {
             cov_type,
             confidence_level,
             absorption,
+            |_, _| (),
         )
+        .map(|(estimator, _)| estimator)
+    }
+
+    /// [`Self::fit_with_absorption`]と同じ推定を、内生変数ごとの第一段階の`FeEstimator`
+    /// （`x̃_endog[j] ~ x̃_exog + 操作変数`のwithin回帰。`cov_type`は構造式と同じ。傾きのF検定は
+    /// しないので`f_statistic()`は`None`）を`consume`に渡して、その戻り値を（`x_endog`の順に）一緒に
+    /// 返す形で行う。`FeTwoSlsEstimator::fit_with_first_stages`と同じ契約。
+    ///
+    /// 第一段階の`FeEstimator`は、生の列・within行列・残差を持つので、内生変数の数だけ`fit`の終わりまで
+    /// 持つとピークメモリがその数に比例して増える。`consume`はそれを受け取って必要な量だけ残す
+    /// （`engine_pybind`は`FEResult`に変える）。
+    ///
+    /// # Errors
+    /// [`Self::fit_with_absorption`]と同じ。
+    #[allow(clippy::too_many_arguments)]
+    pub fn fit_with_first_stages<T>(
+        input: FeIvInput,
+        effects: FeEffects,
+        gmm_type: FeGmmType,
+        raise_on_non_convergence: bool,
+        cov_type: FeCovType,
+        confidence_level: f64,
+        absorption: &FeAbsorption,
+        consume: impl FnMut(&str, FeEstimator) -> T,
+    ) -> Result<(Self, Vec<T>), PanelError> {
+        fit::fit_fe_gmm(
+            input,
+            effects,
+            gmm_type,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+            absorption,
+            consume,
+        )
+    }
+
+    /// 弱操作変数診断が読む量の借用（診断の計算は`common/weak_instruments.rs`で、FE-2SLSと共有する）。
+    fn weak_view(&self) -> WeakInstrumentView<'_> {
+        WeakInstrumentView {
+            input: &self.input,
+            effects: self.effects,
+            cov_type: &self.cov_type,
+            n_groups: &self.n_groups,
+            dk_bandwidth_used: self.dk_bandwidth_used,
+            params: &self.params,
+            residuals: &self.residuals,
+            first_stage_within: self.first_stage_within.as_ref(),
+            weak_instrument_f: &self.weak_instrument_f,
+        }
     }
 
     /// 入力データ（within変換前）。
@@ -336,5 +397,68 @@ impl FeGmmEstimator {
     /// Hansen J検定の自由度（`len(instruments) − len(x_endog)`）。丁度識別・内生変数なしは`None`。
     pub fn hansen_j_df(&self) -> Option<usize> {
         self.hansen_j.map(|test| test.df)
+    }
+
+    /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順）。除外操作変数`q`個の係数がゼロという制限の、
+    /// 等分散前提のネストF検定で、第一段階だけに依存する（GMMの重み・`cov_type`に依らない）。分母の自由度は
+    /// `n − l − neffects`（[`Self::weak_instrument_f_df`]）。内生変数が1個ならCragg-Donaldと一致する。
+    pub fn weak_instrument_f_statistics(&self) -> &[(String, f64)] {
+        &self.weak_instrument_f
+    }
+
+    /// 部分F統計量のF分布の自由度`(除外操作変数の数, n − l − neffects)`（`l = k_exog + k_instruments`）。
+    /// 内生変数が無ければ`None`。
+    pub fn weak_instrument_f_df(&self) -> Option<(usize, usize)> {
+        self.weak_view().weak_instrument_f_df()
+    }
+
+    /// Cragg-Donald Wald F統計量とStock-Yogoの臨界値（吸収した効果の分を自由度から引く。等分散前提で
+    /// `cov_type`に依らない）。第一段階だけに依存するので、`FeTwoSlsEstimator::cragg_donald`と同じ値になる。
+    ///
+    /// # Errors
+    /// 統計量が定義できないとき（内生変数が無い、内生変数が共線、第一段階が完全フィット、外生変数と
+    /// 除外操作変数の共線など）`PanelError::WeakInstrumentStatisticUndefined`。
+    pub fn cragg_donald(&self) -> Result<CraggDonald, PanelError> {
+        self.weak_view().cragg_donald()
+    }
+
+    /// `fit`に渡した`cov_type`に頑健なKleibergen-Paap統計量（rk LMとrk Wald F）。GMMの重みには依らない
+    /// （`cov_type`と重みは独立の選択）。
+    ///
+    /// # Errors
+    /// 両方とも定義できないとき（`Dk`で時点数が除外操作変数の数`− 内生変数の数 + 1`以下の場合を含む）
+    /// `PanelError::WeakInstrumentStatisticUndefined`。
+    pub fn kleibergen_paap(&self) -> Result<KleibergenPaap, PanelError> {
+        self.weak_view().kleibergen_paap()
+    }
+
+    /// `fit`に渡した`cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、Patnaik臨界値。内生変数が1個の
+    /// ときだけ定義される。`alpha`は臨界値の水準（0〜1）。
+    ///
+    /// # Errors
+    /// - 内生変数が1個でないとき`PanelError::EffectiveFEndogenousCount`、`alpha`が(0, 1)の外のとき
+    ///   `PanelError::AlphaOutOfRange`
+    /// - 統計量が定義できないとき`PanelError::WeakInstrumentStatisticUndefined`
+    pub fn effective_f(&self, alpha: f64) -> Result<EffectiveF, PanelError> {
+        self.weak_view().effective_f(alpha)
+    }
+
+    /// Wu-Hausman内生性検定の統計量（F）。内生変数が無いとき、または補助回帰が自由度不足・`v̂`の分散ゼロ・
+    /// 完全適合・特異などで検定できないときは`None`（構造式の推定結果とは無関係なので、`fit`は失敗しない）。
+    ///
+    /// 補助回帰は最小二乗なので、GMMの点推定・重みに依らず、`fit`に渡した`cov_type`の共分散でのWald検定。
+    /// 同じデータ・`cov_type`なら`FeTwoSlsEstimator::wu_hausman_statistic`と同じ値になる。
+    pub fn wu_hausman_statistic(&self) -> Option<f64> {
+        self.wu_hausman.map(|test| test.statistic)
+    }
+
+    /// Wu-Hausman内生性検定のp値。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_p_value(&self) -> Option<f64> {
+        self.wu_hausman.map(|test| test.p_value)
+    }
+
+    /// Wu-Hausman内生性検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_df(&self) -> Option<(usize, usize)> {
+        self.wu_hausman.map(|test| test.df)
     }
 }

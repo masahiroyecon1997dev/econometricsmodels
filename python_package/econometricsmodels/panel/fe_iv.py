@@ -248,13 +248,13 @@ class FEIVResults:
       `wald_dist`, `wald_df_num`, `wald_df_denom`.
     - Estimator actually used: `estimator`, `gmm_type`,
       `gmm_weight_type`, `n_iter`, `converged`.
-    - Weak instruments (`estimator="2sls"` only, `None` with GMM):
+    - Weak instruments (the same for both estimators):
       `weak_instrument_f_statistics`, `weak_instrument_f_df_num`,
       `weak_instrument_f_df_denom`.
     - Overidentification (Sargan with `estimator="2sls"`, Hansen J with
       `estimator="gmm"`; all `None` when just identified):
       `overid_statistic`, `overid_p_value`, `overid_df`.
-    - Endogeneity (`estimator="2sls"` only, `None` with GMM):
+    - Endogeneity (the same for both estimators, under `cov_type`):
       `wu_hausman_statistic`, `wu_hausman_p_value`, `wu_hausman_df_num`,
       `wu_hausman_df_denom`.
     - Fit: `r_squared_within`, `r_squared_between`,
@@ -266,12 +266,12 @@ class FEIVResults:
     - Residuals: `residuals` (structural residuals of the
       within-transformed data).
     - Methods: `first_stage()` (one `FEResults` per endogenous
-      variable), `fixed_effects()` (the estimated effect of every group,
-      for each effects column of the model), `params_table()`. The first
-      two are available with `estimator="2sls"` only.
-    - Weak-instrument diagnostics (methods, computed when called, with
-      `estimator="2sls"` only): `cragg_donald()`, `kleibergen_paap()`,
-      `effective_f()`.
+      variable; the same for both estimators), `fixed_effects()` (the
+      estimated effect of every group, for each effects column of the
+      model; `estimator="2sls"` only), `params_table()`.
+    - Weak-instrument diagnostics (methods, computed when called, the
+      same for both estimators): `cragg_donald()`,
+      `kleibergen_paap()`, `effective_f()`.
     - Exogeneity and orthogonality (a method, computed when called, with
       `estimator="gmm"` only): `c_stat()`.
 
@@ -513,26 +513,27 @@ class FEIVResults:
         return self._raw.r_squared_overall
 
     @property
-    def weak_instrument_f_statistics(self) -> dict[str, float] | None:
+    def weak_instrument_f_statistics(self) -> dict[str, float]:
         """Weak-instrument diagnostic: partial F-statistic for each
         endogenous variable, keyed by variable name in the order of
-        `x_endog`. `None` for `estimator="gmm"`.
+        `x_endog`.
 
         Tests the excluded instruments' joint significance after
         partialling out `x_exog` and the fixed effects, always under the
         classical (homoskedastic) formula regardless of `cov_type`.
         `first_stage()` has no overall F-statistic to compare it with.
+        Computed the same way for both `estimator="2sls"` and
+        `estimator="gmm"`.
         """
         stats = self._raw.weak_instrument_f_statistics
-        if stats is None:
-            return None
         return {name: stats[name] for name in self._x_endog}
 
     @property
     def weak_instrument_f_df_num(self) -> int | None:
         """Numerator degrees of freedom of the weak-instrument F
         statistics (the number of excluded instruments; the same for
-        every endogenous variable). `None` for `estimator="gmm"`."""
+        every endogenous variable). Never `None`, because `x_endog`
+        always has at least one variable."""
         return self._raw.weak_instrument_f_df_num
 
     @property
@@ -540,7 +541,8 @@ class FEIVResults:
         """Denominator degrees of freedom of the weak-instrument F
         statistics (residual degrees of freedom of the first-stage
         regressions after the absorbed fixed effects; the same for every
-        endogenous variable). `None` for `estimator="gmm"`."""
+        endogenous variable). Never `None`, because `x_endog`
+        always has at least one variable."""
         return self._raw.weak_instrument_f_df_denom
 
     @property

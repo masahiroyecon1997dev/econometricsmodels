@@ -4,39 +4,26 @@
 
 use statrs::distribution::StudentsT;
 
+use super::super::common::FeIvInput;
 use super::super::common::{
-    FeIvInput, WithinPrepared, in_first_stage, mat_from_columns, prepare_within,
+    FirstStageArgs, FirstStageWithin, FirstStages, WithinPrepared, WuHausmanContext, effect_names,
+    fe_wu_hausman_test, mat_from_columns, pick_absorbed, prepare_within, run_first_stages,
     structural_fit_is_perfect,
 };
+use super::FeTwoSlsEstimator;
 use super::sargan::fe_sargan_test;
-use super::weak_instruments::first_stage_partial_f;
-use super::wu_hausman::{FirstStageSummary, WuHausmanContext, fe_wu_hausman_test};
-use super::{FeTwoSlsEstimator, FirstStageWithin};
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
-    PanelCov, PanelCovInput, PanelDimension, PanelError, PanelStructure, overall_f_test,
-    panel_cov_params,
+    PanelCov, PanelCovInput, PanelError, PanelStructure, overall_f_test, panel_cov_params,
 };
 use crate::panel::fe::{
-    AbsorbedEffects, FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, WithinOutput,
-    fe_r_squared_between, fe_r_squared_overall,
+    FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, fe_r_squared_between,
+    fe_r_squared_overall,
 };
 use crate::shared::error::CommonError;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::instrumental_variables::two_sls_point_estimate;
 use crate::shared::orthonormal::OrthonormalDesign;
-
-/// 列の位置で選んだ列の吸収した効果（`absorbed[列][次元][水準]`から、`y`の列と`x`の列を取り出す）。
-fn pick_absorbed(
-    absorbed: &Option<Vec<Vec<Vec<f64>>>>,
-    y_column: usize,
-    x_columns: impl Iterator<Item = usize>,
-) -> Option<AbsorbedEffects> {
-    absorbed.as_ref().map(|per_column| AbsorbedEffects {
-        y: per_column[y_column].clone(),
-        x: x_columns.map(|j| per_column[j].clone()).collect(),
-    })
-}
 
 /// [`FeTwoSlsEstimator::fit_with_first_stages`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 ///
@@ -49,14 +36,15 @@ pub(super) fn fit_fe_two_sls<T>(
     cov_type: FeCovType,
     confidence_level: f64,
     absorption: &FeAbsorption,
-    mut consume: impl FnMut(&str, FeEstimator) -> T,
+    consume: impl FnMut(&str, FeEstimator) -> T,
 ) -> Result<(FeTwoSlsEstimator, Vec<T>), PanelError> {
     // faerのグローバル並列度を`Par::Seq`に固定する（`FeEstimator::fit`と同じ理由）。
     crate::shared::parallelism::ensure_serial();
 
     let groups = input.index().effect_codes();
     let n = input.nobs();
-    let (k_exog, k_endog, k_instruments) = (input.k_exog(), input.k_endog(), input.k_instruments());
+    let k_endog = input.k_endog();
+    let k_instruments = input.k_instruments();
     let k = input.k();
     let WithinPrepared {
         levels,
@@ -80,78 +68,38 @@ pub(super) fn fit_fe_two_sls<T>(
     let y_tilde = &tilde[0];
     let df_resid = n - df_model;
 
-    // 第一段階: `x̃_endog[j] ~ x̃_exog + 操作変数`。変換済みの列を使い回す。
-    let effect_names: Vec<String> = (0..groups.len())
-        .map(|d| {
-            input
-                .index()
-                .effect_name(PanelDimension::new(d))
-                .to_string()
+    // 第一段階: `x̃_endog[j] ~ x̃_exog + 操作変数`。変換済みの列を使い回す（固定効果つきGMMと共有）。
+    let effect_names = effect_names(&input);
+    let FirstStages {
+        consumed,
+        weak_instrument_f,
+        summaries: mut first_stage_summaries,
+    } = run_first_stages(
+        &FirstStageArgs {
+            input: &input,
+            effects,
+            cov_type: &cov_type,
+            confidence_level,
+            effect_names: &effect_names,
+            tilde: &tilde,
+            absorbed: &absorbed,
+            noise,
+            neffects,
+            exog_range: &exog_range,
+            instrument_range: &instrument_range,
+        },
+        consume,
+    )?;
+    // 当てはめ値 = 変換後の内生変数 − 第一段階の残差。
+    let fitted_endog: Vec<Vec<f64>> = (0..k_endog)
+        .map(|j| {
+            tilde[endog_range.start + j]
+                .iter()
+                .zip(&first_stage_summaries[j].residuals)
+                .map(|(endog, residual)| endog - residual)
+                .collect()
         })
         .collect();
-    let mut first_stage_names = input.x_exog_names().to_vec();
-    first_stage_names.extend(input.instrument_names().iter().cloned());
-
-    let mut consumed: Vec<T> = Vec::with_capacity(k_endog);
-    let mut first_stage_summaries: Vec<FirstStageSummary> = Vec::with_capacity(k_endog);
-    let mut weak_instrument_f = Vec::with_capacity(k_endog);
-    let mut fitted_endog: Vec<Vec<f64>> = Vec::with_capacity(k_endog);
-    for j in 0..k_endog {
-        let endog_name = &input.x_endog_names()[j];
-        let stage_x: Vec<Vec<f64>> = input
-            .x_exog()
-            .iter()
-            .chain(input.instruments())
-            .cloned()
-            .collect();
-        let stage_input = FeInput::from_effect_groups_owned(
-            input.x_endog()[j].clone(),
-            stage_x,
-            first_stage_names.clone(),
-            groups.to_vec(),
-            endog_name.clone(),
-        )
-        .map_err(|err| in_first_stage(err, endog_name))?
-        .with_effect_names(effect_names.clone());
-
-        let endog_column = 1 + k_exog + j;
-        let x_columns = exog_range.clone().chain(instrument_range.clone());
-        let within = WithinOutput {
-            y: tilde[endog_column].clone(),
-            x: x_columns.clone().map(|c| tilde[c].clone()).collect(),
-            absorbed: pick_absorbed(&absorbed, endog_column, x_columns),
-            noise,
-        };
-        let stage = FeEstimator::fit_from_within(
-            stage_input,
-            effects,
-            cov_type.clone(),
-            confidence_level,
-            within,
-            false,
-        )
-        .map_err(|err| in_first_stage(err, endog_name))?;
-
-        // 当てはめ値 = 変換後の内生変数 − 第一段階の残差。
-        let fitted: Vec<f64> = (0..n)
-            .map(|i| tilde[endog_column][i] - stage.residuals().get(i, 0))
-            .collect();
-        fitted_endog.push(fitted);
-
-        // 弱操作変数の部分F統計量（診断）は第一段階の残差平方和と係数の数だけを使うので、手放す前に求める。
-        // 内生変数ごとに第一段階の直後に求めるため、複数の失敗が同時に起きる入力では、最初に失敗した
-        // 内生変数のエラーが返る。
-        let f = first_stage_partial_f(&stage, k_exog, k_instruments, neffects)
-            .map_err(|err| in_first_stage(err.into(), endog_name))?;
-        weak_instrument_f.push((endog_name.clone(), f));
-        first_stage_summaries.push(FirstStageSummary {
-            params: (0..stage.params().nrows())
-                .map(|l| *stage.params().get(l, 0))
-                .collect(),
-            residuals: (0..n).map(|i| *stage.residuals().get(i, 0)).collect(),
-        });
-        consumed.push(consume(endog_name, stage));
-    }
 
     // 点推定。`X̃`は実際の内生変数、`X̂`は内生変数を第一段階の当てはめ値に置き換えたもの。
     // `X̃`・`ỹ`・当てはめ値は点推定の後に使わないので、ブロックを抜けるときに解放する
@@ -277,18 +225,8 @@ pub(super) fn fit_fe_two_sls<T>(
     // 弱操作変数診断（Cragg-Donald・Kleibergen-Paap・有効F）が使う、第一段階のwithin変換済みの行列。
     // `[x̃_exog, z̃]`は全ての第一段階で同じ列なので1つだけ持つ（第一段階ごとに持たない）。持ったら、
     // within変換した列は解放する。
-    let first_stage_within = (k_endog > 0).then(|| {
-        let first_stage_x: Vec<&[f64]> = exog_range
-            .clone()
-            .chain(instrument_range.clone())
-            .map(|c| tilde[c].as_slice())
-            .collect();
-        let endog_columns: Vec<&[f64]> = endog_range.clone().map(|c| tilde[c].as_slice()).collect();
-        FirstStageWithin {
-            x: mat_from_columns(n, &first_stage_x),
-            y_endog: mat_from_columns(n, &endog_columns),
-        }
-    });
+    let first_stage_within =
+        FirstStageWithin::from_tilde(n, &tilde, &exog_range, &endog_range, &instrument_range);
     drop(tilde);
 
     // 構造式の`y`・実際の`X`（変換前）。R²のbetween・overallと`fixed_effects()`が使う。

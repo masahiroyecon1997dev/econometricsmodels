@@ -71,9 +71,13 @@
 
 use faer::Mat;
 
-use super::common::{FeIvInput, FeWuHausmanTest, FirstStageWithin, WeakInstrumentView};
+use super::common::{
+    FeIvInput, FeWuHausmanTest, FirstStageWithin, WeakInstrumentView, structural_fe_input,
+};
 use crate::panel::common::PanelError;
-use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator};
+use crate::panel::fe::{
+    AbsorbedEffects, FeAbsorption, FeCovType, FeEffects, FeEstimator, FixedEffects,
+};
 use crate::shared::effective_f::EffectiveF;
 use crate::shared::kleibergen_paap::KleibergenPaap;
 use crate::shared::weak_instruments::CraggDonald;
@@ -129,6 +133,9 @@ pub struct FeGmmEstimator {
     weak_instrument_f: Vec<(String, f64)>,
     /// Wu-Hausman内生性検定。内生変数が無い、または補助回帰が診断だけの理由で失敗したときは`None`。
     wu_hausman: Option<FeWuHausmanTest>,
+    /// 交互射影が`y`・`x_exog`・`x_endog`の列から引いた各次元の効果（構造式の列の順）。閉形式の
+    /// 1-wayとバランスな2-wayは`None`。`fixed_effects()`が使う。
+    absorbed: Option<AbsorbedEffects>,
 }
 
 impl FeGmmEstimator {
@@ -460,5 +467,22 @@ impl FeGmmEstimator {
     /// Wu-Hausman内生性検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic()`と同じ条件で`None`。
     pub fn wu_hausman_df(&self) -> Option<(usize, usize)> {
         self.wu_hausman.map(|test| test.df)
+    }
+
+    /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する。構造式の`y`・実際の`X`・GMMの係数`β̂`から
+    /// `FeEstimator::fixed_effects`と同じ規約で計算する（`α_i = ȳ_i − x̄_i'β̂`、`X`は実際の内生変数。
+    /// `FeTwoSlsEstimator::fixed_effects`と同じ復元で、係数だけが違う）。構造式の`y`・`X`は、推定量が
+    /// 複製を持たないので、呼び出し時に`input`から組み立てる。
+    ///
+    /// # Errors
+    /// `input`が構築時に検証済みなので、通常は到達しない（`FeInput`の構築の失敗）。
+    pub fn fixed_effects(&self) -> Result<FixedEffects, PanelError> {
+        let structural = structural_fe_input(&self.input, &self.param_names)?;
+        Ok(crate::panel::fe::fixed_effects_of(
+            &structural,
+            self.effects,
+            &self.params,
+            self.absorbed.as_ref(),
+        ))
     }
 }

@@ -4,7 +4,7 @@
 //! `fit`自体は`#[cfg(test)]`から呼べない（`SelectedData`がGILを要求する）。検証は`maturin develop`後の
 //! Pythonからの数値照合で行う。純Rust部分は`fit_frame`（`&DataFrame`だけを取り、`py.detach`の中で走る）。
 
-use engine::panel::fe::{FeAbsorption, FeEstimator};
+use engine::panel::fe::{FeAbsorption, FeEstimator, FixedEffects};
 use engine::panel::fe_iv::gmm::{CStatistic, CStatisticTarget, FeGmmEstimator, fe_gmm_c_statistic};
 use engine::panel::fe_iv::two_sls::FeTwoSlsEstimator;
 use polars::prelude::DataFrame;
@@ -63,6 +63,14 @@ impl Estimated {
         }
         .map_err(panel_error_to_pyerr)?;
         Ok(KleibergenPaapOutput::from_engine(statistics))
+    }
+
+    /// 固定効果自体。どちらの推定量でも、構造式の`y`・実際の`X`・その推定量の係数から復元する。
+    pub(super) fn fixed_effects(&self) -> PyResult<FixedEffects> {
+        match self {
+            Self::TwoSls { estimator, .. } => Ok(estimator.fixed_effects()),
+            Self::Gmm { estimator, .. } => estimator.fixed_effects().map_err(panel_error_to_pyerr),
+        }
     }
 
     pub(super) fn effective_f(&self, alpha: f64) -> PyResult<EffectiveFOutput> {

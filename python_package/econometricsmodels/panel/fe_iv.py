@@ -268,7 +268,7 @@ class FEIVResults:
     - Methods: `first_stage()` (one `FEResults` per endogenous
       variable; the same for both estimators), `fixed_effects()` (the
       estimated effect of every group, for each effects column of the
-      model; `estimator="2sls"` only), `params_table()`.
+      model), `params_table()`.
     - Weak-instrument diagnostics (methods, computed when called, the
       same for both estimators): `cragg_donald()`,
       `kleibergen_paap()`, `effective_f()`.
@@ -688,15 +688,11 @@ class FEIVResults:
         This is a post-estimation computation: it is never done by
         `fit()`. It re-reads the variables from the data passed to
         `fit()` and estimates the model again on every call, so it costs
-        about as much as `fit()`. Available with `estimator="2sls"`
-        only.
+        about as much as `fit()`. The coefficients are those of the
+        estimator used (`estimator="2sls"` or `estimator="gmm"`).
 
         Returns:
             The fixed effects, shaped as described above.
-
-        Raises:
-            ValidationError: The model was fitted with
-                `estimator="gmm"`.
         """
         return self._raw.fixed_effects()
 

@@ -13,7 +13,7 @@ use crate::panel::common::{
     ColumnRole, PanelError, absorbed_parameters, ensure_no_singleton_groups,
     ensure_no_zero_variance_columns,
 };
-use crate::panel::fe::{FeAbsorption, FeEffects, WithinColumns, within_transform_columns};
+use crate::panel::fe::{FeAbsorption, FeEffects, FeInput, WithinColumns, within_transform_columns};
 use crate::shared::error::{CommonError, ErrorInfo};
 use crate::shared::error_catalog::Stage;
 use crate::shared::goodness_of_fit::is_perfect_fit;
@@ -204,6 +204,31 @@ pub(in crate::panel::fe_iv) fn prepare_within<'a>(
         endog_range,
         instrument_range,
     })
+}
+
+/// 構造式の`y`・実際の`X = [x_exog, x_endog]`（変換前）の`FeInput`。固定効果の復元が使う。`param_names`は
+/// 係数名（`x_exog`、`x_endog`の順）。列・索引を複製するので、`fit`が保持せず、呼び出し時に作る。
+///
+/// # Errors
+/// `FeInput`の構築の失敗（`input`が構築時に検証済みなので、通常は到達しない）。
+pub(in crate::panel::fe_iv) fn structural_fe_input(
+    input: &FeIvInput,
+    param_names: &[String],
+) -> Result<FeInput, PanelError> {
+    let structural_x: Vec<Vec<f64>> = input
+        .x_exog()
+        .iter()
+        .chain(input.x_endog())
+        .cloned()
+        .collect();
+    Ok(FeInput::from_effect_groups_owned(
+        input.y().to_vec(),
+        structural_x,
+        param_names.to_vec(),
+        input.index().effect_codes().to_vec(),
+        input.dep_var_name().to_string(),
+    )?
+    .with_effect_names(super::first_stage::effect_names(input)))
 }
 
 /// 列の絶対値の最大（完全適合・分散ゼロの判定の尺度に使う）。

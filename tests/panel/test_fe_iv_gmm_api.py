@@ -203,16 +203,12 @@ def test_gmm_provides_the_first_stage_and_its_diagnostics(data):
     assert result.effective_f().statistic > 0.0
 
 
-def test_what_the_gmm_engine_does_not_compute_is_an_error(data):
-    """固定効果の推定値は、GMMでは今は持たない（`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`）。"""
+def test_gmm_provides_the_fixed_effects(data):
+    """固定効果の復元もGMMで使える（GMMの係数で復元する）。"""
     result = _fit(data, ["a"])
-    with raises_error(
-        ErrorCode.METHOD_NOT_AVAILABLE_FOR_ESTIMATOR,
-        method="fixed_effects()",
-        estimator="gmm",
-        supported="2sls",
-    ):
-        result.fixed_effects()
+    effects = result.fixed_effects()
+    assert list(effects) == ["entity"]
+    assert len(effects["entity"]) == data["entity"].n_unique()
 
 
 def test_effective_f_checks_its_argument_for_gmm_too(data):

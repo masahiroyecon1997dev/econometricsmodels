@@ -13,8 +13,8 @@
 //!
 //! 第一段階・弱操作変数診断（部分F・`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）・Wu-Hausmanは
 //! 第一段階だけに依存するので、どちらの推定量でも同じ（`common/first_stage.rs`を共有）。`estimator="2sls"`は
-//! 推論がt・F、過剰識別がSargan、`fixed_effects()`を持つ。`estimator="gmm"`は推論が正規分布・χ²、過剰識別が
-//! Hansen J、事後診断が`c_stat()`で、`fixed_effects()`は今は持たない。持たないメソッドは
+//! 推論がt・F、過剰識別がSargan。`estimator="gmm"`は推論が正規分布・χ²、過剰識別がHansen J、事後診断が
+//! `c_stat()`。`fixed_effects()`はどちらの推定量でも、その推定量の係数から復元する。持たないメソッドは
 //! `METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`。
 
 use std::collections::HashMap;
@@ -91,8 +91,8 @@ impl crate::shared::pickle::PickleField for Vec<(String, FEResult)> {
 /// endogeneity test that uses the weight. The first-stage regressions and the Cragg-Donald,
 /// Kleibergen-Paap and effective F diagnostics are not fields: they are the methods
 /// `first_stage()`, `cragg_donald()`, `kleibergen_paap()` and `effective_f()`, available with both
-/// estimators. The fixed effects themselves are the method `fixed_effects()`, available with
-/// `estimator="2sls"` only. The C statistic is the method `c_stat()`, available with
+/// estimators. The fixed effects themselves are the method `fixed_effects()`, also available
+/// with both estimators. The C statistic is the method `c_stat()`, available with
 /// `estimator="gmm"` only.
 // `Clone`を派生しない: 第一段階の`FEResult`は複製できるが、`source_data`（`Py<PyAny>`）が
 // GILなしでは複製できない（`IVResult`と同じ理由）。
@@ -548,27 +548,16 @@ impl FEIVResult {
     }
 
     /// The fixed effects themselves, recovered post-hoc from the fitted coefficients
-    /// (`α_i = ȳ_i - x̄_i'β̂` with the actual endogenous regressors). Available with
-    /// `estimator="2sls"` only.
+    /// (`α_i = ȳ_i - x̄_i'β̂` with the actual endogenous regressors). Available with both
+    /// estimators; the coefficients are those of the estimator used.
     ///
     /// Always a `dict[str, dict[str, float]]` keyed by the column names in `effects`, then by
     /// group. The normalization is the same as `FEResults.fixed_effects()`. It re-reads the
     /// data passed to `fit()` and estimates the model again on every call, so it costs about as
     /// much as `fit()`.
-    ///
-    /// Raises
-    /// ------
-    /// ValidationError
-    ///     The model was fitted with `estimator="gmm"`.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         guard(|| {
-            self.require_estimator("fixed_effects()", EstimatorKind::TwoSls)?;
-            let fixed = self.with_estimator(py, |estimated| match estimated {
-                Estimated::TwoSls { estimator, .. } => Ok(estimator.fixed_effects()),
-                Estimated::Gmm { .. } => Err(internal_error(
-                    "the fixed effects of a GMM re-estimation were requested before they were supported",
-                )),
-            })?;
+            let fixed = self.with_estimator(py, Estimated::fixed_effects)?;
             fixed_effects_dict(py, &self.effects, &fixed)
         })
     }

@@ -12,8 +12,8 @@ use crate::panel::fe::{
 };
 use crate::panel::fe_iv::common::{
     FeIvInput, FirstStageArgs, FirstStageWithin, FirstStages, WithinPrepared, WuHausmanContext,
-    effect_names, fe_wu_hausman_test, mat_from_columns, prepare_within, run_first_stages,
-    structural_fit_is_perfect,
+    effect_names, fe_wu_hausman_test, mat_from_columns, pick_absorbed, prepare_within,
+    run_first_stages, structural_fit_is_perfect,
 };
 use crate::shared::error::CommonError;
 use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
@@ -258,6 +258,8 @@ pub(super) fn fit_fe_gmm<T>(
     let first_stage_within =
         FirstStageWithin::from_tilde(n, &tilde, &exog_range, &endog_range, &instrument_range);
     drop(tilde);
+    let structural_absorbed = pick_absorbed(&absorbed, 0, 1..1 + k);
+    drop(absorbed);
 
     let estimator = FeGmmEstimator {
         input,
@@ -288,6 +290,7 @@ pub(super) fn fit_fe_gmm<T>(
         first_stage_within,
         weak_instrument_f,
         wu_hausman,
+        absorbed: structural_absorbed,
     };
     Ok((estimator, consumed))
 }

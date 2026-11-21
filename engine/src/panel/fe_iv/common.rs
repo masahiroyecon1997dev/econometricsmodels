@@ -19,7 +19,8 @@ pub(in crate::panel::fe_iv) use first_stage::{
 };
 pub use input::{FeIvInput, RoleColumns};
 pub(in crate::panel::fe_iv) use prepare::{
-    WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
+    WithinPrepared, mat_from_columns, prepare_within, structural_fe_input,
+    structural_fit_is_perfect,
 };
 pub(in crate::panel::fe_iv) use weak_instruments::WeakInstrumentView;
 pub(in crate::panel::fe_iv) use wu_hausman::{

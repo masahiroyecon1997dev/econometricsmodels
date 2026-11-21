@@ -3,12 +3,11 @@
 //! IV本体との照合・fixestとの照合が済んでいる）。
 
 use super::{
-    all_rows, entity_labels, fit_with, fit_with_stages, input_spec, third_labels, time_labels,
-    two_step,
+    STRUCTURES, all_rows, entity_labels, fit_with, fit_with_stages, model, time_labels, two_step,
+    unbalanced_rows,
 };
 use crate::panel::common::{PanelError, TimeKeys};
-use crate::panel::fe::{FeCovType, FeEffects};
-use crate::panel::fe_iv::common::FeIvInput;
+use crate::panel::fe::FeCovType;
 use crate::panel::fe_iv::gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
 use crate::panel::fe_iv::two_sls::FeTwoSlsEstimator;
 use crate::shared::error::{CommonError, ErrorInfo};
@@ -20,66 +19,6 @@ fn assert_close(actual: f64, expected: f64, rtol: f64, label: &str) {
         "{label}: {actual} vs {expected}"
     );
 }
-
-fn unbalanced_rows() -> Vec<usize> {
-    all_rows()
-        .into_iter()
-        .filter(|r| ![3, 17, 22, 30].contains(r))
-        .collect()
-}
-
-/// 構造の名前から、入力と固定効果の方向を作る（推定が入力を消費するので、呼ぶたびに作る）。
-fn model(structure: &str) -> (FeIvInput, FeEffects) {
-    let rows = all_rows();
-    match structure {
-        "one_way" => (
-            input_spec(&rows, &[entity_labels()], 1, 1, 2),
-            FeEffects::OneWay,
-        ),
-        "just_identified" => (
-            input_spec(&rows, &[entity_labels()], 1, 1, 1),
-            FeEffects::OneWay,
-        ),
-        "two_endogenous" => (
-            input_spec(&rows, &[entity_labels()], 1, 2, 3),
-            FeEffects::OneWay,
-        ),
-        "two_way" => (
-            input_spec(&rows, &[entity_labels(), time_labels()], 1, 1, 2),
-            FeEffects::TwoWay,
-        ),
-        "two_way_unbalanced" => (
-            input_spec(
-                &unbalanced_rows(),
-                &[entity_labels(), time_labels()],
-                1,
-                1,
-                2,
-            ),
-            FeEffects::TwoWay,
-        ),
-        "three_way" => (
-            input_spec(
-                &rows,
-                &[entity_labels(), time_labels(), third_labels()],
-                1,
-                1,
-                2,
-            ),
-            FeEffects::MultiWay,
-        ),
-        other => panic!("unknown structure {other}"),
-    }
-}
-
-const STRUCTURES: [&str; 6] = [
-    "one_way",
-    "just_identified",
-    "two_endogenous",
-    "two_way",
-    "two_way_unbalanced",
-    "three_way",
-];
 
 fn cov_types(structure: &str) -> Vec<FeCovType> {
     let mut covs = vec![

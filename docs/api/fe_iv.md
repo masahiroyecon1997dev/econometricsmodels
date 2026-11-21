@@ -11,12 +11,12 @@ Pass an `FEIVOptions` as `options=`. `effects` is an argument of `FEIV`, not an 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
 | `estimator` | `"2sls"` or `"gmm"` | `"2sls"` | |
-| `cov_type` | Standard error type: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, `"dk"` | `"cluster"` | `"hc0"` is not available. With `estimator="2sls"` also used by the first-stage regressions, by `kleibergen_paap()` and `effective_f()`, and by the Wu-Hausman test; with `estimator="gmm"` independent of `gmm_weight_type` |
+| `cov_type` | Standard error type: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, `"dk"` | `"cluster"` | `"hc0"` is not available. Also used by the first-stage regressions, by `kleibergen_paap()` and `effective_f()`, and by the Wu-Hausman test; with `estimator="gmm"` independent of `gmm_weight_type`. With `estimator="2sls"` it also sets the weight of `c_stat()`, except that `"dk"` is not allowed there |
 | `cluster` | Column that defines the clusters | `None` (the first column of `effects`) | With `cov_type="cluster"` or, with GMM, `gmm_weight_type="cluster"` |
 | `dk_time` | Column that defines the time periods of the Driscoll-Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `effects` |
 | `dk_bandwidth` | Kernel bandwidth | `None` (automatic) | Only with `cov_type="dk"` |
 | `gmm_type` | `"one_step"` (the fixed weight \((\tilde Z'\tilde Z)^{-1}\), the two-stage least squares estimate), `"two_step"` or `"iterated"` (repeat the second step until the coefficients converge) | `None` (`"two_step"`) | `estimator="gmm"` only |
-| `gmm_weight_type` | Weight matrix of the point estimate: `"classical"`, `"robust"` or `"cluster"` | `None` (`"cluster"`) | `estimator="gmm"` only; not with `gmm_type="one_step"`, which has no weight type; there is no `"hac"`. Also the weight used by `c_stat()` |
+| `gmm_weight_type` | Weight matrix of the point estimate: `"classical"`, `"robust"` or `"cluster"` | `None` (`"cluster"`) | `estimator="gmm"` only; not with `gmm_type="one_step"`, which has no weight type; there is no `"hac"`. Also the weight used by `c_stat()` (with `estimator="2sls"` the weight follows `cov_type`) |
 | `gmm_max_iter` | Maximum number of estimations, 3 to 10000 | `None` (`100`) | `gmm_type="iterated"` only |
 | `gmm_tol` | Convergence tolerance | `None` (`1e-6`) | `gmm_type="iterated"` only. The comparison with the previous coefficients also has an absolute floor of `1e-8` |
 | `raise_on_non_convergence` | Raise an error if iteration does not converge | `None` (`True`) | `gmm_type="iterated"` only |
@@ -39,16 +39,18 @@ Which options go with which setting (an option set where it is not used raises a
 
 ## What each estimator provides
 
-A method that the estimator does not support raises a `ValidationError` (`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`), and a field that it does not support is `None`.
+Every field and method is available with both estimators; there is no result that one of them lacks. The estimators differ in the following:
 
 | Result | `estimator="2sls"` | `estimator="gmm"` |
 |---|---|---|
-| `first_stage()`, `fixed_effects()` | yes | method raises |
-| `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | method raises |
-| `weak_instrument_f_statistics` and its degrees of freedom, `wu_hausman_*` | yes | `None` |
+| `first_stage()`, `fixed_effects()` | yes | yes |
+| `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | yes, the same values |
+| `weak_instrument_f_statistics` and its degrees of freedom, `wu_hausman_*` | yes | yes, the same values |
 | `overid_*` | Sargan | Hansen J |
-| `c_stat()` | method raises | yes |
+| `c_stat()` weight | follows `cov_type` (`"dk"` raises a `ValidationError`) | follows `gmm_weight_type` |
 | `stat_dist`, `wald_dist` | `"t"`, `"f"` | `"normal"`, `"chi2"` |
+
+The first stage, the weak-instrument diagnostics and the Wu-Hausman test depend only on the first stage, so for the same data and `cov_type` they do not depend on the estimator; `fixed_effects()` uses the coefficients of the estimator used.
 
 The fields of the results are listed by purpose at the top of the results class below.
 

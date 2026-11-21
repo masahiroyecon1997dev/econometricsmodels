@@ -84,6 +84,10 @@ fn fit_frame(
 
     let input = OlsInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(least_squares_error_to_pyerr)?;
+    // 抽出した列は`input`（設計行列）に写し終えた。`fit`の間も持ち続けると、QR分解の
+    // 作業領域と重なって、ピークが列`p + 1`本分だけ高くなる。
+    drop(y_slice);
+    drop(x_slices);
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 

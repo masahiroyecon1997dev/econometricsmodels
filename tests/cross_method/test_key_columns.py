@@ -309,13 +309,11 @@ def test_extension_cluster_with_values_is_a_validation_error(
     `cluster`に渡すと、ストレージ型によらず`COLUMN_UNSUPPORTED_DTYPE`
     （列の取り込み時の`INTERNAL_ERROR`にならない）。
     """
-    extension = (
-        pl.col("cluster")
-        .cast(pl.Int64)
-        .cast(storage)
-        .cast(pl.Extension(name, storage))
-    )
-    df = frame.with_columns(extension.alias("cluster"))
+    # polars 1.38.1では`cast`でExtensionにならない（元の型のまま）ので、
+    # コンストラクタでdtypeを指定して作る。
+    values = frame["cluster"].cast(pl.Int64).cast(storage).to_list()
+    extension = pl.Series("cluster", values, dtype=pl.Extension(name, storage))
+    df = frame.with_columns(extension)
 
     with raises_error(
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,

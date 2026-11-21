@@ -4,13 +4,14 @@
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く（`basic`・`reference`・`cov_type`・`validation`・`proptests`等）。
 
 use super::TobitEstimator;
+use super::coordinates::DesignCoordinates;
 use super::fitted::TobitFitted;
 use super::input::TobitInput;
 use super::problem::TobitProblem;
 use super::scaling::TobitScaling;
-use super::statistics::{log_likelihood, ols_initial_params, validate_has_uncensored_observations};
+use super::statistics::{log_likelihood, validate_has_uncensored_observations};
 use crate::nonlinear::common::{
-    MleError, MleFitOptions, orthogonal_inference_for_type, run_solver, scores_needed,
+    MleError, MleFitOptions, cov_params_for_type, run_solver, scores_needed,
     validate_cluster_cov_type, validate_mle_options, validate_sufficient_observations,
 };
 use crate::shared::inference;
@@ -52,8 +53,12 @@ pub(super) fn fit_tobit(
     let y_std = scaling.standardize_y(input.y());
     let lower_std = scaling.standardize_bound(input.lower());
     let upper_std = scaling.standardize_bound(input.upper());
-    let initial_params = ols_initial_params(&x_std, input.x(), &y_std, input.param_names())?;
-    let problem = TobitProblem::from_standardized(x_std, y_std, lower_std, upper_std);
+    // 標準化した設計行列を直交座標`Q = X̃R⁻¹`に移し、`Q`の座標`b = Rβ̃`で最適化する
+    // （`DesignCoordinates`のdocコメント）。ランク判定と条件数のガードもここで行う。
+    let (coordinates, q) = DesignCoordinates::new(&x_std, input.x(), input.param_names())?;
+    drop(x_std);
+    let initial_params = coordinates.initial_params(&q, &y_std);
+    let problem = TobitProblem::from_standardized(q, y_std, lower_std, upper_std);
     // `cov_type`がスコアを使う場合（`scores_needed`）、収束点でのスコア評価に標準化空間の
     // `TobitProblem`が必要になる。`run_solver`は`problem`の所有権を取り込むため、事前に複製しておく。
     let problem_for_scores = scores_needed(&cov_type).then(|| problem.clone());
@@ -72,30 +77,18 @@ pub(super) fn fit_tobit(
     // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
     // 部分的な準完全分離は`NonConvergence`で捕捉される。
 
-    // 標準化空間の内部パラメータ`(β̃, s̃)`を元のスケールの`(β, logσ)`へ逆変換する
-    // （`TobitScaling`のdocコメントの式）。
-    let params_full = scaling.destandardize_params(&output.params);
+    // `Q`の座標の最適解`(b, logσ̃)`を標準化空間`(β̃, s̃)`（`β̃ = R⁻¹b`）に戻し、元のスケールの
+    // `(β, logσ)`へ逆変換する（`TobitScaling`のdocコメントの式）。
+    let params_std = coordinates.standardized_params(&output.params);
+    let params_full = scaling.destandardize_params(&params_std);
     let sigma = params_full[k].exp();
     let params = params_full[..k].to_vec();
 
-    let hessian_std = Mat::from_fn(k + 1, k + 1, |i, j| output.hessian[i][j]);
+    // `cov_type`別の共分散は`Q`の座標（`H`・スコアが良条件）で求め、`R⁻¹`で標準化空間に戻す。
+    let hessian_q = Mat::from_fn(k + 1, k + 1, |i, j| output.hessian[i][j]);
     let scores = problem_for_scores.map(|problem| problem.scores(&output.params));
-    // 傾き（検定対象）を末尾に並べ替えた直交座標で共分散とWald検定の入力を作る
-    // （`orthogonal_inference_for_type`）。並びは`[切片, logσ, 傾き...]`（切片なしは`[logσ, 傾き...]`）。
-    let k_constant = usize::from(input.has_intercept());
-    let order: Vec<usize> = (0..k_constant)
-        .chain(std::iter::once(k))
-        .chain(k_constant..k)
-        .collect();
-    let inference = orthogonal_inference_for_type(
-        &cov_type,
-        &hessian_std,
-        scores.as_ref(),
-        &output.params,
-        n,
-        &order,
-    )?;
-    let cov_params_std = inference.cov_params;
+    let cov_q = cov_params_for_type(&cov_type, &hessian_q, scores.as_ref(), n, k + 1)?;
+    let cov_params_std = coordinates.standardized_covariance(&cov_q);
     // 標準化空間`(β̃, s̃)`の分散共分散行列を、元のスケール`(β, σ)`空間へ
     // `Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`で変換する（`J`は`TobitScaling::param_jacobian`。
     // `x`の列標準化・センタリングの解除と、`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を
@@ -139,6 +132,7 @@ pub(super) fn fit_tobit(
     let bic = -2.0 * llf + (n as f64).ln() * ((k + 1) as f64);
     let df_resid = n - (k + 1);
 
+    let k_constant = usize::from(input.has_intercept());
     let df_model = k - k_constant;
     let (wald_statistic, wald_p_value) = if df_model == 0 {
         // 検定対象の傾き係数が存在しない（切片のみ、または切片も無いモデル）。
@@ -146,15 +140,12 @@ pub(super) fn fit_tobit(
         // （0除算・自由度0のカイ二乗分布の構築を避ける）。
         (f64::NAN, f64::NAN)
     } else {
-        // 検定対象は`β`の傾き係数で、`σ`は含まれない。標準化空間の直交座標`(b̃, M̃)`の末尾`df_model`
-        // 成分が傾きで、先頭の`k_constant + 1`個（切片と`logσ`）は検定しない。標準化は傾きを対角行列で
-        // 変換するだけなので、統計量は元のスケールで`β_S'V_SS⁻¹β_S`を作った値と同じ。
-        wald_chi2_test(
-            &inference.coordinates,
-            &inference.meat,
-            k_constant + 1,
-            df_model,
-        )?
+        // 検定対象は`β`の傾き係数で、`σ`は含まれない。`Q`の座標`b = Rβ̃`は`R`が上三角で、先頭が
+        // 切片・末尾が傾きなので、末尾`df_model`個の傾きの統計量は`b_S'V_b,SS⁻¹b_S`（`V_b`は
+        // `Q`の座標の共分散）。標準化は傾きを対角行列で変換するだけなので、元のスケールの
+        // `β_S'V_SS⁻¹β_S`と同じ値になる。
+        let b = Mat::from_fn(k, 1, |i, _| output.params[i]);
+        wald_chi2_test(&b, &cov_q, k_constant, df_model)?
     };
 
     Ok(TobitEstimator {

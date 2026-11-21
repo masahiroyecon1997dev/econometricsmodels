@@ -57,24 +57,44 @@ fn fit_returns_validation_error_when_cluster_count_equals_slopes() {
     );
 }
 
-/// `fit`は非収束（`raise_on_non_convergence=false`）でも常に収束点（打ち切り点）の
-/// Hessianから`cov_params`を計算しようとするため、その打ち切り点でHessianが
-/// 不定符号・特異な場合は`MleError::SingularHessian`が返る（Newtonの最適化過程
-/// 自体は成功したが、SE計算のための逆行列計算が失敗するケース。`ols_initial_params`
-/// 由来の`SingularDesignMatrix`（設計行列`X`自体の特異性、最適化前に発生）とは
-/// 異なるエラー経路であることに注意）。`censored_regression_input`で`max_iter=1`
-/// にすると、Newton初回ステップ後の打ち切り点で実際にこれが発生することを実測で
-/// 確認済み（`max_iter=2`以降は`cov_params`計算が安定する。真の収束は`max_iter=11`、
-/// `fit_returns_unconverged_result_without_raising_when_raise_on_non_convergence_is_false`
-/// のコメント参照）。
+/// 打ち切りの有無が`x`で完全に決まり、非打ち切り観測の当てはまりも完全なデータ
+/// （`y = max(0, 100·x1 + 0.5·x2)`）。`σ→0`へ退化するので、どの`solver`・`max_iter`でも
+/// 打ち切り点のHessianが特異になる。
+fn noise_free_separation_input() -> TobitInput {
+    let n = 120;
+    let x1: Vec<f64> = (0..n)
+        .map(|i| -2.0 + 4.0 * (i as f64) / ((n - 1) as f64))
+        .collect();
+    let x2: Vec<f64> = (0..n).map(|i| (0.7 * i as f64).sin()).collect();
+    let y: Vec<f64> = (0..n)
+        .map(|i| (100.0 * x1[i] + 0.5 * x2[i]).max(0.0))
+        .collect();
+    TobitInput::from_columns(
+        &y,
+        &[x1, x2],
+        vec!["x1".to_string(), "x2".to_string()],
+        true,
+        "y".to_string(),
+        Some(0.0),
+        None,
+    )
+    .unwrap()
+}
+
+/// `fit`は非収束（`raise_on_non_convergence=false`）でも常に打ち切り点のHessianから
+/// `cov_params`を計算しようとするため、その打ち切り点でHessianが特異なら
+/// `MleError::SingularHessian`が返る（最適化自体は成功したが、SE計算のための逆行列計算が
+/// 失敗するケース。設計行列`X`自体の特異性（`SingularDesignMatrix`、最適化前に発生）とは
+/// 異なるエラー経路）。`noise_free_separation_input`は`σ→0`に退化するので、`max_iter`を
+/// 小さくした打ち切り点で実際にこれが起きる。
 #[test]
 fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point() {
-    let input = censored_regression_input();
+    let input = noise_free_separation_input();
     let result = TobitEstimator::fit(
         input,
         MleFitOptions {
             solver: SolverType::Newton,
-            max_iter: 1,
+            max_iter: 5,
             tol: 1e-12,
             raise_on_non_convergence: false,
             cov_type: CovType::Classical,
@@ -99,10 +119,10 @@ fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_trunc
  {
     for cov_type in [CovType::Hc0, CovType::Hc1] {
         let result = TobitEstimator::fit(
-            censored_regression_input(),
+            noise_free_separation_input(),
             MleFitOptions {
                 solver: SolverType::Newton,
-                max_iter: 1,
+                max_iter: 5,
                 tol: 1e-12,
                 raise_on_non_convergence: false,
                 cov_type: cov_type.clone(),
@@ -121,21 +141,12 @@ fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_trunc
 #[test]
 fn fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_truncated_point_with_cluster()
  {
-    let groups = vec![
-        "a".to_string(),
-        "a".to_string(),
-        "a".to_string(),
-        "a".to_string(),
-        "b".to_string(),
-        "b".to_string(),
-        "b".to_string(),
-        "b".to_string(),
-    ];
+    let groups: Vec<String> = (0..120).map(|i| format!("g{}", i % 4)).collect();
     let result = TobitEstimator::fit(
-        censored_regression_input(),
+        noise_free_separation_input(),
         MleFitOptions {
             solver: SolverType::Newton,
-            max_iter: 1,
+            max_iter: 5,
             tol: 1e-12,
             raise_on_non_convergence: false,
             cov_type: CovType::Cluster {
@@ -240,7 +251,7 @@ fn fit_returns_insufficient_observations_error() {
 
 #[test]
 fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_data() {
-    // x2=2*x1（完全な多重共線性）。ols_initial_paramsのQR分解が特異性を検出し、
+    // x2=2*x1（完全な多重共線性）。`DesignCoordinates::new`のランク判定が特異性を検出し、
     // Newton法が一度も反復する前にエラーを返す（SingularHessian
     // とは区別されるバリアント`SingularDesignMatrix`の検証）。
     // n=6 > 総パラメータ数k+1=4（切片1+x1+x2+logσ1）で`InsufficientObservations`を
@@ -327,7 +338,7 @@ fn fit_returns_insufficient_clusters_error_when_only_one_group() {
 
 /// Logit（`fit_returns_singular_opg_matrix_error_for_perfectly_collinear_
 /// design_matrix`）はxの完全な多重共線性（x2=2*x1）でOPG行列`Σᵢsᵢsᵢ'`を特異にして
-/// いるが、Tobitでは`ols_initial_params`が最適化前にxのQRベースの階数検定を行うため
+/// いるが、Tobitでは`DesignCoordinates::new`が最適化前にxのQRベースの階数検定を行うため
 /// （`fit_returns_singular_design_matrix_error_for_perfectly_collinear_data`参照）、
 /// xが完全に多重共線だと最適化に入る前に`SingularDesignMatrix`になり同じ手法は使えない。
 ///

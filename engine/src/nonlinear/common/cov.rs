@@ -9,9 +9,6 @@ use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::shared::orthonormal::{
-    OrthonormalDesign, covariance_from_factor, information_factor, solve_upper_from_right,
-};
 
 // `cov_type`ごとの係数分散共分散行列の共通計算。モデル固有の尤度計算には依存せず、
 // 収束点で評価した`H`（対数尤度のHessian、k×k）と`scores`（観測ごとのスコア行列、n×k、
@@ -161,7 +158,7 @@ pub(crate) fn scores_needed(cov_type: &CovType) -> bool {
 
 /// `cov_type`に応じた標準化空間の係数分散共分散行列（`k×k`、`k`は呼び出し側が持つ全パラメータ数）。
 /// Logit/Probitの`fit()`で同一の振り分けになるため集約している（Tobitは検定のために直交座標で
-/// 作る[`orthogonal_inference_for_type`]を使う）。
+/// 作らない（`tobit/coordinates.rs`）。
 ///
 /// `scores`は[`scores_needed`]が`true`のときの観測ごとのスコア行列（`n×k`）。`None`のまま
 /// `Classical`以外が渡されるのは呼び出し側の実装の誤りで、`CommonError::Internal`を返す。
@@ -196,113 +193,10 @@ pub(crate) fn cov_params_for_type(
     }
 }
 
-/// `cov_type`別の係数共分散と、全体Wald検定に使う直交座標の組。`order`で並べ替えた
-/// パラメータ（検定対象を末尾に置く）での値。
-#[derive(Debug, Clone)]
-pub(crate) struct OrthogonalInference {
-    /// 元の並びの係数共分散`V`（`k×k`）。
-    pub(crate) cov_params: Mat<f64>,
-    /// 並べ替えたパラメータの直交座標`b̃ = Rθ`（`k×1`）。
-    pub(crate) coordinates: Mat<f64>,
-    /// 直交座標のミート`M̃`（`k×k`、小標本補正込み）。`V = R⁻¹M̃R⁻ᵀ`（並べ替えた並び）。
-    pub(crate) meat: Mat<f64>,
-}
-
-/// [`cov_params_for_type`]と同じ`cov_type`別の共分散を、`R'R`の因子`R`で作った直交座標で計算する
-/// （`shared::orthonormal`）。`-H⁻¹`と`Ψ`を明示的に作って`H⁻¹ΨH⁻¹`とかけ合わせず、
-/// `V = R⁻¹M̃R⁻ᵀ`・`M̃ = Σ s̃_i s̃_i'`（`s̃_i = R⁻ᵀs_i`）の形で組み立てる。傾きの相関が高いとき
-/// 明示的な逆行列とかけ算で失う桁が少ない。
-///
-/// `order[新しい位置] = 元の位置`で、検定対象のパラメータを末尾に並べ替える（`R`が上三角なので、
-/// 末尾`q`成分の統計量は`b̃_S'M̃_SS⁻¹b̃_S`）。`params`・`hessian`・`scores`は元の並び。因子は
-/// `Classical`・`Hc0`・`Hc1`・`Cluster`で`-H`（コレスキー）、`Opg`でスコア行列（QR）から作る
-/// （`Opg`は`M̃ = I`）。
-pub(crate) fn orthogonal_inference_for_type(
-    cov_type: &CovType,
-    hessian: &Mat<f64>,
-    scores: Option<&Mat<f64>>,
-    params: &[f64],
-    n: usize,
-    order: &[usize],
-) -> Result<OrthogonalInference, MleError> {
-    let k = order.len();
-    // 呼び出し側が`n > k`を保証する（`fit()`冒頭の`validate_sufficient_observations`。小標本補正の`n - k`）。
-    debug_assert!(
-        n > k,
-        "n must exceed the number of parameters (caller contract)"
-    );
-    // コレスキー分解は下三角しか読まないので、丸めで崩れた対称性は先に平均で取り除く。
-    let neg_h = Mat::from_fn(k, k, |i, j| {
-        -0.5 * (*hessian.get(order[i], order[j]) + *hessian.get(order[j], order[i]))
-    });
-    let scores_ordered = scores.map(|s| Mat::from_fn(s.nrows(), k, |i, j| *s.get(i, order[j])));
-    let theta = Mat::from_fn(k, 1, |i, _| params[order[i]]);
-    let missing_scores = || {
-        MleError::from(CommonError::internal(
-            "scores must be provided for a cov_type other than Classical",
-        ))
-    };
-
-    let (r, meat) = match (cov_type, scores_ordered.as_ref()) {
-        (CovType::Classical, _) => {
-            let r = information_factor(&neg_h).map_err(|_| MleError::SingularHessian)?;
-            (r, Mat::<f64>::identity(k, k))
-        }
-        (CovType::Opg, Some(scores)) => {
-            let r = OrthonormalDesign::checked_r_factor(scores)
-                .map_err(|_| MleError::SingularOpgMatrix)?;
-            (r, Mat::<f64>::identity(k, k))
-        }
-        (CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. }, Some(scores)) => {
-            let r = information_factor(&neg_h).map_err(|_| MleError::SingularHessian)?;
-            let s_tilde = solve_upper_from_right(scores, &r);
-            let meat = match cov_type {
-                CovType::Cluster { groups } => {
-                    let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
-                        setting: ClusterSetting::CovType,
-                    })?;
-                    debug_assert_eq!(groups.nobs(), n, "groups length must match nobs");
-                    let (s_hat, n_groups) = cluster_meat(groups, k, |i, a| *s_tilde.get(i, a));
-                    let correction = cluster_correction(n_groups, n, k);
-                    Mat::from_fn(k, k, |i, j| correction * *s_hat.get(i, j))
-                }
-                _ => {
-                    let psi = s_tilde.transpose() * &s_tilde;
-                    let correction = if matches!(cov_type, CovType::Hc1) {
-                        (n as f64) / ((n - k) as f64)
-                    } else {
-                        1.0
-                    };
-                    Mat::from_fn(k, k, |i, j| correction * *psi.get(i, j))
-                }
-            };
-            (r, meat)
-        }
-        (_, None) => return Err(missing_scores()),
-    };
-
-    let v_ordered = covariance_from_factor(&r, &meat);
-    let mut cov_params = Mat::<f64>::zeros(k, k);
-    for i in 0..k {
-        for j in 0..k {
-            *cov_params.get_mut(order[i], order[j]) = *v_ordered.get(i, j);
-        }
-    }
-    let coordinates = Mat::from_fn(k, 1, |i, _| {
-        (i..k).map(|j| *r.get(i, j) * *theta.get(j, 0)).sum()
-    });
-    Ok(OrthogonalInference {
-        cov_params,
-        coordinates,
-        meat,
-    })
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use crate::shared::wald::wald_quadratic_form;
 
     /// `cov_type`共通行列演算のテスト用データ: 対角Hessian`H = diag(-2, -5)`
     /// （`-H`が正定値、MLE最大点を模す）と、4観測分のスコア行列。スコアは列間で
@@ -618,178 +512,5 @@ mod tests {
             ),
             "{result:?}"
         );
-    }
-    /// 直交座標の共分散・Wald統計量が、`-H⁻¹`と`Ψ`を明示的に作る従来の式と、全`cov_type`で
-    /// 丸めの範囲で一致する（検定対象を末尾に置く並べ替えを含む）。
-    #[test]
-    fn orthogonal_inference_matches_the_explicit_covariance_for_every_cov_type() {
-        let n = 12;
-        let k = 3;
-        let scores = Mat::from_fn(n, k, |i, j| {
-            (((i * 7 + j * 3) % 11) as f64 - 5.0) + 0.3 * j as f64
-        });
-        let psi = scores.transpose() * &scores;
-        let hessian = Mat::from_fn(k, k, |i, j| {
-            -(0.7 * *psi.get(i, j) + if i == j { 1.0 } else { 0.0 })
-        });
-        let params = [0.4, -1.3, 2.1];
-        let groups =
-            GroupCodes::from_labels(&(0..n).map(|i| format!("g{}", i % 4)).collect::<Vec<_>>());
-        let order = [1, 0, 2];
-        let cov_types = [
-            CovType::Classical,
-            CovType::Opg,
-            CovType::Hc0,
-            CovType::Hc1,
-            CovType::Cluster {
-                groups: Some(groups),
-            },
-        ];
-        for cov_type in cov_types {
-            let expected = cov_params_for_type(&cov_type, &hessian, Some(&scores), n, k).unwrap();
-            let got = orthogonal_inference_for_type(
-                &cov_type,
-                &hessian,
-                Some(&scores),
-                &params,
-                n,
-                &order,
-            )
-            .unwrap();
-            for i in 0..k {
-                for j in 0..k {
-                    let (a, b) = (*got.cov_params.get(i, j), *expected.get(i, j));
-                    assert!(
-                        (a - b).abs() < 1e-10 * b.abs().max(1.0),
-                        "{cov_type:?} ({i}, {j}): {a} vs {b}"
-                    );
-                }
-            }
-            // 並べ替えた末尾2個（元の位置`order[1]`・`order[2]`）のWald統計量。
-            let ordered_params = Mat::from_fn(k, 1, |i, _| params[order[i]]);
-            let ordered_cov = Mat::from_fn(k, k, |i, j| *expected.get(order[i], order[j]));
-            let wald_explicit = wald_quadratic_form(&ordered_params, &ordered_cov, 1, 2).unwrap();
-            let wald_orthogonal = wald_quadratic_form(&got.coordinates, &got.meat, 1, 2).unwrap();
-            assert!(
-                (wald_orthogonal / wald_explicit - 1.0).abs() < 1e-10,
-                "{cov_type:?}: {wald_orthogonal} vs {wald_explicit}"
-            );
-        }
-    }
-
-    #[test]
-    fn orthogonal_inference_requires_scores_for_cov_types_other_than_classical() {
-        let hessian = cov_test_hessian();
-        let result =
-            orthogonal_inference_for_type(&CovType::Hc0, &hessian, None, &[0.0, 0.0], 4, &[0, 1]);
-        assert!(matches!(result, Err(MleError::Common(_))), "{result:?}");
-    }
-
-    #[test]
-    fn orthogonal_inference_reports_the_matrix_that_failed() {
-        let singular = Mat::<f64>::zeros(2, 2);
-        let zero_scores = Mat::<f64>::zeros(4, 2);
-        let classical = orthogonal_inference_for_type(
-            &CovType::Classical,
-            &singular,
-            None,
-            &[0.0; 2],
-            4,
-            &[0, 1],
-        );
-        assert!(
-            matches!(classical, Err(MleError::SingularHessian)),
-            "{classical:?}"
-        );
-        let opg = orthogonal_inference_for_type(
-            &CovType::Opg,
-            &singular,
-            Some(&zero_scores),
-            &[0.0; 2],
-            4,
-            &[0, 1],
-        );
-        assert!(matches!(opg, Err(MleError::SingularOpgMatrix)), "{opg:?}");
-    }
-    /// 傾きの2列がほぼ共線な情報行列`A = -H`とスコアを、全要素が倍精度で厳密に表せる2進小数で組み、
-    /// 直交座標のWald統計量を有理数演算の厳密値と照合する（`-H⁻¹`・`Ψ`を明示的に作る式では
-    /// `eps = 2⁻¹⁷`の`hc0`で相対誤差が約`6e-2`（`eps = 2⁻¹⁴`でも約`1e-5`）出る）。厳密値は`H`・`S`を入力にしたもので、
-    /// Hessianそのものの丸め（`cond(X)²`）は含まない。
-    /// `A = Σ uᵢuᵢ' + diag(1, 1, 0, 0)`、`uᵢ = (1, gᵢ, aᵢ, aᵢ + eps·bᵢ)`、スコア`sᵢ = eᵢuᵢ`、
-    /// パラメータの並びは`[切片, logσ, x1, x2]`で、検定対象は末尾2個。
-    #[test]
-    fn orthogonal_wald_matches_exact_rational_values_for_nearly_collinear_information() {
-        // (eps = 2^-exponent, [classical, hc0, hc1, cluster, opg])
-        let cases = [
-            (
-                14,
-                [
-                    581.1318755526337,
-                    1858.7171081703768,
-                    1672.8453973533392,
-                    2747.3438931520395,
-                    179.40214877699057,
-                ],
-            ),
-            (
-                17,
-                [
-                    581.1054322681247,
-                    1858.6424486375354,
-                    1672.778203773782,
-                    2747.2327747950794,
-                    179.39402911751418,
-                ],
-            ),
-        ];
-        let n = 40;
-        let k = 4;
-        let groups =
-            GroupCodes::from_labels(&(0..n).map(|i| format!("g{}", i % 8)).collect::<Vec<_>>());
-        let cov_types = [
-            CovType::Classical,
-            CovType::Hc0,
-            CovType::Hc1,
-            CovType::Cluster {
-                groups: Some(groups),
-            },
-            CovType::Opg,
-        ];
-        let theta = [0.5, -0.25, 2.0, -1.0];
-        for (exponent, expected) in cases {
-            let eps = 0.5_f64.powi(exponent);
-            let u = Mat::from_fn(n, k, |i, j| {
-                let a = ((7 * i) % 13) as f64 - 6.0;
-                let b = ((5 * i) % 11) as f64 - 5.0;
-                match j {
-                    0 => 1.0,
-                    1 => (((3 * i) % 7) as f64 - 3.0) / 8.0,
-                    2 => a,
-                    _ => a + eps * b,
-                }
-            });
-            let e = |i: usize| (((i * 5) % 9) as f64 - 4.0) / 4.0 + 0.125;
-            let scores = Mat::from_fn(n, k, |i, j| e(i) * *u.get(i, j));
-            let hessian = Mat::from_fn(k, k, |r, c| {
-                let sum: f64 = (0..n).map(|i| *u.get(i, r) * *u.get(i, c)).sum();
-                -(sum + if r == c && r < 2 { 1.0 } else { 0.0 })
-            });
-            for (cov_type, expected) in cov_types.iter().zip(expected) {
-                let got = orthogonal_inference_for_type(
-                    cov_type,
-                    &hessian,
-                    Some(&scores),
-                    &theta,
-                    n,
-                    &[0, 1, 2, 3],
-                )
-                .unwrap();
-                let wald = wald_quadratic_form(&got.coordinates, &got.meat, 2, 2).unwrap();
-                assert!(
-                    (wald / expected - 1.0).abs() < 1e-8,
-                    "eps=2^-{exponent} {cov_type:?}: {wald} vs {expected}"
-                );
-            }
-        }
     }
 }

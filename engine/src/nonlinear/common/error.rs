@@ -43,8 +43,8 @@ pub enum MleError {
     #[error("{}", self.catalog_message())]
     SingularOpgMatrix,
 
-    /// Tobit専用: Newton法の初期値計算（打ち切りを無視した単純なOLS、`ols_initial_params`
-    /// 参照）に使う設計行列が特異（完全な多重共線性等）で最小二乗解が求まらない。
+    /// Tobit専用: 最適化前のランク判定（直交座標`Q`の分解、`tobit::coordinates`参照）で、設計行列が
+    /// 特異（完全な多重共線性等）と分かった。
     /// `SingularHessian`（最適化中・収束後のHessianの逆行列計算）とは、Newton法が
     /// 一度も反復していない段階で発生しうる点・Hessianを一切評価していない点が異なるため
     /// 区別する（`SingularOpgMatrix`を`SingularHessian`と区別しているのと同じ考え方）。

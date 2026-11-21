@@ -82,7 +82,7 @@
 //! Newtonの2次近似が悪条件な領域（Hessianが不定符号）を通過し、そこでの
 //! 局所線形近似が誤った方向への大きなステップを生む。
 //!
-//! 対策として、`ols_initial_params`で打ち切りを無視した単純なOLS（`β`とその残差の
+//! 対策として、`DesignCoordinates::initial_params`で打ち切りを無視した単純なOLS（`β`とその残差の
 //! 標本標準偏差）を計算し、Newtonの初期値として使う（R `survreg`/`censReg`等の
 //! 標準的なTobit実装と同じ方針）。真の最尤推定値に近い出発点から始めることで、
 //! 上記の不安定な領域を通過するリスクを大きく下げる。
@@ -132,6 +132,7 @@ use crate::nonlinear::common::{MarginalEffects, MarginalEffectsAt, MleError, Mle
 use crate::shared::inference;
 
 mod censoring_check;
+mod coordinates;
 mod fit;
 mod fitted;
 mod input;
@@ -205,7 +206,7 @@ impl TobitEstimator {
     /// 逆変換する（`x'β/c = x̃'β̃`・`σ̃ = σ/c`を満たす線形＋定数シフトの写像。
     /// 切片ありのとき`β₀`は全傾き係数に依存する）。
     ///
-    /// 初期値はゼロベクトルではなく`ols_initial_params`が計算するOLS推定値
+    /// 初期値はゼロベクトルではなく`DesignCoordinates::initial_params`が計算するOLS推定値
     /// （`LogitEstimator::fit`とは異なる。モジュール冒頭「Newton法の初期値」節参照）。
     ///
     /// `cov_type`は観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型
@@ -254,7 +255,7 @@ impl TobitEstimator {
     ///   Wald検定の`q×q`部分行列が構造的に特異。`wald_quadratic_form`内の
     ///   `NearSingularMatrix`（`ComputationError`）に任せず`fit()`冒頭のバリデーションで弾く）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
-    ///   （`ols_initial_params`参照）
+    ///   （`DesignCoordinates::new`参照）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`

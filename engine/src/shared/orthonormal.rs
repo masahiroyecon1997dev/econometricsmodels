@@ -202,70 +202,6 @@ pub(crate) fn covariance_from_factor(r: &Mat<f64>, m_tilde: &Mat<f64>) -> Mat<f6
     })
 }
 
-/// MLEの情報行列`A = -H`（`X'WX`の形）を対角で揃えた行列の条件数の、平方根の上限。平方根は
-/// 設計行列の列を揃えた条件数と同じ尺度（`A`の因子`R`の列を揃えた条件数）。
-///
-/// [`MAX_EQUILIBRATED_CONDITION`]（`5e7`）にそろえない理由: `A`の各要素は倍精度の丸めを持ち、
-/// 平方根が`1e6`で条件数は`1e12`、全体のWald統計量に約`1e-6`〜`1e-5`の相対誤差が入る（Tobitで
-/// 実測。誤差は条件数にほぼ比例する）。`5e7`の近くでは条件数が`1e15`を超えて、コレスキー分解が
-/// 通っても丸めた`A`の最小固有値に有効桁が残らず、統計量が桁違いにずれても分解は失敗しない
-/// （`eps = 1e-8`の準共線で、Waldが`735`のところ`764`になった）。QRで直接解く線形モデルは`A`を
-/// 作らないので、`cond(X)`の2乗でなく1乗で精度を失う。
-pub(crate) const MAX_INFORMATION_CONDITION: f64 = 1.0e6;
-
-/// 正定値の情報行列`A`（k×k、MLEの`-H`）のコレスキー因子`R`（上三角、`A = R'R`）。
-///
-/// `A`を対角で揃えた`DAD`の条件数の平方根（`R`の列を揃えた条件数と同じ尺度）を、先に特異値分解で
-/// 見積もって確かめる（コレスキー分解は特異に近い`A`でも通って誤った因子を返しうるので、
-/// 因子ができてからは判定しない）。上限は[`RANK_DEFICIENT_CONDITION`]（完全な共線）と
-/// [`MAX_INFORMATION_CONDITION`]。
-///
-/// # Errors
-/// `A`の対角が正の有限値でない、または要素が非有限のとき[`RankDeficient::Columns`]。条件数の
-/// 平方根が[`RANK_DEFICIENT_CONDITION`]を超えるとき[`RankDeficient::Columns`]、
-/// [`MAX_INFORMATION_CONDITION`]を超える・コレスキー分解が失敗するとき[`RankDeficient::GramMatrix`]。
-pub(crate) fn information_factor(a: &Mat<f64>) -> Result<Mat<f64>, RankDeficient> {
-    use faer::Side;
-    let k = a.nrows();
-    if k == 0 {
-        return Ok(Mat::zeros(0, 0));
-    }
-    let finite = (0..k).all(|i| (0..k).all(|j| a.get(i, j).is_finite()));
-    if !finite || !(0..k).all(|i| *a.get(i, i) > 0.0) {
-        return Err(RankDeficient::Columns);
-    }
-    let scale: Vec<f64> = (0..k).map(|i| a.get(i, i).sqrt().recip()).collect();
-    let equilibrated = Mat::from_fn(k, k, |i, j| *a.get(i, j) * scale[i] * scale[j]);
-    let root_condition = condition_number(&equilibrated).sqrt();
-    if root_condition > RANK_DEFICIENT_CONDITION {
-        return Err(RankDeficient::Columns);
-    }
-    if root_condition > MAX_INFORMATION_CONDITION {
-        return Err(RankDeficient::GramMatrix);
-    }
-    let llt = a.llt(Side::Lower).map_err(|_| RankDeficient::GramMatrix)?;
-    let r = llt.L().transpose().to_owned();
-    if !(0..k).all(|j| (0..=j).all(|i| r.get(i, j).is_finite())) {
-        return Err(RankDeficient::Columns);
-    }
-    Ok(r)
-}
-
-/// `S R⁻¹`（n×k）。`s`の各行`s_i`を`y_i R = s_i`の`y_i`に置き換える（`r`は上三角k×k）。
-/// 観測ごとのスコアを直交座標に移す。`Σ s_i s_i'`を作ってから`R⁻¹`で挟むのと数学的に同じだが、
-/// 条件数が2乗になる`Σ s_i s_i'`を経由しない。
-pub(crate) fn solve_upper_from_right(s: &Mat<f64>, r: &Mat<f64>) -> Mat<f64> {
-    let (n, k) = (s.nrows(), s.ncols());
-    let mut y = Mat::<f64>::zeros(n, k);
-    for i in 0..n {
-        for j in 0..k {
-            let head: f64 = (0..j).map(|l| *y.get(i, l) * *r.get(l, j)).sum();
-            *y.get_mut(i, j) = (*s.get(i, j) - head) / *r.get(j, j);
-        }
-    }
-    y
-}
-
 /// 上三角`r`（k×k、`X = QR`の`R`）の列を単位ノルムに揃える。`R`の列ノルムは`X`の列ノルムに
 /// 等しいので、`X`の列を揃えた行列と同じ特異値を持つ。列のノルムは、最大の成分で割ってから
 /// 二乗和を取り、極端なスケールでのオーバーフロー・アンダーフローを避ける（ノルムそのもの
@@ -315,7 +251,7 @@ fn equilibrated_condition(r: &Mat<f64>) -> f64 {
 }
 
 /// 上三角`r`（k×k）で`r · x = b`を解く（後退代入。`b`はk×m）。
-fn solve_upper(r: &Mat<f64>, b: MatRef<'_, f64>) -> Mat<f64> {
+pub(crate) fn solve_upper(r: &Mat<f64>, b: MatRef<'_, f64>) -> Mat<f64> {
     let k = r.nrows();
     let mut x = Mat::<f64>::zeros(k, b.ncols());
     for c in 0..b.ncols() {
@@ -796,90 +732,5 @@ mod tests {
     fn new_checked_accepts_a_design_without_columns() {
         let design = OrthonormalDesign::new_checked(&Mat::<f64>::zeros(5, 0)).unwrap();
         assert_eq!(design.q().ncols(), 0);
-    }
-    fn correlated_information(rho: f64, scale: [f64; 2]) -> Mat<f64> {
-        Mat::from_fn(2, 2, |i, j| {
-            let base = if i == j { 1.0 } else { rho };
-            base * scale[i] * scale[j]
-        })
-    }
-
-    #[test]
-    fn information_factor_reconstructs_the_matrix() {
-        let a = Mat::from_fn(3, 3, |i, j| {
-            if i == j {
-                4.0 + i as f64
-            } else {
-                1.0 / (1.0 + (i + j) as f64)
-            }
-        });
-        let r = information_factor(&a).unwrap();
-        let back = r.transpose() * &r;
-        for i in 0..3 {
-            for j in 0..3 {
-                assert!((back.get(i, j) - a.get(i, j)).abs() < 1e-14);
-                if i > j {
-                    assert_eq!(*r.get(i, j), 0.0);
-                }
-            }
-        }
-    }
-
-    /// 受け入れ範囲は、対角で揃えた条件数の平方根が`MAX_INFORMATION_CONDITION`以内。
-    /// 行列の単位（各変数を定数倍する対角のスケール）には依らない。
-    #[test]
-    fn information_factor_accepts_up_to_the_root_condition_limit_for_any_units() {
-        // 相関`rho`の2×2の条件数は`(1+rho)/(1-rho)`。`1-rho = 1e-10`で約`2e10`（平方根`1.4e5`）。
-        for scale in [[1.0, 1.0], [1e-6, 1e6], [1e8, 1e-3]] {
-            assert!(
-                information_factor(&correlated_information(1.0 - 1e-10, scale)).is_ok(),
-                "{scale:?}"
-            );
-            // `1-rho = 1e-13`で約`2e13`（平方根`4.5e6`）: 上限を超えるので正定値でも弾く。
-            assert_eq!(
-                information_factor(&correlated_information(1.0 - 1e-13, scale)).unwrap_err(),
-                RankDeficient::GramMatrix,
-                "{scale:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn information_factor_reports_exactly_singular_and_invalid_matrices_as_columns() {
-        for rho in [1.0, -1.0] {
-            assert_eq!(
-                information_factor(&correlated_information(rho, [1.0, 1.0])).unwrap_err(),
-                RankDeficient::Columns
-            );
-        }
-        let zero_diagonal = Mat::from_fn(2, 2, |i, j| if i == 0 && j == 0 { 0.0 } else { 1.0 });
-        assert_eq!(
-            information_factor(&zero_diagonal).unwrap_err(),
-            RankDeficient::Columns
-        );
-        let non_finite = Mat::from_fn(2, 2, |i, j| if i == j { f64::NAN } else { 0.0 });
-        assert_eq!(
-            information_factor(&non_finite).unwrap_err(),
-            RankDeficient::Columns
-        );
-    }
-
-    #[test]
-    fn solve_upper_from_right_inverts_the_right_multiplication_by_r() {
-        let a = Mat::from_fn(3, 3, |i, j| {
-            if i == j {
-                3.0 + i as f64
-            } else {
-                0.5 / (1.0 + (i + j) as f64)
-            }
-        });
-        let r = information_factor(&a).unwrap();
-        let s = Mat::from_fn(7, 3, |i, j| ((i * 5 + j * 3) % 7) as f64 - 2.5);
-        let back = &solve_upper_from_right(&s, &r) * &r;
-        for i in 0..7 {
-            for j in 0..3 {
-                assert!((back.get(i, j) - s.get(i, j)).abs() < 1e-13);
-            }
-        }
     }
 }

@@ -35,7 +35,7 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
 /// **`x`列の平均センタリング（切片ありのときのみ）は`ColumnScale`が行う共通の処理**。Tobitでも
 /// 必要な理由: `exper`(0〜45)と`expersq`(0〜2025)のように強く共線な列を含むと、スケーリング
 /// だけでは標準化後のHessianが悪条件のままで、正則化Newton（`regularized_newton_step`）が
-/// 回復不能な不定符号領域に落ちる（mroz `hours`で実測、`ols_initial_params`の丸め誤差~1e-14で
+/// 回復不能な不定符号領域に落ちる（mroz `hours`で実測、OLS初期値の丸め誤差~1e-14で
 /// 結果が変わるほど際どい）。切片ありモデルでは列を平均センタリングすると`survreg`同様Newtonが
 /// 安定して収束する。切片なしモデルではセンタリングせず（吸収先の切片が無く逆変換が壊れる
 /// ため）、スケーリングのみ行う。

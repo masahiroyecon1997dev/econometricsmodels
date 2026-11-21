@@ -62,9 +62,9 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// **`params`・`cov_params`には、直交座標の`(b̃, M̃)`（`shared::orthonormal`）を渡してもよい**。
 /// OLS・WLS・IV 2SLS・FE・RE・FE-IVはこちらで呼び、`B M B`を作って反転する経路の桁落ちを避ける
 /// （末尾`q`個の傾きの統計量は`b̃_S' M̃_SS⁻¹ b̃_S`と同じ値で、`k_constant`は先頭の非検定列の数）。
-/// IV GMM・FE-GMMも白色化した操作変数の直交座標（`shared::gmm::GmmSolution`）、Tobitも情報行列
-/// `-H`のコレスキー因子の座標（`nonlinear::common::orthogonal_inference_for_type`、検定対象の
-/// 傾きの前に切片と`logσ`が来る）を渡す。
+/// IV GMM・FE-GMMも白色化した操作変数の直交座標（`shared::gmm::GmmSolution`）、Tobitも
+/// 標準化した設計行列の直交座標`Q`の座標（`nonlinear::tobit::coordinates`。パラメータ`b = Rβ̃`の先頭が
+/// 切片、`logσ`は末尾で検定範囲の外）を渡す。
 pub(crate) fn wald_quadratic_form(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,

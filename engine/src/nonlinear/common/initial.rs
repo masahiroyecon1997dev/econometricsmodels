@@ -22,8 +22,8 @@ use crate::shared::linear_algebra::{
 /// 利用者に報告するのは元の設計の列なので、判定は`x_std`、列の特定は`x`で行う（`x`と`x_std`は
 /// 同じ列名`names`を共有する）。
 ///
-/// Logit/Probit（`ols_based_initial_params`）とTobit（`tobit::ols_initial_params`）が
-/// `fit()`冒頭で共有する。Newton法が一度も反復していない段階での検出のため、エラーは
+/// Logit/Probit（`ols_based_initial_params`）が`fit()`冒頭で共有する（Tobitは
+/// 直交座標`Q`の`OrthonormalDesign::new_checked`でランク判定する）。Newton法が一度も反復していない段階での検出のため、エラーは
 /// `SingularHessian`（最適化中・収束後のHessian逆行列計算）ではなく`SingularDesignMatrix`
 /// （後者のdocコメント参照。`solver`（newton/bfgs/lbfgs）に関わらず同じこの単一経路で
 /// 多重共線性を検出するのが本関数を共有する目的）。
@@ -50,8 +50,7 @@ pub fn checked_design_matrix_qr(
 
 /// 標準化空間での線形確率モデル（LPM）最小二乗解を、リンク関数のIRLS 1ステップ相当の
 /// スケール補正を施してNewton/準Newton法の初期値（warm start）に変換する。Logit/Probitが
-/// `fit()`冒頭で共有する（Tobitは`β`がOLSと同一スケールでスケール補正が不要なため、
-/// `tobit::ols_initial_params`が`checked_design_matrix_qr`だけを共有し補正は行わない）。
+/// `fit()`冒頭で共有する（Tobitは`β`がOLSと同一スケールでスケール補正が不要で、直交座標の初期値を使う）。
 ///
 /// ## 数式（nullモデル `p≡p̄` を起点にしたIRLSの1反復目）
 ///
@@ -66,7 +65,7 @@ pub fn checked_design_matrix_qr(
 ///
 /// `p̄`が0または1の近傍（全観測で`y`が同一＝完全分離）では`w→0`で補正が発散するため、
 /// 補正を行わず素のLPM解を返す（分離の検出は`run_solver`の事後チェック・`NonConvergence`に
-/// 委ねる。`tobit::ols_initial_params`が完全当てはまりで`σ=1`にフォールバックするのと
+/// 委ねる。`tobit::coordinates`の初期値が完全当てはまりで`σ=1`にフォールバックするのと
 /// 同じ発想）。
 ///
 /// `link_terms`は`p̄`を受け取り`(w, η₀)`を返すクロージャ（Logit/Probitでリンクが

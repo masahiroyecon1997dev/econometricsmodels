@@ -193,14 +193,23 @@ References: Kinal (1980), "The existence of moments of k-class estimators", Econ
 
 ### Overidentification: `overid_statistic`
 
-Chi-squared with \(l - k\) degrees of freedom (`overid_df`); `None` when just identified.
+Chi-squared with \(l - k\) degrees of freedom (`overid_df`); `None` when just identified, and in the cases listed in the last detail below.
 
 | `estimator` | Statistic |
 |---|---|
-| `"2sls"` | Sargan: \(\hat\varepsilon' Z (Z'Z)^{-1} Z'\hat\varepsilon / \hat\sigma^2\), with \(\hat\sigma^2 = \hat\varepsilon'\hat\varepsilon/n\). Homoskedastic; does not depend on `cov_type`. |
+| `"2sls"`, `cov_type="classical"` | Sargan: \(\hat\varepsilon' Z (Z'Z)^{-1} Z'\hat\varepsilon / \hat\sigma^2\), with \(\hat\sigma^2 = \hat\varepsilon'\hat\varepsilon/n\). Assumes homoskedastic errors. |
+| `"2sls"`, any other `cov_type` | Hansen's J with the weight matrix of the covariance, evaluated at the GMM estimate that uses this weight matrix (below). Robust to the heteroskedasticity, clustering or autocorrelation that `cov_type` allows for. |
 | `"gmm"` | Hansen's J: \((Z'\hat\varepsilon)' S^{-1} (Z'\hat\varepsilon)\), with the weight matrix used for the point estimate, so it follows `gmm_weight_type`. |
 
-For a test that is robust to heteroskedasticity or clustering, use `estimator="gmm"` with a robust or cluster `gmm_weight_type` and read Hansen's J.
+For 2SLS with a `cov_type` other than `"classical"`, let \(\tilde\varepsilon = y - X\hat\beta_{\text{2SLS}}\) be the 2SLS residuals. The weight matrix \(S\) is built from \(\tilde\varepsilon\) as in [the weight types of the GMM estimator](#gmm): \(\sum_i \tilde\varepsilon_i^2 z_i z_i'\) for `"hc0"` to `"hc3"`, the sum over clusters of the outer products of the cluster score sums \(\sum_{i \in g}\tilde\varepsilon_i z_i\) for `"cluster"`, and the Bartlett-kernel sum \(\Gamma_0 + \sum_{h=1}^{L}(1 - h/(L+1))(\Gamma_h + \Gamma_h')\) for `"hac"`, where \(\Gamma_h = \sum_{t=h+1}^{n}\tilde\varepsilon_t\tilde\varepsilon_{t-h}z_tz_{t-h}'\), the observations are in the order of `hac_time`, and \(L\) is `hac_lags` or its automatic choice, as in [the OLS definition](ols.md#hac-newey-west). The GMM estimate is \(\hat\beta_S = (X'Z S^{-1} Z'X)^{-1} X'Z S^{-1} Z'y\), with residuals \(\hat\varepsilon = y - X\hat\beta_S\), and the statistic is \(J = (Z'\hat\varepsilon)' S^{-1} (Z'\hat\varepsilon)\), not divided by \(n\). It equals the Hansen J of the two-step GMM estimator with the same weight type.
+
+Three details:
+
+- **It is not \((Z'\tilde\varepsilon)' S^{-1} (Z'\tilde\varepsilon)\), the quadratic form at the 2SLS residuals.** 2SLS does not use \(S^{-1}\) as its weight. When the errors are not homoskedastic, \(Z'\tilde\varepsilon\) has a singular asymptotic variance of rank \(l - k\) that is not \(S\), and \(S^{-1}\) is not its generalized inverse, so that statistic is not chi-squared in large samples. Evaluating \(J\) at \(\hat\beta_S\) restores the chi-squared limit with \(l - k\) degrees of freedom. With the heteroskedasticity-robust \(S\) it is the robust score test of Wooldridge (1995).
+- **`"hc0"`, `"hc1"`, `"hc2"` and `"hc3"` give the same value.** \(S\) has no small-sample factor and no leverage adjustment, as with `gmm_weight_type="robust"`; the statistic depends on the scale of \(S\), so a factor such as \(n/(n-k)\) would change it. The same holds for the cluster factor \((G/(G-1))((n-1)/(n-k))\).
+- **The statistic is `None` when \(S\) is singular.** With `cov_type="cluster"` this always happens when there are fewer clusters \(G\) than columns \(l\) of \(Z\) (the exogenous regressors, including the constant, and the excluded instruments): \(S\) is a sum of \(G\) rank-one matrices. With any covariance it can also happen because \(S\), or the matrix \(Z'X\) weighted by it, is numerically close to singular, for example with nearly collinear regressors; this is rare. The fit itself still succeeds and the other results are reported. `gmm_weight_type="cluster"` with too few clusters raises an error instead, because the weight is needed for the point estimate.
+
+Reference: Wooldridge (1995), "Score diagnostics for linear models estimated by two stage least squares", in Maddala, Phillips and Srinivasan (eds.), *Advances in Econometrics and Quantitative Economics*.
 
 ### Endogeneity: `wu_hausman_statistic`
 

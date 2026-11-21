@@ -142,7 +142,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   同じ、GMMは常にロバストWald（χ²）（GMMはz分布と決定済みで古典的F検定の正当化が無い
   ため）。
 - **検定統計量の自由度**: `overid_df`（Sargan/Hansen J、χ²、`len(instruments) - len(x_endog)`、
-  丁度識別は`None`）、`wu_hausman_df_num`/`wu_hausman_df_denom`（F、分子は内生変数の数、
+  統計量が`None`のとき`None`。3.5節）、`wu_hausman_df_num`/`wu_hausman_df_denom`（F、分子は内生変数の数、
   分母は拡張回帰の`df_inference`）、`weak_instrument_f_df_num`/`weak_instrument_f_df_denom`
   （分子は除外操作変数の数、分母は第一段階回帰の残差自由度。内生変数ごとの辞書だが自由度は
   共通のためスカラー）。統計量が`None`/NaNのときは自由度も`None`。
@@ -452,21 +452,44 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
 
 ### 3.5 過剰識別検定（`overid_statistic`/`overid_p_value`）
 
-Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含める（別メソッド化しない）。
+過剰識別検定（2SLSは`cov_type`に追従、GMMはHansen J）を`fit()`の結果本体に含める（別メソッド化しない。
+推定量そのものの妥当性・識別に属する検定のため。`docs/spec/api-conventions.md`）。定義式は
+[`docs/methods/iv.md`](../methods/iv.md)が正本。
 
 - 自由度は`len(instruments) - len(x_endog)`。**丁度識別（自由度0）の場合は`None`**。
-- **Sargan検定**（`two_sls/sargan.rs`）は常に古典的（`e'Z(Z'Z)⁻¹Z'e/σ̂²`、`σ̂²=e'e/n`）な計算式を
-  使い`cov_type`には依存しない（定義自体が等分散前提の検定であり、不均一分散に頑健な版が
-  欲しい場合はGMM＋Hansen Jを使うのが標準的な使い分けのため）。
-- **Hansen J検定**（`gmm/hansen_j.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
+- **2SLSは`cov_type`に追従する**（Wu-Hausmanと同じ。弱操作変数診断が常に等分散前提なのとは対照的）。
+  `classical`は従来どおりSargan、それ以外は2SLS残差から`cov_type`に対応する重み`S`を作り、その`S`で
+  GMMを再推定した解でのHansen J（`two_sls/overid.rs`。再推定は`shared/gmm_iteration.rs`の
+  `gmm_whiten_for_weight`と`shared/gmm.rs`の`gmm_solve`で、`gmm_iterate`のループ本体と共有する）。理由と性質:
+  - **2SLS推定値そのものでの`(Z'e)'S⁻¹(Z'e)`は採らない**。2SLSは`S⁻¹`を重みに使わないので`Z'e`の
+    漸近分散は`S`ではなく（階数`l-k`の特異行列）、`S⁻¹`はその一般化逆行列にならず、不均一分散下で
+    χ²に従わない（単発のMonte Carlo（テストには含めない）、不均一分散・n=400・自由度3・名目5%・3000回で棄却率6.5%。再推定した版は3.5%）。
+    再推定した`J`は、ロバストなscore検定（Wooldridge, 1995）と代数的に同じ量で、同じ重みの2段階GMMの
+    Hansen Jと一致する（`two_sls/overid.rs`の`equals_the_two_step_gmm_hansen_j_of_the_same_weight`、
+    Pythonの`test_overid_statistic_of_2sls_equals_gmm_hansen_j_of_the_same_weight`）。
+  - **`hc0`〜`hc3`は同じ値**。`S`は小標本補正もレバレッジ補正も入れない素の`Σ ε̂ᵢ²zᵢzᵢ'`
+    （`gmm_weight_type="robust"`と同じ。`J`は`S`の尺度に依存するので、`n/(n-k)`のような一様な補正も
+    入れない。クラスターの`(G/(G-1))((n-1)/(n-k))`、HACのBartlettカーネル以外の補正も同様）。
+  - **`None`になる条件**（`fit()`は失敗させない。診断1つのために必須の出力を捨てないという線引きは
+    `iv/CLAUDE.md`）: 丁度識別、`cov_type=cluster`でクラスター数`G`が全操作変数の数`l`より少ない
+    （`rank(S) ≤ G`で`S`が必ず特異。`gmm_weight_type="cluster"`は点推定に必要なので
+    `InsufficientClustersForWeightMatrix`で弾くのとは対照的）、重みの白色化・`Ĝ`の分解が
+    `NearSingularMatrix`（`GmmWeight`・`GmmBread`）で失敗する（近共線な外生変数×クラスターの重みなど。
+    同じ入力で`gmm_weight_type="cluster"`のGMMも失敗する）。この2種類以外の失敗は伝播する。
+    `None`のとき`overid_df`も`None`。
+  - 検証: linearmodelsの`IVGMM`（2段階、同じ重み）のHansen J（主）と、hc0では`wooldridge_overid`（同じ値）、
+    R `momentfit`の2段階GMMのHansen J（クロスチェック）。`hc2`・`hc3`は補正を入れない定義のため
+    `hc0`と同じ参照値と比べる（`tests/iv/test_iv_reference.py`・`test_iv_crosscheck.py`）。
+- **GMMのHansen J検定**（`gmm/hansen_j.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
   流用するのが定義そのもの（`J=(Z'ê)'S⁻¹(Z'ê)`）。`S`は`n`で正規化していない生の和のため
   `n`で割ってはならない（標準形`J=n·ḡₙ'Ŝ⁻¹ḡₙ`に代入すると`n`は完全に相殺する）。
   `one_step`・`gmm_weight_type=Classical`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
   Classical以外の`Robust`/`Cluster`/`Hac`と絶対スケールを揃えるため）。
   `gmm_weight_type=Classical`かつ`two_step`のHansen Jは2SLSのSargan統計量と数値的に
   一致する。
-- どちらも計算失敗は`None`にせず`IvError`として伝播する（使う行列はいずれも点推定計算で
-  既に反転成功済みの行列の再利用であり、理論上ここでの特異性は到達不能なため）。
+- **Sargan・GMMのHansen Jの計算失敗は`None`にせず`IvError`として伝播する**（使う行列はいずれも
+  点推定計算で既に反転成功済みの行列の再利用であり、理論上ここでの特異性は到達不能なため）。
+  2SLSのロバストな版は新しい行列（`S`・`Ĝ`）を作るので、上のとおり別扱い。
 
 ### 3.6 内生性検定（`wu_hausman_statistic`/`wu_hausman_p_value`）
 
@@ -554,7 +577,8 @@ error.rs`）:
 - **`gmm_type`・`gmm_max_iter`・`cov_type`に依存せず、重みの種類だけを引き継ぐ**（常に2段階）。`one_step`の結果でも、`gmm_weight_type`と同じ設定の2段階の統計量になる。
   linearmodelsも元のモデルの方式に関係なく、同じ重みの種類で2段階（既定）で推定する。
 - **2SLSには`weight_type_for_cov_type`で重みを決める**: `Classical`→`Classical`（差のSargan）、`Hc0`〜`Hc3`→`Robust`（`S`にHC1・HC2・HC3の補正は無い）、`Hac`・`Cluster`は同じ。
-  2SLSの`overid_statistic`（Sargan）は等分散を仮定するままで、2SLSの推定値で評価する頑健なJは別の機能。
+  2SLSの`overid_statistic`は`cov_type`に追従する（3.5節）。C統計量の重みの決め方（ここ）と、過剰識別検定の
+  重みの決め方（`two_sls/overid.rs`）は同じ対応（`Hc0`〜`Hc3`→素のロバスト）。
 - **クラスターは`G < l_full`（`Z_full`の列数）を構造的な特異として未定義**にする（`S_e`のランクは`G`以下。`Z_full`は常に過剰識別）。linearmodelsも、クラスター数が足りないと無効な統計量（`InvalidTestStatistic`）を返す（`G=6`・`l_full=7`で確認）。
   検定する変数が増えるほど`l_full`が増えるので、`fit()`が通るクラスター数でも未定義になりうる。
 - **定義できないときはエラー**: `C_STATISTIC_UNDEFINED`（`ComputationError`。操作変数の共線・初期推定の完全フィット・`S_e`のランク落ち）と、`C_STATISTIC_NOTHING_TO_TEST`（`ValidationError`）。
@@ -592,8 +616,12 @@ error.rs`）:
 - **Rクロスチェック（2SLS）**: `ivreg`。`classical`/`hc0`〜`hc3`/
   `cluster`/`hac`の`vcov`を`coeftest()`経由でそのまま使える。`summary(model,
   diagnostics=TRUE)`は`vcov.`に行列を渡すと常にclassical（iid）vcovにフォールバックする
-  仕様のため、`weak_instrument_f_statistics`/`overid_statistic`（設計自体が常にclassical）
-  はcov_typeによらず一律クロスチェックできる。`wu_hausman_statistic`/`wu_hausman_p_value`も
+  仕様のため、`weak_instrument_f_statistics`（設計自体が常にclassical）と、classicalの
+  `overid_statistic`（Sargan）はcov_typeによらず一律クロスチェックできる。`cov_type`が
+  classical以外の`overid_statistic`はivregに対応する検定が無いので、`momentfit`の2段階GMMの
+  Hansen J（同じ重みの種類）と比べる（`generate_iv_crosscheck_fixtures.py`の`_run_ivreg`。
+  `ivreg`の`summary`のSarganは`cov_type`に追従しない）。主リファレンスの`IVGMM`も同じ量
+  （`benchmark/iv/references/linearmodels_ref.py`の`_overid_for_cov_type`）。`wu_hausman_statistic`/`wu_hausman_p_value`も
   `summary(diagnostics=TRUE, vcov.=<関数>)`でcov_type別のロバスト共分散を診断表に反映できるため、
   全cov_typeでクロスチェックする（`benchmark/iv/references/run_ivreg.R`参照）。ただしclusterの
   p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致しない。

@@ -78,9 +78,9 @@ print(gmm.params["endog1"], gmm.stat_dist)  # normal and chi-squared tests
 
 ```python
 print(two_sls.weak_instrument_f_statistics)  # {"endog1": ...}
-print(two_sls.overid_statistic, two_sls.overid_p_value)  # Sargan (2SLS)
+print(two_sls.overid_statistic, two_sls.overid_p_value)  # Sargan (2SLS, classical)
 print(two_sls.wu_hausman_statistic, two_sls.wu_hausman_p_value)  # 2SLS only
-print(gmm.overid_statistic, gmm.overid_p_value)  # Hansen J (GMM)
+print(gmm.overid_statistic, gmm.overid_p_value)  # Hansen's J (GMM)
 
 first_stage = two_sls.first_stage()
 print(first_stage["endog1"].params)  # OLSResults for endog1 ~ x_exog + instruments
@@ -90,7 +90,10 @@ How to read them:
 
 - **Weak instruments** (`weak_instrument_f_statistics`, one per endogenous variable). The F statistic tests that the excluded instruments do not explain the endogenous variable in the first stage. A small value means the instruments are weak, and the IV estimate and its standard errors are then unreliable. A common rule of thumb is a value above about 10; no verdict is reported, and the statistic assumes homoskedastic errors (see [Inference conventions](../guide/inference-conventions.md#weak-instruments)).
 - **Weak instruments, post-estimation** (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`). These are methods, not fields, and have their own section [below](#weak-instrument-diagnostics-post-estimation).
-- **Overidentification** (`overid_statistic`, `overid_p_value`; the Sargan test for 2SLS and Hansen's J for GMM). The null hypothesis is that all instruments are valid, that is uncorrelated with the error. A small p-value says that at least one instrument is invalid or the model is misspecified; a large one is consistent with validity but does not prove it. Both are `None` when the model is just-identified (as many instruments as endogenous variables), because there is nothing to test. Only Hansen's J is robust to heteroskedasticity and clustering. To test whether particular instruments are valid, treating the others as valid, use [`c_stat(instruments=...)`](#exogeneity-and-instrument-validity-post-estimation).
+- **Overidentification** (`overid_statistic`, `overid_p_value`, `overid_df`). The statistic depends on the estimator and on `cov_type`: Sargan for 2SLS with `cov_type="classical"`, Hansen's J otherwise (for GMM with the weight of `gmm_weight_type`, for 2SLS with the weight of `cov_type`).
+    - *What it tests.* The null hypothesis is that all instruments are valid, that is uncorrelated with the error. A small p-value says that at least one instrument is invalid or the model is misspecified; a large one is consistent with validity but does not prove it. To test whether particular instruments are valid, treating the others as valid, use [`c_stat(instruments=...)`](#exogeneity-and-instrument-validity-post-estimation).
+    - *Robustness.* The Sargan test assumes homoskedastic errors. Every other version is robust to what the covariance allows for (heteroskedasticity, clustering, autocorrelation). `"hc0"` to `"hc3"` give the same value.
+    - *When it is `None`.* Both fields are `None` when the model is just-identified (as many instruments as endogenous variables), because there is nothing to test. For 2SLS they are also `None` when the weight matrix of the covariance is singular: always with `cov_type="cluster"` and fewer clusters than the exogenous regressors (including the constant) and the excluded instruments together, and rarely, with nearly collinear regressors, for numerical reasons. The fit itself still succeeds.
 - **Exogeneity and instrument validity, post-estimation** (`c_stat()`). A method, not a field. It tests whether chosen endogenous variables are exogenous and chosen excluded instruments are valid, for both estimators, and has its own section [below](#exogeneity-and-instrument-validity-post-estimation).
 - **Endogeneity** (`wu_hausman_statistic`, `wu_hausman_p_value`, 2SLS only). The null hypothesis is that the suspect regressors are in fact exogenous, so that OLS would be consistent. A small p-value supports treating them as endogenous and using IV; a large one means the data cannot distinguish IV from OLS, and OLS is then more precise. For GMM, where these fields are `None`, use [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation). For 2SLS, `c_stat()` is an alternative that can test a subset of the endogenous variables and can also test instruments.
 

@@ -78,14 +78,14 @@ With `cov_type="cluster"`, the structural equation needs more clusters than its 
 
 ## Overidentification tests
 
-`overid_statistic` and `overid_p_value` (chi-squared with `overid_df` degrees of freedom, `None` when just identified) are computed differently by each estimator.
+`overid_statistic` and `overid_p_value` (chi-squared with `overid_df` degrees of freedom; `None` when just identified, and in the 2SLS case described below) are computed differently by each estimator.
 
-- **2SLS reports the Sargan test.** It is always computed under homoskedasticity and does not depend on `cov_type`.
+- **2SLS follows `cov_type`.** With `"classical"` it is the Sargan test, computed under homoskedasticity. With any other `cov_type` it is Hansen's J with the weight matrix of that covariance, evaluated at the GMM estimate that uses this weight matrix, so it is robust to the heteroskedasticity, clustering or autocorrelation the covariance allows for (see [Definitions: IV](../methods/iv.md#overidentification-overid_statistic)). `"hc0"` to `"hc3"` give the same value, because the weight matrix has no small-sample or leverage correction. The statistic is `None` when that weight matrix is singular: always with `cov_type="cluster"` and fewer clusters than the exogenous regressors (including the constant) and the excluded instruments together, and rarely, with nearly collinear regressors, for numerical reasons. The fit itself still succeeds.
 - **GMM reports Hansen's J test.** It uses the weight matrix of the point estimate and therefore follows `gmm_weight_type`.
 - **FEIV with `estimator="2sls"` reports the Sargan test of the within-transformed data**, with the error variance `e'e / (n - n_absorbed)`, where `n_absorbed` is the number of absorbed fixed-effect parameters. It does not depend on `cov_type`. `fixest` divides by `n` instead, so its statistic is larger by the factor `n / (n - n_absorbed)` (see [Definitions: FEIV](../methods/fe_iv.md#differences-from-fixest)).
 - **FEIV with `estimator="gmm"` reports Hansen's J test of the within-transformed data.** It follows `gmm_weight_type` (cluster by default; `gmm_type="one_step"` uses the classical covariance of the moment conditions, as the classical weight does). Only the classical weight uses the error variance `e'e / (n - n_absorbed)`; the robust and cluster weights are not rescaled, so with a robust weight on a short panel the test over-rejects (see [Definitions: FEIV](../methods/fe_iv.md#hansen-j-statistic)).
 
-If you need an overidentification test that is robust to heteroskedasticity or clustering, use `estimator="gmm"` of IV, or [FEIV](../usage/fe_iv.md#gmm-estimator) with `estimator="gmm"` for panel data with fixed effects, with a robust or cluster `gmm_weight_type`, and read Hansen's J. To test whether a subset of the instruments is valid, use `c_stat(instruments=...)` (see [below](#exogeneity-and-instrument-validity-c-statistic)).
+If you need an overidentification test that is robust to heteroskedasticity or clustering, use IV with `estimator="2sls"` and a robust `cov_type`, or `estimator="gmm"` with a robust or cluster `gmm_weight_type`. For panel data with fixed effects, [FEIV](../usage/fe_iv.md#gmm-estimator) needs `estimator="gmm"` with a robust or cluster `gmm_weight_type`: FEIV with `estimator="2sls"` still reports the Sargan test. To test whether a subset of the instruments is valid, use `c_stat(instruments=...)` (see [below](#exogeneity-and-instrument-validity-c-statistic)).
 
 ## Endogeneity test (Wu-Hausman)
 

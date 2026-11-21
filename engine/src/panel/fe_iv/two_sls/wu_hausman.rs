@@ -31,8 +31,9 @@ pub(super) struct WuHausmanContext<'a> {
     pub(super) effect_names: &'a [String],
     /// within変換した列（順は`y`、`x_exog`、`x_endog`、`instruments`）。
     pub(super) tilde: &'a [Vec<f64>],
-    /// 内生変数ごとの第一段階から取り出した係数・残差（`x_endog`の順）。
-    pub(super) first_stages: &'a [FirstStageSummary],
+    /// 内生変数ごとの第一段階から取り出した係数・残差（`x_endog`の順）。残差は補助回帰の列へ
+    /// 複製せず移すので、`fe_wu_hausman_test`の後は空になる（係数は残る）。
+    pub(super) first_stages: &'a mut [FirstStageSummary],
     /// 変換が残す誤差（完全適合の判定に使う）。
     pub(super) noise: f64,
 }
@@ -112,7 +113,7 @@ fn wu_hausman_wald(
 /// # Errors
 /// 補助回帰の、`None`にしない失敗（`is_expected_failure`以外）。
 pub(super) fn fe_wu_hausman_test(
-    context: &WuHausmanContext<'_>,
+    context: WuHausmanContext<'_>,
 ) -> Result<Option<FeWuHausmanTest>, PanelError> {
     let WuHausmanContext {
         input,
@@ -124,16 +125,18 @@ pub(super) fn fe_wu_hausman_test(
         tilde,
         first_stages,
         noise,
-    } = *context;
+    } = context;
     let (k_exog, k_endog) = (input.k_exog(), input.k_endog());
     if k_endog == 0 {
         return Ok(None);
     }
     let n = input.nobs();
 
+    // 第一段階の残差は、補助回帰のwithin空間の列へ移す（要約が持ち続けると同じ列が3つ生きる）。
+    // 生の列には、`wu_hausman_columns`が所有を要るので1つだけ複製する。
     let residuals: Vec<Vec<f64>> = first_stages
-        .iter()
-        .map(|stage| stage.residuals.clone())
+        .iter_mut()
+        .map(|stage| std::mem::take(&mut stage.residuals))
         .collect();
     let (raw_columns, names) = wu_hausman_columns(
         input.x_exog(),

@@ -262,7 +262,7 @@ pub(super) fn fit_fe_two_sls<T>(
     };
 
     // 構造式の共分散・F検定が計算できた後に、補助回帰を回す（構造式のエラーを先に返す）。
-    let wu_hausman = fe_wu_hausman_test(&WuHausmanContext {
+    let wu_hausman = fe_wu_hausman_test(WuHausmanContext {
         input: &input,
         effects,
         cov_type: &cov_type,
@@ -270,7 +270,7 @@ pub(super) fn fit_fe_two_sls<T>(
         groups,
         effect_names: &effect_names,
         tilde: &tilde,
-        first_stages: &first_stage_summaries,
+        first_stages: &mut first_stage_summaries,
         noise,
     })?;
 

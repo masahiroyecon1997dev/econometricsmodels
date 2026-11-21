@@ -166,6 +166,12 @@ pub(crate) fn wu_hausman_columns(
     columns.extend(x_endog);
     columns.extend(first_stage_residuals);
 
+    (columns, wu_hausman_names(x_exog_names, x_endog_names))
+}
+
+/// [`wu_hausman_columns`]の列の名前（`[x_exog, x_endog, 第一段階残差]`の順）。列を借用で並べる
+/// 呼び出し側（2SLSの拡張回帰）が、列を複製せず名前だけ組み立てるために使う。
+pub(crate) fn wu_hausman_names(x_exog_names: &[String], x_endog_names: &[String]) -> Vec<String> {
     let mut names: Vec<String> = x_exog_names.to_vec();
     names.extend(x_endog_names.iter().cloned());
     names.extend(
@@ -173,7 +179,7 @@ pub(crate) fn wu_hausman_columns(
             .iter()
             .map(|endog_name| format!("{endog_name}_first_stage_resid")),
     );
-    (columns, names)
+    names
 }
 
 #[cfg(test)]

@@ -27,7 +27,9 @@ pub use first_stage::{
     FirstStageOutput, FirstStageResult, compute_first_stage, compute_first_stage_with,
 };
 pub use input::IvInput;
-pub(crate) use input::{hcat, mat_column_to_vec, mat_to_columns, without_baked_in_intercept};
+#[cfg(test)]
+pub(crate) use input::mat_to_columns;
+pub(crate) use input::{hcat, mat_column_slices, mat_column_to_vec, without_baked_in_intercept};
 pub use validation::validate_iv_fit_inputs;
 pub use weak_instruments::{
     CraggDonald, KleibergenPaap, StockYogoCriticalValues, compute_cragg_donald,

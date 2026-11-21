@@ -1,10 +1,10 @@
 //! Wu-Hausman内生性検定（回帰ベース）。
 
-use crate::iv::common::{IvError, IvInput, mat_to_columns};
+use crate::iv::common::{IvError, IvInput, mat_column_slices, without_baked_in_intercept};
 use crate::linear::common::LeastSquaresError;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::linear::ols::{AuxiliaryFit, CovType, OlsInput};
 use crate::shared::error::CommonError;
-use crate::shared::instrumental_variables::wu_hausman_columns;
+use crate::shared::instrumental_variables::wu_hausman_names;
 
 /// [`wu_hausman_test`]の戻り値。
 pub(super) struct WuHausmanTest {
@@ -47,15 +47,16 @@ pub(super) struct WuHausmanTest {
 /// （広すぎる`Err(_)`キャッチは将来の実装バグを`None`で隠してしまうため、意図した失敗理由
 /// だけを明示的にマッチする）。
 ///
-/// `x_exog_bare`（定数項を除いた素のx_exog）を使い、`OlsInput::from_columns`に
-/// `input.has_intercept()`を渡して定数項を1回だけ正しく追加させる
-/// （`without_baked_in_intercept`のdocコメント参照）。
+/// 定数項を除いた素のx_exogを使い、`OlsInput::from_column_slices`に`input.has_intercept()`を
+/// 渡して定数項を1回だけ正しく追加させる（`without_baked_in_intercept`のdocコメント参照）。
+///
+/// 拡張回帰の列は`IvInput`の行列の列（`x_exog`・`x_endog`）と`first_stage_residuals`の借用で並べ、
+/// 複製しない。設計行列は`AuxiliaryFit`が消費してその場でQR分解する（`OlsEstimator::fit`だと、
+/// 設計行列・QRの格納・`Q`の3つが同時に生きる）。検査・統計量は`OlsEstimator::fit`と
+/// `wald_test_last_columns`と同じ。
 pub(super) fn wu_hausman_test(
     input: &IvInput,
     first_stage_residuals: Vec<Vec<f64>>,
-    x_exog_bare: &[Vec<f64>],
-    x_exog_names_bare: &[String],
-    y: &[f64],
     cov_type: &CovType,
     confidence_level: f64,
 ) -> Result<Option<WuHausmanTest>, IvError> {
@@ -63,16 +64,17 @@ pub(super) fn wu_hausman_test(
         return Ok(None);
     }
 
-    let (hausman_columns, hausman_names) = wu_hausman_columns(
-        x_exog_bare,
-        x_exog_names_bare,
-        mat_to_columns(input.x_endog()),
-        input.x_endog_names(),
-        first_stage_residuals,
-    );
+    let x_exog_all = mat_column_slices(input.x_exog());
+    let (x_exog_bare, x_exog_names_bare) =
+        without_baked_in_intercept(&x_exog_all, input.x_exog_names(), input.has_intercept());
+    let mut hausman_columns: Vec<&[f64]> = x_exog_bare.to_vec();
+    hausman_columns.extend(mat_column_slices(input.x_endog()));
+    hausman_columns.extend(first_stage_residuals.iter().map(Vec::as_slice));
+    let hausman_names = wu_hausman_names(x_exog_names_bare, input.x_endog_names());
+    let y = input.y().col_as_slice(0);
 
     let hausman_result: Result<WuHausmanTest, LeastSquaresError> = (|| {
-        let hausman_input = OlsInput::from_columns(
+        let hausman_input = OlsInput::from_column_slices(
             y,
             &hausman_columns,
             hausman_names,
@@ -80,14 +82,14 @@ pub(super) fn wu_hausman_test(
             input.dep_var_name().to_string(),
         )?;
         // 被説明変数は元の構造式の`y`（説明変数側に第一段階残差が加わるだけ）なので、
-        // 完全フィットの判定は元の`y`の総平方和で行う（`fit_auxiliary`ではなく`fit`）。
-        let hausman_estimator =
-            OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
-        let (statistic, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
+        // 完全フィットの判定は元の`y`の総平方和で行う（`check_outcome=true`、`fit_auxiliary`ではなく`fit`）。
+        let hausman = AuxiliaryFit::fit(hausman_input, cov_type, confidence_level, true)?;
+        let (statistic, p_value, df_inference) =
+            hausman.wald_last_columns(cov_type, input.k_endog())?;
         Ok(WuHausmanTest {
             statistic,
             p_value,
-            df: (input.k_endog(), hausman_estimator.df_inference()),
+            df: (input.k_endog(), df_inference),
         })
     })();
 

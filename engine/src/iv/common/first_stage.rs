@@ -1,7 +1,7 @@
 //! 内生変数ごとの第一段階回帰と、弱操作変数診断（部分F統計量）。2SLS/GMMが共有する。
 
 use super::error::IvError;
-use super::input::{IvInput, mat_column_to_vec, mat_to_columns, without_baked_in_intercept};
+use super::input::{IvInput, mat_column_slices, without_baked_in_intercept};
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::instrumental_variables;
 use crate::shared::least_squares::residual_sum_of_squares;
@@ -64,28 +64,30 @@ pub fn compute_first_stage_with<T>(
     confidence_level: f64,
     mut consume: impl FnMut(&str, OlsEstimator) -> T,
 ) -> Result<FirstStageOutput<T>, IvError> {
-    let x_exog_columns = mat_to_columns(input.x_exog());
-    // 定数項列は`OlsInput::from_columns`側の`include_intercept=input.has_intercept()`で
-    // 追加させるため、ここでは焼き込み済みの定数項列を除いた「素の」x_exog列を使う
+    // 列は`IvInput`の行列の列の借用で並べる（列を`Vec`に複製すると、第一段階の設計行列と同時に
+    // 列数ぶんの複製を持ち、ピークメモリが増える）。
+    let x_exog_all = mat_column_slices(input.x_exog());
+    // 定数項列は`OlsInput`側の`include_intercept=input.has_intercept()`で追加させるため、
+    // ここでは焼き込み済みの定数項列を除いた「素の」x_exog列を使う
     // （[`without_baked_in_intercept`]のdocコメント参照）。
     let (x_exog_bare, x_exog_names_bare) =
-        without_baked_in_intercept(&x_exog_columns, input.x_exog_names(), input.has_intercept());
+        without_baked_in_intercept(&x_exog_all, input.x_exog_names(), input.has_intercept());
 
     // 全操作変数（`x_exog ++ instruments`のunion、`iv-spec.md`1.1節）。
-    let mut instrument_columns: Vec<Vec<f64>> = x_exog_bare.to_vec();
-    instrument_columns.extend(mat_to_columns(input.instruments()));
+    let mut instrument_columns: Vec<&[f64]> = x_exog_bare.to_vec();
+    instrument_columns.extend(mat_column_slices(input.instruments()));
     let mut instrument_names: Vec<String> = x_exog_names_bare.to_vec();
     instrument_names.extend(input.instrument_names().iter().cloned());
 
     let mut first_stage = Vec::with_capacity(input.k_endog());
     let mut weak_instrument_f_statistics = Vec::with_capacity(input.k_endog());
     for (j, endog_name) in input.x_endog_names().iter().enumerate() {
-        let y_endog = mat_column_to_vec(input.x_endog(), j);
+        let y_endog = input.x_endog().col_as_slice(j);
         // `y_endog`・`instrument_columns`はどちらも`IvInput`（同じnで構築済み）から
         // 取り出しているため、ここで`DimensionMismatch`が実際に発生することは理論上ない
         // （`two_sls/fit.rs`の同型の第一段階ループと同じ理由）。
-        let ols_input = OlsInput::from_columns(
-            &y_endog,
+        let ols_input = OlsInput::from_column_slices(
+            y_endog,
             &instrument_columns,
             instrument_names.clone(),
             input.has_intercept(),
@@ -157,6 +159,7 @@ fn partial_f_statistic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::iv::common::mat_to_columns;
     use crate::iv::common::validation::validate_structural_cluster_count;
     use crate::shared::error::{ClusterSetting, CommonError};
     use crate::shared::group_codes::GroupCodes;

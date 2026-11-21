@@ -229,8 +229,17 @@ pub(crate) fn mat_column_to_vec(m: &Mat<f64>, col: usize) -> Vec<f64> {
 }
 
 /// `Mat<f64>`の全列を`Vec<Vec<f64>>`（列ごと）として取り出す。[`mat_column_to_vec`]参照。
+/// 本体のコードは複製せず[`mat_column_slices`]を使うので、テストの期待値を作るためだけに使う。
+#[cfg(test)]
 pub(crate) fn mat_to_columns(m: &Mat<f64>) -> Vec<Vec<f64>> {
     (0..m.ncols()).map(|j| mat_column_to_vec(m, j)).collect()
+}
+
+/// `Mat<f64>`の全列を借用スライス（列ごと）として並べる。[`mat_to_columns`]と違って複製しない
+/// （列の`Vec`への複製は、設計行列と同時に列数ぶんの複製を持つので、`OlsInput::from_column_slices`
+/// のように借用で組める呼び出し側はこちらを使う）。
+pub(crate) fn mat_column_slices(m: &Mat<f64>) -> Vec<&[f64]> {
+    (0..m.ncols()).map(|j| m.col_as_slice(j)).collect()
 }
 
 /// 2つの行列を横に連結する（`[a, b]`、行数は同じであること）。`IvInput`の`Mat`から
@@ -268,11 +277,11 @@ pub(crate) fn hcat(a: &Mat<f64>, b: &Mat<f64>) -> Mat<f64> {
 /// `input.has_intercept()`をそのまま渡せば、二重追加を避けつつ`k_constant`も
 /// 正しく設定できる（`x_exog_columns`が空でも`has_intercept=true`なら「定数項のみ」の
 /// モデルとして正しく機能する）。
-pub(crate) fn without_baked_in_intercept<'a>(
-    x_exog_columns: &'a [Vec<f64>],
+pub(crate) fn without_baked_in_intercept<'a, C>(
+    x_exog_columns: &'a [C],
     x_exog_names: &'a [String],
     has_intercept: bool,
-) -> (&'a [Vec<f64>], &'a [String]) {
+) -> (&'a [C], &'a [String]) {
     if has_intercept {
         (&x_exog_columns[1..], &x_exog_names[1..])
     } else {

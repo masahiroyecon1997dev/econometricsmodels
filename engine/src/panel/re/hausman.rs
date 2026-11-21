@@ -42,7 +42,8 @@ fn hausman_aux_wald_f(
     k: usize,
     confidence_level: f64,
 ) -> Result<f64, LeastSquaresError> {
-    AuxiliaryFit::fit(aux_input, confidence_level)?.wald_f_last_columns(&cov_type, k)
+    AuxiliaryFit::fit(aux_input, &cov_type, confidence_level, false)?
+        .wald_f_last_columns(&cov_type, k)
 }
 
 /// 補助回帰の直交座標（`b̃`・`M̃`）で、末尾`k`列（`X̃`の係数）が同時にゼロというWald検定のF統計量を
@@ -202,7 +203,8 @@ pub(super) fn re_hausman_test(
             )
             .map_err(|e| to_err(LeastSquaresError::Common(e)))?;
 
-            let aux = AuxiliaryFit::fit(aux_input, confidence_level).map_err(to_err)?;
+            let aux = AuxiliaryFit::fit(aux_input, &CovType::Classical, confidence_level, false)
+                .map_err(to_err)?;
             // `fit_auxiliary(Classical)`と同じく、`Classical`の全体F検定が計算できない補助回帰は拒否する。
             aux.require_overall_f(&CovType::Classical).map_err(to_err)?;
             let k_aux = aux.k();
@@ -224,7 +226,8 @@ pub(super) fn re_hausman_test(
             hausman_wald_f(coordinates, &meat, k_aux, k, g - 1)?
         }
         ReCovType::Dk { bandwidth, time } => {
-            let aux = AuxiliaryFit::fit(aux_input, confidence_level).map_err(to_err)?;
+            let aux = AuxiliaryFit::fit(aux_input, &CovType::Classical, confidence_level, false)
+                .map_err(to_err)?;
             aux.require_overall_f(&CovType::Classical).map_err(to_err)?;
             let n = aux.nobs();
             let k_aux = aux.k();

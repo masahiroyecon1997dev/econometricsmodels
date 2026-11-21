@@ -7,8 +7,7 @@ use super::cov::{CovStage, covariance_stage};
 use super::sargan::sargan_test;
 use super::wu_hausman::wu_hausman_test;
 use crate::iv::common::{
-    IvError, IvInput, compute_first_stage_with, hcat, mat_column_to_vec, mat_to_columns,
-    validate_iv_fit_inputs, without_baked_in_intercept,
+    IvError, IvInput, compute_first_stage_with, hcat, mat_column_to_vec, validate_iv_fit_inputs,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::CovType;
@@ -53,15 +52,6 @@ pub(super) fn fit_two_sls(
     // （`FirstStageFailed`にラップされ、`k`・`q`も構造方程式のものと食い違う）より先に弾く（`compute_first_stage`より前）。
     validate_iv_fit_inputs(&input, &cov_type)?;
 
-    // Wu-Hausman拡張回帰の`OlsInput::from_columns`が列ごとの`Vec`を受け取るため、
-    // `x_exog`の列への変換は一度だけ行い使い回す。
-    let x_exog_columns = mat_to_columns(input.x_exog());
-    // 定数項列を新規に`OlsInput::from_columns`へ渡す際は、焼き込み済みの定数項列を
-    // 除いた「素の」x_exog列を使う（`common::without_baked_in_intercept`のdoc
-    // コメント参照。Wu-Hausman拡張回帰の列の構築で使う）。
-    let (x_exog_bare, x_exog_names_bare) =
-        without_baked_in_intercept(&x_exog_columns, input.x_exog_names(), input.has_intercept());
-
     // 第一段階回帰・弱操作変数診断（部分F統計量、docs/spec/iv-spec.md 3.4節）は
     // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
     // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
@@ -85,7 +75,7 @@ pub(super) fn fit_two_sls(
     // `X = [x_exog, x_endog]`（実際の内生変数、推定値ではない）と`X̂ = [x_exog, x̂_endog]`は
     // 同じ列の並び。`x_exog`は定数項込み（`IvInput::x_exog`）。
     let n = input.nobs();
-    let y = mat_column_to_vec(input.y(), 0);
+    let y = input.y().col_as_slice(0);
     // `fitted_values()`は呼ぶたびに`n×1`を計算するので、列ごとに1回だけ呼ぶ（上のクロージャ）。
     let k_exog = input.x_exog().ncols();
     let x_hat = Mat::from_fn(n, k_exog + input.k_endog(), |i, j| {
@@ -122,7 +112,7 @@ pub(super) fn fit_two_sls(
 
     // 構造残差が丸め誤差の範囲で0なら、標準誤差とそれを使う検定統計量は定義できない。
     // 第二段階回帰の残差ではなく構造残差で判定する（第二段階は`X̂`への回帰で別の量）。
-    let sst = total_sum_of_squares(&y, None, input.has_intercept());
+    let sst = total_sum_of_squares(y, None, input.has_intercept());
     if is_perfect_fit(ssr, sst, k) {
         return Err(CommonError::PerfectFit.into());
     }
@@ -170,15 +160,7 @@ pub(super) fn fit_two_sls(
         wald_f_test(&coordinates, &meat, k_constant, df_model, df_inference)?
     };
 
-    let wu_hausman = wu_hausman_test(
-        &input,
-        first_stage_residuals,
-        x_exog_bare,
-        x_exog_names_bare,
-        &y,
-        &cov_type,
-        confidence_level,
-    )?;
+    let wu_hausman = wu_hausman_test(&input, first_stage_residuals, &cov_type, confidence_level)?;
     let sargan = sargan_test(&input, &residuals, ssr)?;
 
     Ok(TwoSlsEstimator {

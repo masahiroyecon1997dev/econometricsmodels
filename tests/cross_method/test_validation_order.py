@@ -14,7 +14,11 @@
    （FE/REの`effects`の列数の検査は、これより前に行われる）
 5. `y`・`x`などモデルの列（存在・dtype・欠損値）。順序は`y` → `x` → `effects`
 6. オプションの列（`cluster`・`hac_time`・`dk_time`・GMMの重み行列の列）
-7. エンジンの検査（`confidence_level`の範囲など）
+7. エンジンの検査。設定値 → データの大きさに依る検査の順:
+   `confidence_level` → `max_iter` → `tol` → `gmm_max_iter` → `gmm_tol` →
+   `y`の値・打ち切り境界（Logit/Probit/Tobit）。観測数の不足は、故障が入力の行を
+   変えられないので、`test_confidence_level_is_reported_before_the_observation_count`が
+   別に確かめる
 
 故障を1つずつ`FAULTS`に定義し、手法ごとに「その手法に当てはまる故障」を総当たりで
 2つ組み合わせる。順位（段階と段階内の順）が違う組について、順位が早い故障のエラーが
@@ -123,6 +127,7 @@ _NONLINEAR_FAULTS = (
     "missing_cluster_column",
     "bad_confidence_level",
     "bad_max_iter",
+    "bad_tol",
 )
 _IV_FAULTS = (
     "uint128_y",
@@ -244,6 +249,8 @@ METHODS = [
             "unused_gmm_weight_type",
             "missing_weight_time_option",
             "missing_weight_cluster_column",
+            "bad_gmm_max_iter",
+            "bad_gmm_tol",
         ),
         base_opts={"estimator": "gmm"},
         time_cov_type="hac",
@@ -254,7 +261,7 @@ METHODS = [
         "fe",
         _simple(FE, FEOptions),
         _PANEL_ARGS,
-        _PANEL_FAULTS,
+        (*_PANEL_FAULTS, "bad_max_iter", "bad_tol"),
         time_cov_type="dk",
         time_option="dk_time",
     ),
@@ -262,7 +269,7 @@ METHODS = [
         "feiv",
         _simple(FEIV, FEIVOptions),
         _FE_IV_ARGS,
-        _FE_IV_FAULTS,
+        (*_FE_IV_FAULTS, "bad_max_iter", "bad_tol"),
         time_cov_type="dk",
         time_option="dk_time",
         x_role="x_exog",
@@ -271,7 +278,13 @@ METHODS = [
         "feiv_gmm",
         _simple(FEIV, FEIVOptions),
         _FE_IV_ARGS,
-        _FE_GMM_FAULTS,
+        (
+            *_FE_GMM_FAULTS,
+            "bad_max_iter",
+            "bad_tol",
+            "bad_gmm_max_iter",
+            "bad_gmm_tol",
+        ),
         base_opts={"estimator": "gmm"},
         time_cov_type="dk",
         time_option="dk_time",
@@ -366,7 +379,9 @@ class Fault:
 # （estimator → cov_type → gmm_type → gmm_weight_type → solver → variance_method）。
 # 段階3は使われないオプション(0) → `cov_type`の必須オプションの欠落(1) →
 # `gmm_weight_type`の必須オプションの欠落(2)。段階6は`cov_type`の列(0, 1)が先、
-# GMMの重み行列の列(2)が後。同じ順位の故障は、組にしない。
+# GMMの重み行列の列(2)が後。段階7は`confidence_level`(0) → `max_iter`(1) → `tol`(2) →
+# `gmm_max_iter`(3) → `gmm_tol`(4) → `y`の値・打ち切り境界(5)。
+# 同じ順位の故障は、組にしない。
 FAULTS = {
     f.id: f
     for f in [
@@ -605,18 +620,36 @@ FAULTS = {
         ),
         Fault(
             "bad_max_iter",
-            (7, 0),
+            (7, 1),
             code=ErrorCode.MAX_ITER_OUT_OF_RANGE,
             params={"value": 0, "min": 1, "max": 10_000},
         ),
         Fault(
+            "bad_tol",
+            (7, 2),
+            code=ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+            params={"option": "tol"},
+        ),
+        Fault(
+            "bad_gmm_max_iter",
+            (7, 3),
+            code=ErrorCode.GMM_MAX_ITER_OUT_OF_RANGE,
+            params={"value": 1, "min": 3, "max": 10_000},
+        ),
+        Fault(
+            "bad_gmm_tol",
+            (7, 4),
+            code=ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+            params={"option": "gmm_tol"},
+        ),
+        Fault(
             "non_binary_y",
-            (7, 0),
+            (7, 5),
             code=ErrorCode.OUTCOME_NOT_BINARY,
         ),
         Fault(
             "bad_censoring_bounds",
-            (7, 0),
+            (7, 5),
             code=ErrorCode.CENSORING_BOUNDS_NOT_ORDERED,
             params={"lower": 1.0, "upper": 0.0},
         ),
@@ -739,6 +772,12 @@ def changes(method: Method, fault_id: str) -> Changes:
             return {}, {"confidence_level": 2.0}
         case "bad_max_iter":
             return {}, {"max_iter": 0}
+        case "bad_tol":
+            return {}, {"tol": -1.0}
+        case "bad_gmm_max_iter":
+            return {}, {"gmm_type": "iterated", "gmm_max_iter": 1}
+        case "bad_gmm_tol":
+            return {}, {"gmm_type": "iterated", "gmm_tol": -1.0}
         case "non_binary_y":
             return {"y": "y"}, {}
         case "bad_censoring_bounds":
@@ -911,3 +950,24 @@ def test_every_method_covers_every_stage_boundary(method):
     }
     for boundary in BOUNDARIES:
         assert boundary in covered, boundary
+
+
+# ── 観測数が足りない入力での`confidence_level` ───────────────────────
+
+
+@pytest.mark.parametrize("method", _method_params())
+def test_confidence_level_is_reported_before_the_observation_count(df, method):
+    """行数が足りない入力でも、範囲外の`confidence_level`が先に報告される。
+
+    故障は入力の行を変えられないので、組合せには入れず、ここで別に確かめる。
+    先頭の2行だけにすると、どの手法も観測数（FE/RE/FEIVは自由度やsingleton）が足りず、
+    `confidence_level`が正しければ`ValidationError`になる。
+    """
+    small = df.head(2)
+    args = dict(method.base_args)
+    opts = dict(method.base_opts)
+    # 前提: 行数が足りない入力は、それだけで`ValidationError`になる。
+    with pytest.raises(ValidationError):
+        method.run(small, args, opts)
+    with raises_error(ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=2.0):
+        method.run(small, args, {**opts, "confidence_level": 2.0})

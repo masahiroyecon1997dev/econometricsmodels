@@ -1873,7 +1873,7 @@ def check_predict_new_data_without_intercept_matches_statsmodels(
 
 
 def check_predict_with_include_intercept_false_and_x_named_const(
-    estimator_cls, options_cls, link
+    estimator_cls, options_cls, link, *, rtol: float
 ) -> None:
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
     `predict(new_data=...)`が正しく動作すること（OLSの`test_predict_with_include_
@@ -1889,7 +1889,9 @@ def check_predict_with_include_intercept_false_and_x_named_const(
 
     `link`はリンク関数（Logitは`Λ`、Probitは`Φ`）を`z -> probability`の
     呼び出し可能オブジェクトとして呼び出し側から渡す（このcheck自体はLogit/
-    Probit共有のため、期待値の計算式だけを手法ごとに差し替える）。
+    Probit共有のため、期待値の計算式だけを手法ごとに差し替える）。`rtol`は
+    予測確率と`link`の値の相対許容誤差（確率が極小になりうるので相対誤差のみで
+    比べ、絶対誤差の下限は置かない）。
     """
     df = pl.DataFrame(
         {
@@ -1911,7 +1913,7 @@ def check_predict_with_include_intercept_false_and_x_named_const(
     ):
         z = coef_const * c + coef_x2 * x2
         expected = link(z)
-        assert abs(prob - expected) < 1e-9, f"probability/{i}"
+        assert_close(prob, expected, f"probability/{i}", rtol=rtol, atol=0.0)
 
 
 def check_cluster_unused_by_cov_type_raises(

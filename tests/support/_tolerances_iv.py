@@ -75,12 +75,18 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     # 最大相対差は、D1・D2の全ケースで9.8e-16、誤差がほぼ比例するケース（`min tr(S1)/
     # tr(W1)` が約1e-13まで）で2.1e-14。
     # `atol_table1`: 論文Table 1は小数第2位に丸めてあるため、丸めの半分（0.005）。
+    # `atol_published_critical_value`: 2.2.3節の一般化TSLS臨界値（K=3で8.53、K=30で12.27）。
+    # Table 1と同じく小数第2位に丸めた公表値なので、丸めの半分（0.005）。
+    # `atol_rounding_slack`: 公表値の丸めの半分ちょうど（0.005）の差が浮動小数点の
+    # 誤差で超過しないための上乗せ。上の2つの`atol`に足して使う。
     # `rtol_published_b`: 同次分散での`B_TSLS = |1 - 2/K|`は閉じた式との比較で、
     # 最大化の格子の打ち切り（`|beta| <= 1e8`）が効く`beta`軸の方法でも1e-8に収まる。
     "mop_oracle": {
         "rtol_effective": 1e-10,
         "rtol_b_tsls": 1e-8,
         "atol_table1": 0.005,
+        "atol_published_critical_value": 0.005,
+        "atol_rounding_slack": 1e-9,
         "rtol_published_b": 1e-8,
     },
     # --- 弱操作変数診断（`IVResults.cragg_donald()`等）。リファレンスはlinearmodelsの

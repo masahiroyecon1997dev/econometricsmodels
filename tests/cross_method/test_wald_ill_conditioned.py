@@ -14,6 +14,7 @@ from fractions import Fraction
 import numpy as np
 import polars as pl
 import pytest
+from _assertions import assert_close
 from econometricsmodels import IV, IVOptions, Tobit, TobitOptions
 
 # 2つの傾き（a, b）の相関が1 - 5e-9程度になる強い準共線。
@@ -73,8 +74,8 @@ def _exact_wald_quadratic_form(res) -> float:
     return float(sum(b * s for b, s in zip(beta, solved)))
 
 
-def _assert_relative_close(got: float, expected: float) -> None:
-    assert abs(got - expected) <= RTOL * abs(expected), (got, expected)
+def _assert_relative_close(got: float, expected: float, label: str) -> None:
+    assert_close(got, expected, label, rtol=RTOL, atol=0.0)
 
 
 @pytest.mark.parametrize("cov_type", ["hc1", "cluster", "hac"])
@@ -95,7 +96,9 @@ def test_iv_2sls_wald_f_matches_exact_quadratic_form(cov_type):
     n_slopes = len(res.param_names) - 1
     # 2SLSの統計量はF = W / q。
     _assert_relative_close(
-        res.wald_statistic, _exact_wald_quadratic_form(res) / n_slopes
+        res.wald_statistic,
+        _exact_wald_quadratic_form(res) / n_slopes,
+        f"iv_2sls/wald_statistic/{cov_type}",
     )
 
 
@@ -118,7 +121,11 @@ def test_iv_gmm_wald_chi2_matches_exact_quadratic_form(cov_type):
     ).fit()
 
     # GMMの統計量はχ²（q で割らない生の二次形式）。
-    _assert_relative_close(res.wald_statistic, _exact_wald_quadratic_form(res))
+    _assert_relative_close(
+        res.wald_statistic,
+        _exact_wald_quadratic_form(res),
+        f"iv_gmm/wald_statistic/{cov_type}",
+    )
 
 
 @pytest.mark.parametrize("cov_type", ["hc0", "hc1", "cluster"])
@@ -131,4 +138,8 @@ def test_tobit_wald_chi2_matches_exact_quadratic_form(cov_type):
         options=TobitOptions(cov_type=cov_type, lower=0.0, **kwargs),
     ).fit()
 
-    _assert_relative_close(res.wald_statistic, _exact_wald_quadratic_form(res))
+    _assert_relative_close(
+        res.wald_statistic,
+        _exact_wald_quadratic_form(res),
+        f"tobit/wald_statistic/{cov_type}",
+    )

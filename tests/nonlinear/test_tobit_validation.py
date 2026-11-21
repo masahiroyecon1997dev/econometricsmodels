@@ -837,7 +837,10 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(solver):
         df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
     ).fit()
 
-    # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。許容幅は「真値を回復し、
+    # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。参照値（真値）との
+    # 差の許容幅が`TOLERANCES`の「リファレンスとの実測の最大差＋マージン」ではなく、
+    # 回復を判定するバウンドなので、`assert_close`ではなく明示的な`abs`・範囲比較で書く。
+    # 許容幅は「真値を回復し、
     # かつσ→0退化に倒れていない」ことだけを担保する緩いバンド。実測は（既定solverで）
     # x1≈99.91・x2≈0.52・const≈0.15・σ≈0.94だが、将来の
     # ソルバー変更でのメソッド間変動を吸収するためマージンを広く取る。σの下限0.5は
@@ -892,6 +895,10 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
     res = Tobit(df, y="y", x=["x1", "x2"]).fit()
 
     assert res.converged is True
+    # リファレンス数値照合ではなく、DGPの真値の回復バウンド（`assert_close`を使わない理由は
+    # 上のテストのコメント参照）。ノイズが極小（0.001）なので真値からの差は数値最適化の
+    # 精度で決まり、`x`の係数は真値±0.01、σ（真値0.001、実測≈0.00094）は0より大きく
+    # 真値の2倍未満に収まることを固定する。
     assert abs(res.params["x1"] - 100.0) < 0.01
     assert abs(res.params["x2"] - 0.5) < 0.01
     assert abs(res.sigma - 0.001) < 0.001
@@ -919,7 +926,10 @@ def test_many_regressors_no_false_separation():
     res = Tobit(df, y="y", x=[f"x{j}" for j in range(k)]).fit()
 
     assert res.converged
-    # 代表的な係数が真値近傍（厳密照合は数値テストの領分）。
+    # リファレンス数値照合ではなく、DGPの真値の回復バウンド（`assert_close`を使わない理由は
+    # `test_large_true_coefficient_dgp_converges_and_recovers_truth`のコメント参照）。
+    # 代表的な係数（x0の真値1.0、x1の真値-0.7）が真値の近傍にあり、σが真値1.5の近傍に
+    # あること。厳密照合は数値テストの領分。
     assert abs(res.params["x0"] - 1.0) < 0.5
     assert abs(res.params["x1"] - (-0.7)) < 0.5
     assert 1.0 < res.sigma < 2.0
@@ -945,7 +955,9 @@ def test_mroz_hours_raw_scale_converges_without_false_separation():
 
     assert res.converged
     assert res.n_obs == 753
-    # Wooldridge Example 17.2 の水準（educ の係数 ≈ 80.6）。
+    # リファレンス数値照合ではなく、教科書の水準（Wooldridge Example 17.2のeducの係数
+    # ≈ 80.6）の近傍にあることのバウンド（`assert_close`を使わない理由は
+    # `test_large_true_coefficient_dgp_converges_and_recovers_truth`のコメント参照）。
     assert abs(res.params["educ"] - 80.6) < 5.0
     assert 1000.0 < res.sigma < 1250.0
 

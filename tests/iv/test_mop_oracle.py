@@ -111,8 +111,12 @@ def test_patnaik_critical_values_reproduce_table_1(k: int) -> None:
     for x, expected in zip(TABLE1_COLUMNS, TABLE1[k - 1], strict=True):
         cv = mop.patnaik_critical_value(np.eye(k), x, alpha=0.05)
         _close(cv.k_eff, float(k), f"K_eff K={k} x={x:.3f}")
-        assert abs(cv.value - expected) <= _TOL["atol_table1"] + 1e-9, (
-            f"K={k}, x={x:.3f}: ours={cv.value!r}, paper={expected}"
+        assert_close(
+            cv.value,
+            expected,
+            f"Table 1 K={k} x={x:.3f}",
+            rtol=0.0,
+            atol=_TOL["atol_table1"] + _TOL["atol_rounding_slack"],
         )
 
 
@@ -124,7 +128,15 @@ def test_homoskedastic_generalized_tsls_matches_published_values(
     """2.2.3節: tau=0.10、alpha=0.05の一般化TSLS臨界値は K=3 で 8.53、K=30 で 12.27。"""
     rf = _homoskedastic(k, _OMEGA)
     res = mop.mop_effective_f(rf, alpha=0.05, method=method)
-    assert abs(res.generalized[_TAU_10].value - published) <= 0.005 + 1e-9
+    assert_close(
+        res.generalized[_TAU_10].value,
+        published,
+        f"generalized TSLS critical value K={k} method={method}",
+        rtol=0.0,
+        atol=(
+            _TOL["atol_published_critical_value"] + _TOL["atol_rounding_slack"]
+        ),
+    )
 
 
 @pytest.mark.parametrize("k", [1, 3, 5, 10, 30])

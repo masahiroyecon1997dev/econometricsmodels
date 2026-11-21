@@ -72,7 +72,9 @@ def unconsumed_cov_leaves() -> list[str]:
 
 
 # 行列の対角成分の平方根と`std_errors`の一致。同じ計算から取り出した値なので機械精度で一致する
-# （実測は丸め誤差のみ）。
+# （実測は丸め誤差のみ）。読み込み時の整合チェックで、`_assertions`が`mark_cov_consumed`を
+# このモジュールから取り込むため、`assert_close`を使うと循環importになる。直書きの
+# `abs`比較を残す理由はこれ。
 _DIAG_RTOL = 1e-10
 
 

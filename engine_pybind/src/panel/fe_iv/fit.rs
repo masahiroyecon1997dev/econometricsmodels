@@ -175,27 +175,28 @@ pub(super) fn compute_c_statistic(
     options: &FEIVOptions,
     target: &CStatisticTarget,
 ) -> PyResult<CStatistic> {
-    let built = build_fe_iv_input(df, columns, options)?;
-    let weight = match &built.gmm {
-        Some(gmm) => c_statistic_weight(&gmm.gmm_type),
+    let BuiltFeIvInput {
+        input,
+        effects,
+        cov_type,
+        gmm,
+        ..
+    } = build_fe_iv_input(df, columns, options)?;
+    // 重みは値で受けて移す（`GroupCodes`は行数に比例する）。
+    let weight = match gmm {
+        Some(gmm) => c_statistic_weight(gmm.gmm_type),
         None => {
-            let entity_groups = &built.input.index().effect_codes()[0];
+            let entity_groups = &input.index().effect_codes()[0];
             // `dk`は`FEIVResult::c_stat`が先に弾く（再推定の前）。ここに来るのは到達不能な状態。
-            c_statistic_weight_for_cov_type(&built.cov_type, entity_groups).ok_or_else(|| {
+            c_statistic_weight_for_cov_type(cov_type, entity_groups).ok_or_else(|| {
                 internal_error(
                     "the C statistic was requested for a Driscoll-Kraay covariance of a two-stage least squares fit",
                 )
             })?
         }
     };
-    fe_gmm_c_statistic(
-        &built.input,
-        built.effects,
-        &absorption(options),
-        target,
-        &weight,
-    )
-    .map_err(panel_error_to_pyerr)
+    fe_gmm_c_statistic(&input, effects, &absorption(options), target, &weight)
+        .map_err(panel_error_to_pyerr)
 }
 
 /// Pythonから渡された`data`・列名・`options`を検証し、推定量を推定して`FEIVResult`として返す。

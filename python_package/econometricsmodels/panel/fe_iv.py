@@ -533,7 +533,9 @@ class FEIVResults:
     def weak_instrument_f_df_num(self) -> int | None:
         """Numerator degrees of freedom of the weak-instrument F
         statistics (the number of excluded instruments; the same for
-        every endogenous variable). The same for both estimators."""
+        every endogenous variable). The type allows `None`, but the value
+        is always an integer, because `x_endog` always has at least one
+        variable."""
         return self._raw.weak_instrument_f_df_num
 
     @property
@@ -541,7 +543,9 @@ class FEIVResults:
         """Denominator degrees of freedom of the weak-instrument F
         statistics (residual degrees of freedom of the first-stage
         regressions after the absorbed fixed effects; the same for every
-        endogenous variable). The same for both estimators."""
+        endogenous variable). The type allows `None`, but the value is
+        always an integer, because `x_endog` always has at least one
+        variable."""
         return self._raw.weak_instrument_f_df_denom
 
     @property
@@ -570,7 +574,11 @@ class FEIVResults:
         makes the test over-reject on a short panel.
 
         `None` when just-identified (`len(instruments) ==
-        len(x_endog)`, degrees of freedom 0).
+        len(x_endog)`, degrees of freedom 0). This is the only case in
+        which it is `None`: the weight matrix of the Sargan statistic does
+        not depend on `cov_type`, so there is no singular-weight case, and
+        with `estimator="gmm"` a singular weight matrix makes `fit()`
+        raise an error instead of returning `None`.
         """
         return self._raw.overid_statistic
 
@@ -578,7 +586,8 @@ class FEIVResults:
     def overid_p_value(self) -> float | None:
         """P-value of the overidentification test.
 
-        Same conditions as `overid_statistic` for when this is `None`.
+        `None` under the same conditions as `overid_statistic`, which
+        are the same for `estimator="2sls"` and `estimator="gmm"`.
         """
         return self._raw.overid_p_value
 
@@ -586,7 +595,8 @@ class FEIVResults:
     def overid_df(self) -> int | None:
         """Degrees of freedom of the chi-squared overidentification test
         (`len(instruments) - len(x_endog)`). `None` under the same
-        conditions as `overid_statistic`."""
+        conditions as `overid_statistic`, which are the same for
+        `estimator="2sls"` and `estimator="gmm"`."""
         return self._raw.overid_df
 
     @property
@@ -616,7 +626,8 @@ class FEIVResults:
     def wu_hausman_p_value(self) -> float | None:
         """P-value of the Wu-Hausman test.
 
-        `None` under the same conditions as `wu_hausman_statistic`.
+        `None` under the same conditions as `wu_hausman_statistic`, which
+        are the same for `estimator="2sls"` and `estimator="gmm"`.
         """
         return self._raw.wu_hausman_p_value
 
@@ -624,7 +635,8 @@ class FEIVResults:
     def wu_hausman_df_num(self) -> int | None:
         """Numerator degrees of freedom of the Wu-Hausman F test (the
         number of endogenous variables). `None` under the same conditions
-        as `wu_hausman_statistic`."""
+        as `wu_hausman_statistic`, which are the same for
+        `estimator="2sls"` and `estimator="gmm"`."""
         return self._raw.wu_hausman_df_num
 
     @property
@@ -634,7 +646,8 @@ class FEIVResults:
         `cov_type="cluster"`, the number of `dk_time` periods minus 1 for
         `"dk"`, and the residual degrees of freedom of the augmented
         regression otherwise. `None` under the same conditions as
-        `wu_hausman_statistic`."""
+        `wu_hausman_statistic`, which are the same for `estimator="2sls"`
+        and `estimator="gmm"`."""
         return self._raw.wu_hausman_df_denom
 
     def params_table(self) -> list[dict[str, float | str]]:
@@ -814,20 +827,20 @@ class FEIVResults:
 
         Tests whether endogenous variables in `variables` are in fact
         exogenous, and whether excluded instruments in `instruments` are
-        uncorrelated with the error. The statistic is the difference of
-        two Hansen J statistics, computed on the within-transformed data
-        from a two-step GMM estimate with and without the tested moment
-        conditions. It is chi-squared distributed under the null that
-        the tested moment conditions are valid. The test is conditional:
-        the remaining instruments are taken as valid. Both J statistics
-        use the same estimate of the covariance of the moment conditions,
-        so the statistic is never negative. Pass `variables`,
+        uncorrelated with the error. The model is estimated by two-step
+        GMM on the within-transformed data with and without the tested
+        moment conditions. The statistic is the difference of the two
+        Hansen J statistics. Under the null that the tested moment
+        conditions are valid, it is chi-squared distributed. The test is
+        conditional: the remaining instruments are taken as valid. Both J
+        statistics use the same estimate of the covariance of the moment
+        conditions, so the statistic is never negative. Pass `variables`,
         `instruments` or both.
 
         With `estimator="gmm"`, the covariance of the moment conditions
         follows `gmm_weight_type` (grouped by `cluster` for the cluster
-        weight) when `gmm_type` is `"two_step"` or `"iterated"`, and is
-        the classical one for `gmm_type="one_step"`, which has no weight
+        weight) when `gmm_type` is `"two_step"` or `"iterated"`, and is the
+        classical one for `gmm_type="one_step"`, which has no weight
         type. It does not depend on `cov_type`, `gmm_max_iter` or
         `gmm_tol`, and a model fitted with `gmm_type="one_step"` or
         `"iterated"` gets the two-step statistic.
@@ -852,9 +865,9 @@ class FEIVResults:
         nested in the entities) is the safe choice on a short panel.
 
         This is a post-estimation diagnostic: it is never computed by
-        `fit()`. It re-reads the variables from the data passed to
-        `fit()` (keep that data unchanged) and estimates the model again
-        on every call.
+        `fit()`. It re-reads the variables from the data passed to `fit()`
+        (keep that data unchanged) and estimates the model again on every
+        call.
 
         Args:
             variables: Names from `x_endog` whose exogeneity is tested.
@@ -872,21 +885,21 @@ class FEIVResults:
 
         Raises:
             TypeError: `variables` or `instruments` is not a list of str.
-            ValidationError: The model was fitted with
-                `estimator="2sls"` and `cov_type="dk"`, neither argument
-                is given, a list is empty or repeats a name, a name in
-                `variables` is not in `x_endog`, a name in `instruments`
-                is not among the excluded instruments, or so many
-                instruments are tested
-                that fewer excluded instruments than endogenous variables
-                remain.
+            ValidationError: Neither argument is given, a list is empty
+                or repeats a name, a name in `variables` is not in
+                `x_endog`, a name in `instruments` is not among the
+                excluded instruments, so many instruments are tested that
+                fewer excluded instruments than endogenous variables
+                remain, or the model was fitted with `estimator="2sls"`
+                and `cov_type="dk"`.
             ComputationError: The statistic is undefined for these data, for
                 example because the instruments are collinear, or because
                 there are fewer clusters than the columns of the full
                 instrument set (the exogenous regressors, the tested
                 endogenous variables and all excluded instruments). Unlike
                 `fit()`, which rejects too few clusters for the cluster
-                weight with a `ValidationError`, the diagnostic can only
-                detect this while computing.
+                weight of GMM (`gmm_weight_type="cluster"`) with a
+                `ValidationError`, the diagnostic can only detect this
+                while computing.
         """
         return c_statistic_result(self._raw.c_stat(variables, instruments))

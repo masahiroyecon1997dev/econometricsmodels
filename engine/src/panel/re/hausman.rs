@@ -156,12 +156,10 @@ pub(super) fn re_hausman_test(
         return Ok(None);
     }
 
-    let mut columns = x_star.to_vec();
-    columns.extend(
-        tested
-            .iter()
-            .map(|&m| x_within_mat.col_as_slice(m).to_vec()),
-    );
+    // 補助回帰の列は、`X*`（呼び出し側の列）と`X̃`（within変換済みの行列の列）の借用で並べる
+    // （`Vec`に複製すると、設計行列と同時に列数ぶんの複製を持ち、ピークメモリが増える）。
+    let mut columns: Vec<&[f64]> = x_star.iter().map(Vec::as_slice).collect();
+    columns.extend(tested.iter().map(|&m| x_within_mat.col_as_slice(m)));
     let mut names = x_star_names.to_vec();
     names.extend(
         tested
@@ -169,8 +167,9 @@ pub(super) fn re_hausman_test(
             .map(|&m| format!("{}_within", fe.input().x_names()[m])),
     );
 
-    let aux_input = OlsInput::from_columns(y_star, &columns, names, true, dep_var_name.to_string())
-        .map_err(to_err)?;
+    let aux_input =
+        OlsInput::from_column_slices(y_star, &columns, names, true, dep_var_name.to_string())
+            .map_err(to_err)?;
 
     // Classical/Hc1〜Hc3は`OlsEstimator`の同名`CovType`でそのまま当てはめる。Cluster・Dkは
     // `OlsEstimator`が`String`列でグループ化する・Newey-West型HACと別物のため使わず、

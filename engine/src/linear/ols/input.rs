@@ -99,6 +99,26 @@ impl OlsInput {
         )
     }
 
+    /// [`from_columns`](Self::from_columns)と同じ入力検査・同じ結果で、`x_columns`を借用スライスで
+    /// 受け取る。補助回帰（ハウスマン検定・診断検定）のように、すでにある列を並べ替えて
+    /// 設計行列を組むだけのとき、列を`Vec`に複製せずに済む（複製すると、設計行列と同時に
+    /// 列数ぶんの複製を持つ）。
+    ///
+    /// # Errors
+    /// [`from_columns`](Self::from_columns)と同じ。
+    ///
+    /// # パニックについて
+    /// [`from_columns`](Self::from_columns)と同じ。
+    pub(crate) fn from_column_slices(
+        y: &[f64],
+        x_columns: &[&[f64]],
+        x_names: Vec<String>,
+        include_intercept: bool,
+        dep_var_name: String,
+    ) -> Result<Self, LeastSquaresError> {
+        Self::from_columns_impl(y, x_columns, x_names, include_intercept, dep_var_name, None)
+    }
+
     /// `from_columns`/`from_columns_weighted`共通の組み立てロジック。`weights`が`Some`の場合、
     /// 設計行列（自動追加される切片列を含む）・yの各行を`sqrt(weights[i])`倍する。`None`の場合は
     /// 全行`1.0`倍（`sqrt(1.0) = 1.0`）と等価で、`from_columns`はこれまでと完全に同じ結果になる。
@@ -107,9 +127,9 @@ impl OlsInput {
     /// `weights=None`版を呼ぶ」という実装は誤り。それだと自動追加される切片列（すべて1.0）が
     /// 重み付けされないままになる。重み変換は行列組み立てそのものの中（この関数）で行う必要がある
     /// （`docs/spec/wls-spec.md`「sqrt(w)変換」参照）。
-    fn from_columns_impl(
+    fn from_columns_impl<C: AsRef<[f64]>>(
         y: &[f64],
-        x_columns: &[Vec<f64>],
+        x_columns: &[C],
         x_names: Vec<String>,
         include_intercept: bool,
         dep_var_name: String,
@@ -121,6 +141,7 @@ impl OlsInput {
             "x_columns and x_names must have the same length"
         );
         for col in x_columns {
+            let col = col.as_ref();
             if col.len() != y.len() {
                 return Err(CommonError::DimensionMismatch {
                     y_rows: y.len(),
@@ -237,6 +258,54 @@ mod tests {
         assert_eq!(*input.x().get(0, 1), 10.0);
         assert_eq!(*input.x().get(2, 1), 30.0);
         assert_eq!(*input.y().get(2, 0), 3.0);
+    }
+
+    #[test]
+    fn from_column_slices_matches_from_columns() {
+        let y = vec![1.0, 2.0, 3.0];
+        let x_columns = vec![vec![10.0, 20.0, 30.0], vec![-1.0, 0.5, 2.0]];
+        let names = || vec!["x1".to_string(), "x2".to_string()];
+        let slices: Vec<&[f64]> = x_columns.iter().map(Vec::as_slice).collect();
+
+        for include_intercept in [true, false] {
+            let owned =
+                OlsInput::from_columns(&y, &x_columns, names(), include_intercept, "y".to_string())
+                    .unwrap();
+            let borrowed = OlsInput::from_column_slices(
+                &y,
+                &slices,
+                names(),
+                include_intercept,
+                "y".to_string(),
+            )
+            .unwrap();
+
+            assert_eq!(borrowed.x(), owned.x());
+            assert_eq!(borrowed.y(), owned.y());
+            assert_eq!(borrowed.param_names(), owned.param_names());
+            assert_eq!(borrowed.has_intercept(), owned.has_intercept());
+        }
+    }
+
+    #[test]
+    fn from_column_slices_returns_dimension_mismatch_on_mismatched_column_length() {
+        let y = vec![1.0, 2.0, 3.0];
+        let short = [10.0, 20.0];
+        let result = OlsInput::from_column_slices(
+            &y,
+            &[short.as_slice()],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::DimensionMismatch {
+                y_rows: 3,
+                x_rows: 2
+            })
+        );
     }
 
     #[test]

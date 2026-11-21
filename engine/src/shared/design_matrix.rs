@@ -13,11 +13,22 @@
 /// `*Input::from_columns`の切片列自動追加）と新規データ側が同じ規約を共有するために
 /// 存在する。将来どちらか一方だけ規約を変更（例: 切片列の位置）した場合に静かに
 /// 不整合になるリスクがあるため、共有ヘルパーとして切り出している。
-pub fn design_matrix_element(has_intercept: bool, columns: &[Vec<f64>], i: usize, j: usize) -> f64 {
+///
+/// 列の持ち方は`Vec<f64>`でも借用スライス`&[f64]`でもよい（`AsRef<[f64]>`）。
+pub fn design_matrix_element<C: AsRef<[f64]>>(
+    has_intercept: bool,
+    columns: &[C],
+    i: usize,
+    j: usize,
+) -> f64 {
     if has_intercept {
-        if j == 0 { 1.0 } else { columns[j - 1][i] }
+        if j == 0 {
+            1.0
+        } else {
+            columns[j - 1].as_ref()[i]
+        }
     } else {
-        columns[j][i]
+        columns[j].as_ref()[i]
     }
 }
 

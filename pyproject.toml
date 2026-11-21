@@ -74,7 +74,7 @@ test = [
     # `ncx2`の分位点。statsmodels/linearmodelsの間接依存としても入るが、オラクルが
     # 直接importするため明示し、数値が変わらないよう`==`で固定する。
     "scipy==1.18.0",
-    "ruff==0.17.3",
+    "ruff==0.17.4",
     # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
     # wooldridge_loader）。標準CIで確実に実行されるよう
     # 専用グループからここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
@@ -92,7 +92,7 @@ test = [
     # （statsmodels/linearmodels/R）へ渡すためpandasに変換する箇所と、benchmark/・
     # performance/配下のリファレンス実装アダプタ（compare_*.py）が使う。pandas側は
     # 直接依存に含めない。
-    "pyarrow==26.0.0",
+    "pyarrow==26.0.1",
 ]
 dev = [
     "maturin==1.16.0",

@@ -230,6 +230,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 ### 3.3 GMMの推定方式（`gmm_type`/`gmm_max_iter`/`gmm_tol`）
 
+- **GMMは白色化した操作変数の空間でのOLSとして解き、共分散・全体Wald・Hansen Jもその座標で求める**（初期推定・古典的重みは`Z`のQR、ロバスト・クラスター・HACの重みは`S`を明示的に作らずCholeskyか`S = A'A`の`A`のQR）。式・ガード（`GMM_BREAD`・`GMM_WEIGHT`）・精度・限界は[`orthogonal-coordinates.md`](./orthogonal-coordinates.md)4.2節。
+
 - **用語**: 「1-step GMM」（`gmm_type="one_step"`）は残差に基づく重みの再構築を一切行わず
   アドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（2SLSと同じ結果）。「2-step efficient GMM」
   （`"two_step"`、既定）は「初期推定→残差からS構築→S⁻¹で再推定」の2段階手続き。

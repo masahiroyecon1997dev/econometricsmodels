@@ -5,6 +5,8 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 [`re-spec.md`](./re-spec.md)を参照し、本ドキュメントには2手法が共有する設計判断のみを
 記載する。
 
+共分散と全体F・Hausman・Wu-Hausmanは設計行列のQR（直交座標）で計算する。構成・受け入れ境界・REの別名窓・テスト方針は[`orthogonal-coordinates.md`](./orthogonal-coordinates.md)。
+
 ## 1. 引数設計
 
 ### 1.1 `y` / `x` / `effects` のシグネチャ

@@ -203,7 +203,7 @@ Tobit固有の差分:
   両側から適用し、`β`-`σ`間の共分散も含めて`(β, σ)`空間へ変換する（対角成分＝`Var(σ)≈σ²·Var(log σ)`
   だけの変換に留めない。限界効果等での`cov_params`再利用を見据えた設計）。`std_errors()`等は
   `β∪{σ}`の`k+1`長ベクトル（`k`番目が`σ`）として公開する。
-- **直交座標での計算と受け入れ境界（ほぼ共線な傾き）**: `cov_params`と全体Wald検定は、標準化空間の
+- **直交座標での計算と受け入れ境界（ほぼ共線な傾き）**: 共通の設計は[`orthogonal-coordinates.md`](./orthogonal-coordinates.md)。`cov_params`と全体Wald検定は、標準化空間の
   `A = -H`のコレスキー因子`A = R'R`で作る（`nonlinear/common/cov.rs`の`orthogonal_inference_for_type`、
   部品は`shared/orthonormal.rs`の`information_factor`・`solve_upper_from_right`・
   `covariance_from_factor`）。パラメータを`[切片, logσ, 傾き...]`に並べ替え（`R`が上三角なので

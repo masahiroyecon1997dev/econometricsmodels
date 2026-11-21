@@ -190,7 +190,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   求める**: 統計量は`b̃_S' M̃_SS⁻¹ b̃_S`（`b̃ = Q'y`、`M̃`は`x = Q`・`xtx_inv = 単位行列`で既存のmeat
   構築部品を呼んで得る）、係数の共分散は`V = R⁻¹M̃R⁻ᵀ`（`shared::orthonormal`）。傾きの相関が`1 - 5e-13`でも、厳密な有理数演算との相対誤差は
   `1e-11`（`tests/support/_exact_wald.py`）。標準誤差は旧経路との差が凍結データ79件で最大`2e-12`。
-  この経路はOLS・WLS・IV 2SLS・FE・RE・FE-IV。IV GMM・FE-GMMは白色化した操作変数の座標（`iv-spec.md`）、Tobitは`-H`のコレスキー因子の座標（`tobit-spec.md`3.3節）。
+  この経路はOLS・WLS・IV 2SLS・FE・RE・FE-IV。IV GMM・FE-GMMは白色化した操作変数の座標（`iv-spec.md`）、Tobitは`-H`のコレスキー因子の座標（`tobit-spec.md`3.3節）。 共通の設計・受け入れ境界・テスト方針は`orthogonal-coordinates.md`。
 - **被説明変数が定数（`OUTCOME_CONSTANT`）**: 切片のあるモデルで`y`が（丸め誤差の範囲で）全行で
   同じ値だと、中心化した総平方和が0でR²が定義できない。入力だけから分かるので、QR分解より前に
   `ValidationError`にする。切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。

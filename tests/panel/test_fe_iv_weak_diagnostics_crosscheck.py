@@ -14,9 +14,12 @@ ivDiagが返すのは内生変数が1個のときの次の統計量だけ。
 - Kleibergen-Paapのrk Wald F: `hc1`は`F.robust`、クラスターは`F.cluster`。
 - 有効F（`eff_F`）: `hc1`はrobust、クラスターはcluster。
 
-1-wayの個体FEは`classical`・`hc1`・個体クラスター・時点クラスター・region・不均衡なregion、2-wayは
-`classical`・`hc1`だけ。2-wayの固定効果でのクラスター頑健なFは、ivDiagが本実装とも、本実装と一致する
-fixestの第一段階のWald F（`test_fe_iv_reference.py`）とも一致しない（原因は追っていない）。rk LM・Stock-Yogoの臨界値・内生変数が複数のシナリオ・3-way・DK・
+1-wayの個体FEは`classical`・`hc1`・個体クラスター・時点クラスター・region・不均衡なregion・sector、
+2-wayは`classical`・`hc1`・`sector`クラスター。2-wayで個体・時点・regionのクラスターを含めないのは、
+ivDiag（lfe）がクラスター頑健共分散の自由度`K`を、固定効果のどれかがクラスターにネストすると、ネストしない
+固定効果も含めて外すため（fixestと本実装はネストした固定効果だけを外す）。そのF・有効Fは
+`(N - K_lfe) / (N - K)`倍ずれ、本実装ともfixestの第一段階のWald F（`test_fe_iv_reference.py`）とも合わない。
+`sector`はどの個体・時点にも複数の水準が現れるのでネストせず、一致する。rk LM・Stock-Yogoの臨界値・内生変数が複数のシナリオ・3-way・DK・
 HC2・HC3は比べられず、ダミー変数を明示した2SLSとMOPの独立実装だけが参照になる。
 """
 

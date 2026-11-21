@@ -14,6 +14,11 @@
         "rk_wald_f": 166.25198242294,
         "effective_f": 153.67370050035
       },
+      "cluster_sector": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 320.399918874864,
+        "effective_f": 220.201338620147
+      },
       "cluster_time": {
         "cragg_donald_f": 172.721999905404,
         "rk_wald_f": 478.466459262718,
@@ -219,6 +224,11 @@
         "rk_wald_f": 278.530373825036,
         "effective_f": 196.846912044739
       },
+      "cluster_sector": {
+        "cragg_donald_f": 183.524275494404,
+        "rk_wald_f": 182.753157484325,
+        "effective_f": 185.641658380267
+      },
       "cluster_time": {
         "cragg_donald_f": 183.524275494404,
         "rk_wald_f": 391.106080691147,
@@ -243,6 +253,11 @@
         "cragg_donald_f": 126.744931915765,
         "rk_wald_f": 123.178211434114,
         "effective_f": 108.000897918451
+      },
+      "cluster_sector": {
+        "cragg_donald_f": 126.744931915766,
+        "rk_wald_f": 919.514069106731,
+        "effective_f": 126.059662642838
       },
       "cluster_time": {
         "cragg_donald_f": 126.744931915766,
@@ -439,6 +454,11 @@
           "cragg_donald_f": 167.687605538462,
           "rk_wald_f": 170.775594027503,
           "effective_f": 162.235679154212
+        },
+        "cluster_sector": {
+          "cragg_donald_f": 167.687605538461,
+          "rk_wald_f": 389.501309896367,
+          "effective_f": 187.239904130983
         }
       },
       "unbalanced": {
@@ -449,6 +469,11 @@
           "cragg_donald_f": 120.094690377529,
           "rk_wald_f": 112.375187145033,
           "effective_f": 102.825664912965
+        },
+        "cluster_sector": {
+          "cragg_donald_f": 120.094690377529,
+          "rk_wald_f": 1113.94044698853,
+          "effective_f": 94.6354389470229
         }
       },
       "long_panel": {
@@ -459,6 +484,11 @@
           "cragg_donald_f": 185.266304920583,
           "rk_wald_f": 198.479217448758,
           "effective_f": 170.006900102659
+        },
+        "cluster_sector": {
+          "cragg_donald_f": 185.266304920583,
+          "rk_wald_f": 112.728010661062,
+          "effective_f": 192.662514473054
         }
       }
     }
@@ -466,9 +496,9 @@
   "wooldridge": {},
   "_meta": {
     "method": "fe_iv",
-    "generated_at": "2026-11-14T00:16:51.260931+00:00",
+    "generated_at": "2026-11-21T05:47:27.143222+00:00",
     "reference": "ivDiag (R)",
     "ivdiag_version": "1.0.8",
-    "note": "ivDiagのFE引数で固定効果を吸収。cragg_donald_fはF.standard（cov_typeによらない）、rk_wald_fはhc1がF.robust・クラスターがF.cluster、effective_fはeff_F（hc1はrobust、クラスターはcluster。prec=14）。classicalはCragg-Donaldだけ。内生変数が複数のシナリオ・3-way・DK・HC2・HC3は比べられない。"
+    "note": "ivDiagのFE引数で固定効果を吸収。cragg_donald_fはF.standard（cov_typeによらない）、rk_wald_fはhc1がF.robust・クラスターがF.cluster、effective_fはeff_F（hc1はrobust、クラスターはcluster。prec=14）。classicalはCragg-Donaldだけ。内生変数が複数のシナリオ・3-way・DK・HC2・HC3は比べられない。2-wayのクラスターは、固定効果がネストしないsectorだけ（ネストするとivDiagの自由度の数え方が違う）。"
   }
 }

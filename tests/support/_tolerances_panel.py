@@ -133,8 +133,9 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_p_value": 1e-6,
     },
     # FE-2SLSの弱操作変数診断のivDiagによるクロスチェック（`fe_iv_weak_diagnostics_crosscheck.json`）。
-    # 実測の最大: rk Wald F 1.1e-9、有効F 5.2e-10、Cragg-Donald 5e-15（相対）。許容誤差は基本の1e-8
-    # （ivDiagの値は小数14桁で指定して取り出している。`run_ivdiag.R`参照）。
+    # 実測の最大（相対）: 2-wayの不均衡パネル以外は3e-14（Cragg-Donald・rk Wald F・有効F）、その2-wayの
+    # 不均衡パネルはhc1が1.1e-9、sectorクラスターが4.2e-9（rk Wald F 2.0e-9・有効F 4.2e-9）。許容誤差は
+    # 基本の1e-8（ivDiagの値は小数14桁で指定して取り出している。`run_ivdiag.R`参照）。
     "fe_iv_weak_diagnostics_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 0.0,

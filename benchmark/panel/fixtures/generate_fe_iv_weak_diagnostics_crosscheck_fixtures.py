@@ -15,9 +15,11 @@ ivDiagが返すのは内生変数が1個のときの統計量だけで、標準�
 - **有効F**: `eff_F`（robust は`hc1`、cluster）。
 
 rk LM統計量・Stock-Yogoの臨界値・内生変数が複数のケース・DK・HC2・HC3は比べられない。
-1-wayの固定効果は`classical`・`hc1`・クラスター（個体・時点・region・不均衡なregion）、2-wayは
-`classical`・`hc1`だけ（2-wayの固定効果でのクラスター頑健なFは、ivDiagが本実装と、fixestの第一段階の
-Wald F（本実装と一致。`test_fe_iv_reference.py`）の両方と一致しない。原因は追っていない）。ケースは`benchmark/panel/fe_iv_cases.py`の`ivdiag_cases()`。
+1-wayの固定効果は`classical`・`hc1`・クラスター（個体・時点・region・不均衡なregion・sector）、2-wayは
+`classical`・`hc1`・`sector`のクラスター。2-wayで個体・時点・regionのクラスターを含めないのは、
+ivDiag（lfe）が、固定効果のどれかがクラスターにネストするとネストしない固定効果も自由度から外すため
+（fixestと本実装はネストした固定効果だけを外す）。F・有効Fが`(N - K_lfe) / (N - K)`倍ずれる。
+どの固定効果もネストしない`sector`は一致する。ケースは`benchmark/panel/fe_iv_cases.py`の`ivdiag_cases()`。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_fe_iv_weak_diagnostics_crosscheck_fixtures
@@ -79,7 +81,8 @@ def build_fixtures() -> dict:
             "ivDiagのFE引数で固定効果を吸収。cragg_donald_fはF.standard（cov_typeによらない）、"
             "rk_wald_fはhc1がF.robust・クラスターがF.cluster、effective_fはeff_F（hc1はrobust、"
             "クラスターはcluster。prec=14）。classicalはCragg-Donaldだけ。"
-            "内生変数が複数のシナリオ・3-way・DK・HC2・HC3は比べられない。"
+            "内生変数が複数のシナリオ・3-way・DK・HC2・HC3は比べられない。2-wayのクラスターは、"
+            "固定効果がネストしないsectorだけ（ネストするとivDiagの自由度の数え方が違う）。"
         ),
     }
     return group_by_dataset_source(fixtures, [])

@@ -286,12 +286,22 @@ def plm_cases() -> list[Case]:
     ]
 
 
+# ivDiagと比べる、`sector`でのクラスターのシナリオ。`sector`は行ごとに無作為な4水準で、どの個体・時点も
+# 複数の`sector`に現れる（固定効果がクラスターにネストしない）。ネストしない列を使うのは、ivDiag（lfe）が
+# クラスターにネストした固定効果を1つでも含むと、他の固定効果も自由度から外すため（`ivdiag_cases()`）。
+_IVDIAG_SECTOR_CLUSTER_SCENARIOS = ("baseline", "unbalanced", "long_panel")
+
+
 def ivdiag_cases() -> list[Case]:
     """ivDiagのケース。内生変数が1個のシナリオの、1-wayのclassical・hc1・クラスターと、
-    2-wayのclassical・hc1。
+    2-wayのclassical・hc1・`sector`クラスター。
 
-    ivDiagは2-wayの固定効果でのクラスター頑健なFが、本実装ともfixestの第一段階のWald Fとも
-    一致しない（原因は追っていない）ため、2-wayのクラスターは含めない。
+    ivDiagはクラスター頑健共分散をlfeの`felm`で計算し、固定効果のうち1つでもクラスター列にネスト
+    していれば、ネストしない固定効果も自由度`K`から外す（fixestと本実装は、ネストした固定効果だけを
+    外す）。このため、2-wayでどちらかの効果（個体・時点）がクラスター列（個体・時点・region）に
+    ネストするケースは、F・有効Fがともに`(N - K_lfe) / (N - K)`倍ずれ、ivDiagとは比べない。
+    1-wayは、ネストしても`K`が一致し（ネストした1つの効果を切片1個と数える）、全クラスターで一致する。
+    2-wayでは、どの固定効果もネストしない`sector`のクラスターだけが比べられる。
     """
     keep_one_way = {
         "classical",
@@ -318,6 +328,12 @@ def ivdiag_cases() -> list[Case]:
         )
         if case.cov.key in keep:
             cases.append(case)
+        if (
+            case.cov.key == "cluster"
+            and case.n_effects in (1, 2)
+            and case.scenario in _IVDIAG_SECTOR_CLUSTER_SCENARIOS
+        ):
+            cases.append(_with_cov(case, CLUSTER_SECTOR))
     return cases
 
 

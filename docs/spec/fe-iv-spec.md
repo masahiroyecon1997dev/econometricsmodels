@@ -151,7 +151,14 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 | `Cluster` | `fe_cluster_k_correction`の`K − l`（入れ子の次元を除く） |
 
 `lfe`・`ivDiag`は連結成分が複数のパネルで本実装・`fixest`と1ずれる（`lfe`は階数を正確に数える）。入れ子の第3の効果では3者とも真のランクより多く数える。
-この差は公開ドキュメントに書く。クラスターの`K`の規則（`fixest`の`ssc(fixef.K="nested")`）はFEと同じで、効果の列そのものがクラスターのときの扱いは
+この差は公開ドキュメントに書く。
+
+**ivDiagのクラスターの`K`**: `ivDiag`のクラスター頑健共分散は`lfe::felm`で、固定効果のどれかがクラスター列にネストすると、ネストしない固定効果も`K`から外す（`fixest`・本実装はネストした効果だけ。1-wayはネストした1効果を切片1個と数えるので一致）。
+2-wayで個体・時点・region（個体を含む）のクラスターは、F・有効Fがともに`(N − K_lfe)/(N − K)`倍ずれる（baselineの個体クラスターで160.9対157.5、時点クラスターで348.5対290.9。`K_lfe=4`、`K`は9・43）。
+どの効果もネストしない`sector`（行ごとに無作為）のクラスターは一致するので、これで比べる。2-wayの不均衡パネルだけ2e-9〜4e-9ずれる（lfeの反復的な吸収の収束の許容誤差と見られるが、確かめていない）。
+`fixest`の`fitstat("cd")`は自由度に`n − n_endog − n_inst − 1`を使い、外生変数と吸収した効果を数えないので、本実装・ivDiagのCragg-Donaldの`F`の`(n − n_endog − n_inst − 1)/(n − 外生変数・操作変数・吸収した効果の数)`倍になる（baselineの1-wayで236/197 = 206.9/172.7）。
+
+クラスターの`K`の規則（`fixest`の`ssc(fixef.K="nested")`）はFEと同じで、効果の列そのものがクラスターのときの扱いは
 `fe-spec.md`を参照。
 
 ### 3.4 診断（FEIV）
@@ -253,7 +260,7 @@ engineの単体テストの軸（FE-GMM）: FE-2SLSへの還元、ダミー変�
 
 **FE-2SLS**: 主は`fixest`（`feols`に操作変数。係数・classical/hc1/cluster/dkの標準誤差・Wald F・Wu-Hausman・Sargan・部分F・rk Wald F）。独立クロスチェックは
 `plm(y ~ x | x2 + z, model = "within")`（1-wayの標準誤差）、`linearmodels.IV2SLS`にダミーを明示した2SLS（LSDV。係数・古典/HC1の標準誤差・Sargan・Wu-Hausman・部分F・CD・KP・R²。
-`PanelOLS._rsquared(params)`でR²）、`ivDiag`（1-wayのclassical・hc1・クラスターと2-wayのclassical・hc1のCD・rk Wald F・有効F）。ダミー変数2SLSの有効Fは
+`PanelOLS._rsquared(params)`でR²）、`ivDiag`（1-wayのclassical・hc1・クラスターと2-wayのclassical・hc1・`sector`クラスターのCD・rk Wald F・有効F。2-wayで個体・時点・regionのクラスターを含めない理由は3.3の「ivDiagのクラスターの`K`」）。ダミー変数2SLSの有効Fは
 `benchmark/iv/references/mop_oracle.py`にダミーを外生変数として渡す。
 
 **FE-GMM**: 主は`linearmodels.IVGMM`をwithin変換後のデータ（切片なし）に適用（係数・重み・Hansen J・反復回数）。標準誤差は漸近共分散×小標本補正のスカラー（手書き）。
@@ -263,7 +270,7 @@ engineの単体テストの軸（FE-GMM）: FE-2SLSへの還元、ダミー変�
 還元をFE-2SLSの全ケースに広げ、`fixest`・`plm`で小標本補正・`K`・Jの分子を確かめる。未確認で残るのは、過剰識別のrobust・cluster重みとの組合せ。
 
 **`fixest`の落とし穴（参照スクリプトの設定）**:
-- `cd`は本実装と一致しない（baselineで206.9対172.7。原因は追っていない）。`kpr`はiid、または内生変数と操作変数が同数のときだけ実装され、rk LM・rk Wald Fのどちらにも一致しないので使わない。
+- `cd`は本実装と一致しない（baselineで206.9対172.7。自由度が違う。3.3の「ivDiagのクラスターの`K`」）。`kpr`はiid、または内生変数と操作変数が同数のときだけ実装され、rk LM・rk Wald Fのどちらにも一致しないので使わない。
 - `wr2`は第二段階の残差ベースでR²の定義が違う。係数は内生変数が先頭（`fit_endog1`）なので`x_exog`・`x_endog`の順に直す。
 - `wh`はiid前提。classical以外は、第一段階の残差`v̂`を足した補助FE回帰を同じ`vcov`で回し`v̂`のWaldを取る。
 - 不均衡パネルでは`fixef.tol`を厳しくする（既定の`1e-6`だと参照値が約5e-9ずれる。下限は`2.2e-12`）。
@@ -290,7 +297,7 @@ DKは時点数が傾き係数の数を超えるケースだけ作る。時点ラ
 （iteratedはrobust・cluster重みだけ。classical重みの反復は2SLSと同じ）。実データは含めない。
 
 **許容誤差**: FEIV `1e-8`（絶対`1e-10`）が基本。実測（FE-2SLS）: fixestに係数4e-15・標準誤差1e-12・Sargan 3e-12・rk Wald F 4e-11、ダミー変数2SLSに係数7e-15・有効F（MOP）5e-11、
-ivDiagにrk Wald F 1.1e-9・有効F 5e-10。`estimator="gmm"`: `IVGMM`に係数8e-14・標準誤差9e-13・共分散2e-12・信頼区間3e-10（悪条件のHC3）・Wald/J 5e-13、momentfitに係数7e-15。
+ivDiagに（2-wayの不均衡パネル以外は3e-14以下、その不均衡パネルが）rk Wald F 2.0e-9・有効F 4.2e-9。`estimator="gmm"`: `IVGMM`に係数8e-14・標準誤差9e-13・共分散2e-12・信頼区間3e-10（悪条件のHC3）・Wald/J 5e-13、momentfitに係数7e-15。
 `df1_boundary`（4個体×2時点）のHC3は`1/(1−h)²`が丸め誤差を増幅してWaldが2e-7ずれるので、HC2・HC3の追加シナリオから外す（標準誤差は3e-11）。
 fixestの`sargan`と本実装は`(n − n_abs)/n`倍の差があるので、参照値に同じ倍率を掛けて比べる。
 

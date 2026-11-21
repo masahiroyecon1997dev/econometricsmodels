@@ -21,6 +21,52 @@ use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
 
+/// QR分解より前に、入力だけから判定できる検査を行う（回帰変数の有無・信頼水準・観測数・クラスター数・
+/// 被説明変数の順）。`fit_ols`と`AuxiliaryFit::fit`が同じ検査を同じ順序で行うための共通部分で、
+/// どちらかだけ検査や順序を変えてしまうことを避ける。
+///
+/// 戻り値は、全体F検定が定義できるか（`validate_cluster_count`参照。`allow_undefined_f_test`が偽なら
+/// 常に真）。
+///
+/// # Errors
+/// `OlsEstimator::fit`が共分散より前に返すエラー。
+pub(super) fn preflight(
+    input: &OlsInput,
+    cov_type: &CovType,
+    confidence_level: f64,
+    allow_undefined_f_test: bool,
+    check_outcome: bool,
+) -> Result<bool, LeastSquaresError> {
+    validate_has_regressors(input.nobs(), input.k())?;
+
+    // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+    crate::shared::parallelism::ensure_serial();
+
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
+    }
+
+    let (n, k) = (input.nobs(), input.k());
+    if n <= k {
+        return Err(CommonError::InsufficientObservations { n, k }.into());
+    }
+
+    // 入力だけから判定できるクラスター数の検証は、QR分解・残差計算より前に行う
+    // （`cov_params::validate_cluster_count`参照）。
+    let f_test_defined = validate_cluster_count(
+        cov_type,
+        n,
+        k - usize::from(input.has_intercept()),
+        allow_undefined_f_test,
+    )?;
+
+    // 入力だけから分かる被説明変数の検証も、QR分解より前に行う。
+    if check_outcome && input.has_intercept() && input.outcome_constant() {
+        return Err(CommonError::OutcomeConstant.into());
+    }
+    Ok(f_test_defined)
+}
+
 /// `OlsEstimator::fit`/`fit_with_optional_f_test`/`fit_auxiliary`の共通実装。契約（エラー条件）は`fit`のdocコメント参照。
 ///
 /// `allow_undefined_f_test`が真のとき、クラスター数が傾き係数の数以下でも全体F検定を`None`にして続行する。
@@ -36,35 +82,14 @@ pub(super) fn fit_ols(
     release_design: bool,
 ) -> Result<OlsEstimator, LeastSquaresError> {
     let mut input = input;
-    validate_has_regressors(input.nobs(), input.k())?;
-
-    // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
-    crate::shared::parallelism::ensure_serial();
-
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-    }
-
-    let n = input.nobs();
-    let k = input.k();
-
-    if n <= k {
-        return Err(CommonError::InsufficientObservations { n, k }.into());
-    }
-
-    // 入力だけから判定できるクラスター数の検証は、QR分解・残差計算より前に行う
-    // （`cov_params::validate_cluster_count`参照）。
-    let f_test_defined = validate_cluster_count(
+    let (n, k) = (input.nobs(), input.k());
+    let f_test_defined = preflight(
+        &input,
         &cov_type,
-        n,
-        k - usize::from(input.has_intercept()),
+        confidence_level,
         allow_undefined_f_test,
+        check_outcome,
     )?;
-
-    // 入力だけから分かる被説明変数の検証は、QR分解より前に行う。
-    if check_outcome && input.has_intercept() && input.outcome_constant() {
-        return Err(CommonError::OutcomeConstant.into());
-    }
 
     // 直交座標（`X = QR`、`b̃ = Q'y`）を係数・残差・共分散・F検定の全てに使う。ランク落ちは`R`の
     // 列ピボットQRで判定する（n×kの列ピボットQRと`(X'X)⁻¹`を別に求めない）。

@@ -104,7 +104,9 @@ pub fn compute_first_stage_with<T>(
                 source,
             })?;
         // 部分F統計量は制限なしモデル（この`estimator`）の残差平方和と係数の数だけを使うので、
-        // `consume`に渡して手放す前に求める。
+        // `consume`に渡して手放す前に求める。内生変数ごとに第一段階の直後に求めるため、複数の失敗が
+        // 同時に起きる入力では、最初に失敗した内生変数のエラーが返る（全ての第一段階を先に当てはめて
+        // から一括で部分Fを求める順ではない）。
         let f_stat = partial_f_statistic(input, &estimator, j)?;
         weak_instrument_f_statistics.push((endog_name.clone(), f_stat));
         first_stage.push((endog_name.clone(), consume(endog_name, estimator)));

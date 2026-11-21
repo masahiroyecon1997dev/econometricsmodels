@@ -10,15 +10,15 @@
 
 use faer::Mat;
 
-use super::cov_params::{CovParams, compute_cov_params, validate_cluster_count};
+use super::cov_params::{CovParams, compute_cov_params};
 use super::cov_type::CovType;
+use super::fit::preflight;
 use super::input::OlsInput;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::is_perfect_fit;
 use crate::shared::least_squares::residual_sum_of_squares;
 use crate::shared::orthonormal::OrthonormalDesign;
-use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
 
 /// 設計行列を消費して当てはめた補助回帰（直交座標）。`Q`・`R`・`b̃ = Q'y`・残差を持つ。
@@ -47,23 +47,8 @@ impl AuxiliaryFit {
         confidence_level: f64,
         check_outcome: bool,
     ) -> Result<Self, LeastSquaresError> {
-        validate_has_regressors(input.nobs(), input.k())?;
-
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
-        crate::shared::parallelism::ensure_serial();
-
-        if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-        }
-        let (n, k) = (input.nobs(), input.k());
-        if n <= k {
-            return Err(CommonError::InsufficientObservations { n, k }.into());
-        }
-        // 入力だけから判定できる検証は、QR分解より前に行う（`fit_ols`と同じ順序）。
-        validate_cluster_count(cov_type, n, k - usize::from(input.has_intercept()), false)?;
-        if check_outcome && input.has_intercept() && input.outcome_constant() {
-            return Err(CommonError::OutcomeConstant.into());
-        }
+        preflight(&input, cov_type, confidence_level, false, check_outcome)?;
+        let k = input.k();
         let outcome_sst = input.outcome_sst();
 
         let (x, y, names, has_intercept) = input.into_design();
@@ -104,7 +89,7 @@ impl AuxiliaryFit {
 
     /// 説明変数の数（定数項を含む）。
     pub(crate) fn k(&self) -> usize {
-        self.design.identity().nrows()
+        self.coordinates.nrows()
     }
 
     /// `cov_type`の共分散のミート`M̃`（直交座標）と推論の自由度。

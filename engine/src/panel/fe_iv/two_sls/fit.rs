@@ -139,6 +139,8 @@ pub(super) fn fit_fe_two_sls<T>(
         fitted_endog.push(fitted);
 
         // 弱操作変数の部分F統計量（診断）は第一段階の残差平方和と係数の数だけを使うので、手放す前に求める。
+        // 内生変数ごとに第一段階の直後に求めるため、複数の失敗が同時に起きる入力では、最初に失敗した
+        // 内生変数のエラーが返る。
         let f = first_stage_partial_f(&stage, k_exog, k_instruments, neffects)
             .map_err(|err| in_first_stage(err.into(), endog_name))?;
         weak_instrument_f.push((endog_name.clone(), f));

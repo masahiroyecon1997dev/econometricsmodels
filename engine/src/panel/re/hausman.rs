@@ -8,7 +8,7 @@ use statrs::distribution::{ChiSquared, ContinuousCDF};
 use super::input::ReCovType;
 use super::variance::debug_assert_within_reuse_contract;
 use crate::linear::common::LeastSquaresError;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::linear::ols::{AuxiliaryFit, CovType, OlsInput};
 use crate::panel::common::{
     PanelError, panel_cluster_cov_params, panel_driscoll_kraay_cov_params, resolve_dk_bandwidth,
 };
@@ -16,7 +16,6 @@ use crate::panel::fe::FeEstimator;
 use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::linear_algebra::{COLLINEARITY_TOLERANCE, independent_columns_in_order};
-use crate::shared::orthonormal::OrthonormalDesign;
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use crate::shared::wald::wald_f_test;
 
@@ -34,15 +33,16 @@ fn hausman_within_column_is_aliased(x_star: &[f64], x_within: &[f64], raw_scale:
 }
 
 /// ハウスマン補助回帰を`OlsEstimator`のcov_type（Classical/Hc1〜Hc3）で当てはめ、`X̃`の
-/// 末尾`k`列が同時にゼロというロバストWald検定のF統計量を返す。
+/// 末尾`k`列が同時にゼロというロバストWald検定のF統計量を返す。補助回帰の設計行列は
+/// `AuxiliaryFit`が消費する（`OlsEstimator::fit_auxiliary`だと、設計行列・QRの格納・`Q`の3つが
+/// 同時に生きる）。
 fn hausman_aux_wald_f(
     aux_input: OlsInput,
     cov_type: CovType,
     k: usize,
     confidence_level: f64,
 ) -> Result<f64, LeastSquaresError> {
-    let aux = OlsEstimator::fit_auxiliary(aux_input, cov_type, confidence_level)?;
-    Ok(aux.wald_test_last_columns(k)?.0)
+    AuxiliaryFit::fit(aux_input, confidence_level)?.wald_f_last_columns(&cov_type, k)
 }
 
 /// 補助回帰の直交座標（`b̃`・`M̃`）で、末尾`k`列（`X̃`の係数）が同時にゼロというWald検定のF統計量を
@@ -202,11 +202,12 @@ pub(super) fn re_hausman_test(
             )
             .map_err(|e| to_err(LeastSquaresError::Common(e)))?;
 
-            let aux = OlsEstimator::fit_auxiliary(aux_input, CovType::Classical, confidence_level)
-                .map_err(to_err)?;
-            let k_aux = aux.input().k();
-            let design = aux_orthonormal_design(&aux).map_err(to_err)?;
-            let coordinates = design.coordinates(aux.input().y());
+            let aux = AuxiliaryFit::fit(aux_input, confidence_level).map_err(to_err)?;
+            // `fit_auxiliary(Classical)`と同じく、`Classical`の全体F検定が計算できない補助回帰は拒否する。
+            aux.require_overall_f(&CovType::Classical).map_err(to_err)?;
+            let k_aux = aux.k();
+            let design = aux.design();
+            let coordinates = aux.coordinates();
             let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
             // 小標本補正`G/(G-1)·(n-1)/(n-K)`は`K=k_aux`（`OlsEstimator`のクラスター共分散と
             // 同式）、検定の自由度は`G-1`。共分散`V`を作って反転せず、直交座標のミート`M̃`
@@ -220,20 +221,20 @@ pub(super) fn re_hausman_test(
                 cluster_codes,
                 k_aux,
             );
-            hausman_wald_f(&coordinates, &meat, k_aux, k, g - 1)?
+            hausman_wald_f(coordinates, &meat, k_aux, k, g - 1)?
         }
         ReCovType::Dk { bandwidth, time } => {
-            let aux = OlsEstimator::fit_auxiliary(aux_input, CovType::Classical, confidence_level)
-                .map_err(to_err)?;
-            let n = aux.input().nobs();
-            let k_aux = aux.input().k();
+            let aux = AuxiliaryFit::fit(aux_input, confidence_level).map_err(to_err)?;
+            aux.require_overall_f(&CovType::Classical).map_err(to_err)?;
+            let n = aux.nobs();
+            let k_aux = aux.k();
             // 時点列の長さ・バンド幅・`T > k`（`validate_dk_periods_cover_tested_coefficients`）は
             // RE本体のDK計算（`fit()`）が先に検証済みのため、ここでは再検証しない。
             let time = time.codes();
             let t_periods = time.n_groups();
             let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-            let design = aux_orthonormal_design(&aux).map_err(to_err)?;
-            let coordinates = design.coordinates(aux.input().y());
+            let design = aux.design();
+            let coordinates = aux.coordinates();
             let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
             // fixestのDKは`K.fixef="full"`が既定（RE本体の`fit()`のDk分岐と同じ、
             // `k_correction=k_aux`）。Wald検定の分母自由度も`t_periods-1`に揃える
@@ -246,7 +247,7 @@ pub(super) fn re_hausman_test(
                 k_aux,
                 bw,
             );
-            hausman_wald_f(&coordinates, &meat, k_aux, k, t_periods - 1)?
+            hausman_wald_f(coordinates, &meat, k_aux, k, t_periods - 1)?
         }
     };
 
@@ -264,13 +265,6 @@ pub(super) fn re_hausman_test(
         )))
     })?;
     Ok(Some((stat, k, chi2.sf(stat))))
-}
-
-/// 補助回帰の設計行列の直交分解（`shared::orthonormal`）。
-fn aux_orthonormal_design(aux: &OlsEstimator) -> Result<OrthonormalDesign, LeastSquaresError> {
-    OrthonormalDesign::new(aux.input().x()).map_err(|err| {
-        LeastSquaresError::from_rank_deficient(err, aux.input().x(), aux.input().param_names())
-    })
 }
 
 #[cfg(test)]

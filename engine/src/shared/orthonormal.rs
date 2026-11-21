@@ -32,7 +32,15 @@
 //! 単位で合否が動かないようにするため（Choleskyの成否は列の一様な拡大縮小に依らない。生の`R`の
 //! 相対閾値`max|R_ii|`だと、共線な2列を`1e-12`倍するだけでランク落ちとして弾かれる）。
 
-use faer::{Mat, MatRef};
+use faer::dyn_stack::{MemBuffer, MemStack};
+use faer::linalg::householder::{
+    apply_block_householder_sequence_on_the_left_in_place_scratch,
+    apply_block_householder_sequence_on_the_left_in_place_with_conj,
+};
+use faer::linalg::qr::no_pivoting::factor::{
+    qr_in_place, qr_in_place_scratch, recommended_block_size,
+};
+use faer::{Conj, Mat, MatRef, Par};
 
 use super::linear_algebra::{RankDeficient, checked_col_piv_qr};
 
@@ -115,29 +123,67 @@ impl OrthonormalDesign {
         }
         let qr = x.qr();
         let r = qr.thin_R().to_owned();
-        // `R`に非有限の要素がある（入力のNaN・無限大や、オーバーフロー）か、対角が厳密に0なら、
-        // 列のランク落ちとして弾く（後段の等化・特異値分解は有限な`R`を前提にする）。
-        let degenerate =
-            (0..k).any(|j| (0..=j).any(|i| !r.get(i, j).is_finite()) || *r.get(j, j) == 0.0);
-        if degenerate {
-            return Err(RankDeficient::Columns);
-        }
-        if check_rank {
-            let equilibrated = equilibrate_columns(&r);
-            checked_col_piv_qr(&equilibrated)?;
-            let condition = condition_number(&equilibrated);
-            if condition > RANK_DEFICIENT_CONDITION {
-                return Err(RankDeficient::Columns);
-            }
-            if condition > MAX_EQUILIBRATED_CONDITION {
-                return Err(RankDeficient::GramMatrix);
-            }
-        }
+        validate_r(&r, check_rank)?;
         let q = if with_q {
             qr.compute_thin_Q()
         } else {
             Mat::zeros(0, k)
         };
+        Ok(Self { q, r })
+    }
+
+    /// [`Self::new_checked`]と同じ判定・同じ結果で、`x`を受け取って**複製せずに**その場で分解する。
+    ///
+    /// `new_checked`は`x.qr()`が`x`の複製を作るため、`x`・QRの格納・`Q`の3つ（`3·n·k`）が同時に
+    /// 生きる。ここでは`x`の領域をそのままQRの格納に使い、`Q`ができた時点で手放すので、
+    /// ピークは`2·n·k`で済む。呼び出し側は`x`をその後に使えない。結果の`Q`・`R`は
+    /// `new_checked`とビット単位で同じ（`x.qr()`と同じ`qr_in_place`と、同じHouseholder列の適用）。
+    ///
+    /// # Errors
+    /// [`Self::new_checked`]と同じ判定。失敗したときは、列名の特定（`collinear_columns`）に要る
+    /// 元の`x`を、QRから復元して[`ConsumedRankDeficient::x`]で返す（`x`はその場で壊れているため。
+    /// 失敗は稀で、成功時の計算は増えない）。
+    pub(crate) fn new_checked_owned(x: Mat<f64>) -> Result<Self, ConsumedRankDeficient> {
+        let (n, k) = (x.nrows(), x.ncols());
+        if n < k {
+            return Err(ConsumedRankDeficient {
+                kind: RankDeficient::Columns,
+                x,
+            });
+        }
+        if k == 0 {
+            return Ok(Self {
+                q: Mat::zeros(n, 0),
+                r: Mat::zeros(0, 0),
+            });
+        }
+        let par = faer::get_global_parallelism();
+        let block_size = recommended_block_size::<f64>(n, k);
+        let mut packed = x;
+        let mut coefficients = Mat::<f64>::zeros(block_size, k);
+        qr_in_place(
+            packed.as_mut(),
+            coefficients.as_mut(),
+            par,
+            MemStack::new(&mut MemBuffer::new(qr_in_place_scratch::<f64>(
+                n,
+                k,
+                block_size,
+                par,
+                Default::default(),
+            ))),
+            Default::default(),
+        );
+        let r = Mat::from_fn(k, k, |i, j| if i <= j { *packed.get(i, j) } else { 0.0 });
+        if let Err(kind) = validate_r(&r, true) {
+            // `X = Q [R; 0]`。`R`を上に置いた行列にHouseholder列を適用して、元の`x`を復元する。
+            let mut restored = Mat::<f64>::zeros(n, k);
+            restored.get_mut(..k, ..).copy_from(&r);
+            apply_householder_sequence(&packed, &coefficients, &mut restored, par);
+            return Err(ConsumedRankDeficient { kind, x: restored });
+        }
+        let mut q = Mat::<f64>::identity(n, k);
+        apply_householder_sequence(&packed, &coefficients, &mut q, par);
         Ok(Self { q, r })
     }
 
@@ -200,6 +246,65 @@ pub(crate) fn covariance_from_factor(r: &Mat<f64>, m_tilde: &Mat<f64>) -> Mat<f6
     Mat::from_fn(v.nrows(), v.ncols(), |i, j| {
         0.5 * (*v.get(i, j) + *v.get(j, i))
     })
+}
+
+/// [`OrthonormalDesign::new_checked_owned`]が失敗したときの誤り。
+#[derive(Debug)]
+pub(crate) struct ConsumedRankDeficient {
+    /// 失敗の種類（[`OrthonormalDesign::new_checked`]の[`RankDeficient`]と同じ）。
+    pub(crate) kind: RankDeficient,
+    /// 元の設計行列（QRから復元したもの。列名の特定に使う）。
+    pub(crate) x: Mat<f64>,
+}
+
+/// `R`（k×k、`X = QR`の上三角の因子）が分解を続けられるかを判定する。`new_checked`・
+/// `new_checked_owned`・`new`（`check_rank = false`）が共有する。
+fn validate_r(r: &Mat<f64>, check_rank: bool) -> Result<(), RankDeficient> {
+    let k = r.ncols();
+    // `R`に非有限の要素がある（入力のNaN・無限大や、オーバーフロー）か、対角が厳密に0なら、
+    // 列のランク落ちとして弾く（後段の等化・特異値分解は有限な`R`を前提にする）。
+    let degenerate =
+        (0..k).any(|j| (0..=j).any(|i| !r.get(i, j).is_finite()) || *r.get(j, j) == 0.0);
+    if degenerate {
+        return Err(RankDeficient::Columns);
+    }
+    if check_rank {
+        let equilibrated = equilibrate_columns(r);
+        checked_col_piv_qr(&equilibrated)?;
+        let condition = condition_number(&equilibrated);
+        if condition > RANK_DEFICIENT_CONDITION {
+            return Err(RankDeficient::Columns);
+        }
+        if condition > MAX_EQUILIBRATED_CONDITION {
+            return Err(RankDeficient::GramMatrix);
+        }
+    }
+    Ok(())
+}
+
+/// `qr_in_place`が詰めた行列`packed`（下三角がHouseholderの基底）とその係数`coefficients`の
+/// Householder列を、左から`matrix`（n×m）に適用する（`Q·matrix`、`faer`の`Qr::compute_thin_Q`と同じ）。
+fn apply_householder_sequence(
+    packed: &Mat<f64>,
+    coefficients: &Mat<f64>,
+    matrix: &mut Mat<f64>,
+    par: Par,
+) {
+    let columns = matrix.ncols();
+    apply_block_householder_sequence_on_the_left_in_place_with_conj(
+        packed.as_ref(),
+        coefficients.as_ref(),
+        Conj::No,
+        matrix.as_mut(),
+        par,
+        MemStack::new(&mut MemBuffer::new(
+            apply_block_householder_sequence_on_the_left_in_place_scratch::<f64>(
+                packed.nrows(),
+                coefficients.nrows(),
+                columns,
+            ),
+        )),
+    );
 }
 
 /// 上三角`r`（k×k、`X = QR`の`R`）の列を単位ノルムに揃える。`R`の列ノルムは`X`の列ノルムに
@@ -704,6 +809,114 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    /// 決定的な疑似乱数の列（`n×k`）。`new_checked_owned`が複数の形でも同じ結果になることの確認用。
+    fn pseudo_random_design(n: usize, k: usize) -> Mat<f64> {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        Mat::from_fn(n, k, |_, j| {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            let unit =
+                (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64;
+            if j == 0 { 1.0 } else { unit - 0.5 }
+        })
+    }
+
+    #[test]
+    fn new_checked_owned_matches_new_checked_bit_for_bit() {
+        let (near, _, _) = near_collinear(1.0);
+        let designs = [
+            near,
+            near_collinear_design(1e-7, 1e6),
+            pseudo_random_design(1_000, 7),
+            pseudo_random_design(37, 5),
+            pseudo_random_design(9, 9),
+            pseudo_random_design(300, 1),
+        ];
+        for (index, x) in designs.into_iter().enumerate() {
+            let borrowed = OrthonormalDesign::new_checked(&x).unwrap();
+            let owned = OrthonormalDesign::new_checked_owned(x).unwrap();
+            assert_eq!(owned.q(), borrowed.q(), "design {index}: Q");
+            let (_, owned_r) = owned.into_parts();
+            let (_, borrowed_r) = borrowed.into_parts();
+            assert_eq!(owned_r, borrowed_r, "design {index}: R");
+        }
+    }
+
+    #[test]
+    fn new_checked_owned_rejects_like_new_checked_and_returns_the_original_design() {
+        let n = 12;
+        let x1 = |i: usize| ((i * 7) % 5) as f64 - 2.0;
+        let designs: Vec<(&str, Mat<f64>, RankDeficient)> = vec![
+            (
+                "duplicate column",
+                Mat::from_fn(n, 3, |i, j| if j == 0 { 1.0 } else { x1(i) }),
+                RankDeficient::Columns,
+            ),
+            (
+                "dummy variable trap",
+                Mat::from_fn(n, 3, |i, j| match j {
+                    0 => 1.0,
+                    1 => f64::from(u8::from(i % 2 == 0)),
+                    _ => f64::from(u8::from(i % 2 == 1)),
+                }),
+                RankDeficient::Columns,
+            ),
+            (
+                "all-zero column",
+                Mat::from_fn(n, 3, |i, j| match j {
+                    0 => 1.0,
+                    1 => x1(i),
+                    _ => 0.0,
+                }),
+                RankDeficient::Columns,
+            ),
+            (
+                "more columns than rows",
+                Mat::from_fn(2, 3, |i, j| (i + j) as f64),
+                RankDeficient::Columns,
+            ),
+            (
+                "condition above the limit",
+                near_collinear_design(3e-8, 1.0),
+                RankDeficient::GramMatrix,
+            ),
+        ];
+        for (name, x, expected) in designs {
+            assert_eq!(
+                OrthonormalDesign::new_checked(&x).unwrap_err(),
+                expected,
+                "{name}: precondition"
+            );
+            let error = OrthonormalDesign::new_checked_owned(x.clone()).unwrap_err();
+            assert_eq!(error.kind, expected, "{name}");
+            // 元の設計行列を、QRから丸め誤差の範囲で復元して返す（列名の特定に使う）。
+            assert_eq!(
+                (error.x.nrows(), error.x.ncols()),
+                (x.nrows(), x.ncols()),
+                "{name}"
+            );
+            let scale = (0..x.ncols())
+                .flat_map(|j| (0..x.nrows()).map(move |i| (i, j)))
+                .map(|(i, j)| x.get(i, j).abs())
+                .fold(0.0_f64, f64::max);
+            for j in 0..x.ncols() {
+                for i in 0..x.nrows() {
+                    assert!(
+                        (error.x.get(i, j) - x.get(i, j)).abs() <= 1e-12 * scale,
+                        "{name}: x[{i}, {j}]"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn new_checked_owned_accepts_a_design_without_columns() {
+        let design = OrthonormalDesign::new_checked_owned(Mat::<f64>::zeros(5, 0)).unwrap();
+        assert_eq!((design.q().nrows(), design.q().ncols()), (5, 0));
     }
 
     #[test]

@@ -190,6 +190,12 @@ impl OlsInput {
         })
     }
 
+    /// 設計行列・被説明変数・係数名・定数項の有無に分解する（設計行列を、複製せず所有権ごと
+    /// 取り出して消費する補助回帰向け。`ols/auxiliary.rs`）。
+    pub(super) fn into_design(self) -> (Mat<f64>, Mat<f64>, Vec<String>, bool) {
+        (self.x, self.y, self.param_names, self.has_intercept)
+    }
+
     pub fn y(&self) -> &Mat<f64> {
         &self.y
     }

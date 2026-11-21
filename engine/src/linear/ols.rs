@@ -27,6 +27,7 @@ use crate::linear::common::LeastSquaresError;
 use crate::shared::inference;
 use crate::shared::orthonormal::WaldCoordinates;
 
+mod auxiliary;
 mod cov_params;
 mod cov_type;
 mod fit;
@@ -34,6 +35,7 @@ mod input;
 mod predict;
 mod wald;
 
+pub(crate) use auxiliary::AuxiliaryFit;
 pub use cov_type::CovType;
 pub use input::OlsInput;
 pub use predict::predict_new_data;

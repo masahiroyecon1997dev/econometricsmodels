@@ -1,4 +1,4 @@
-"""FEIV（固定効果つきの2SLS）の実行時間・ピークRSS を計測するベンチマークスクリプト（engine 単独）。
+"""FEIV（固定効果つきの2SLS・GMM）の実行時間・ピークRSS を計測するベンチマークスクリプト（engine 単独）。
 
 CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けるため、
 `FEIV(...).fit()` 全体（Python API 呼び出し、Arrow 変換・PyO3 オーバーヘッド込みの
@@ -74,7 +74,34 @@ FEIV は `y`・`x_exog`・`x_endog`・操作変数の全列に同じ within 変�
 
 ## GMM
 
-FE-GMM は未実装。実装したとき、`extra_methods` に推定量（2段階GMM・反復GMM）を足す。
+`estimator="gmm"` の変種を `extra_methods` の代表点（n=1,000,000・k=5・classical）に足す。
+名前は `gmm_<方式>[_<構造>|_<重み>]`。内生変数・操作変数の数と効果の構造は 2SLS の同名の
+method と同じで、重みの既定は engine の既定と同じ `cluster`。
+
+| method | 方式 | 重み | 構造 |
+|---|---|---|---|
+| `gmm_two_step` | 2段階 | cluster | `one_way` |
+| `gmm_two_step_robust` | 2段階 | robust | `one_way` |
+| `gmm_iterated` | 反復 | cluster | `one_way` |
+| `gmm_iterated_robust` | 反復 | robust | `one_way` |
+| `gmm_two_way_unbalanced` | 2段階 | cluster | `two_way_unbalanced` |
+| `gmm_endog3` | 2段階 | cluster | `endog3`（内生3・操作変数5） |
+
+cov 軸（n=100,000・k=5、1-way）には、2段階・cluster 重みの GMM の標準誤差を
+`gmm_hc1`・`gmm_hc2`・`gmm_hc3`・`gmm_cluster`・`gmm_dk` として足す（3次元の効果での GMM は測らない）。
+
+- **計測範囲**: GMM の `fit()` は within 変換（全列に1回）・重み行列の推定・係数・標準誤差・
+  Hansen J（過剰識別のとき）・R²・全体の Wald 検定まで一括で計算する。第一段階・弱操作変数の
+  診断・Wu-Hausman は GMM には無いので、同じ構造の 2SLS より軽くなりうる。重みの反復
+  （`iterated`）は `gmm_max_iter=100`・`gmm_tol=1e-6` を明示して固定する。
+- **反復回数**: 反復 GMM の反復回数 `n_iter` は結果 JSON の各行に入る。n=10,000〜100,000 の
+  試し測りでは、反復 GMM は重みが cluster でも robust でも 3 回（2段階は 2 回）で収束し、
+  `gmm_tol` を 1e-6 から 1e-14 まで締めても 3〜4 回で時間もほぼ変わらない。method 軸の代表点
+  （n=1,000,000）では反復 GMM も 2 回で収束し、2段階と費用が区別できない。反復回数を動かす
+  変種（`gmm_tol` 違い）は情報が増えないので置かない。
+- **`robust` 重みの意味**: within 変換した誤差は個体内で相関するため、`robust` 重みは小さい T で
+  は統計的に妥当でない（engine の既定が `cluster` の理由）。ここでは重み行列の種類による
+  計算費用の違いを見るためだけに測る。
 
 使用例（リポジトリルートから）:
     python -m performance.compare_fe_iv \\
@@ -126,11 +153,18 @@ _THIRD_EFFECT_SD = 1.0
 
 
 class _Structure(NamedTuple):
-    """method（固定効果の構造・内生変数と操作変数の数）の定義。"""
+    """method（固定効果の構造・内生変数と操作変数の数・推定量）の定義。
+
+    `estimator`が`"gmm"`のとき、`gmm_type`と`gmm_weight_type`で GMM の方式と重み行列を
+    決める（`"2sls"`では使わない）。
+    """
 
     effects: tuple[str, ...]
     k_endog: int
     k_instruments: int
+    estimator: str = "2sls"
+    gmm_type: str | None = None
+    gmm_weight_type: str | None = None
 
 
 _STRUCTURES = {
@@ -141,6 +175,35 @@ _STRUCTURES = {
     "endog3": _Structure((_ENTITY_COL,), 3, 5),
     "inst6": _Structure((_ENTITY_COL,), 1, 6),
 }
+
+# 反復 GMM の上限回数と許容誤差。engine の既定値と同じ数値だが、既定が変わっても
+# 計測条件が動かないよう明示する（2段階 GMM は反復しないので渡さない）。
+_GMM_MAX_ITER = 100
+_GMM_TOL = 1e-6
+
+
+def _gmm(
+    base: str, gmm_type: str, gmm_weight_type: str = "cluster"
+) -> _Structure:
+    """構造`base`（データ・効果・変数の数）に GMM の推定量を載せた定義を返す。"""
+    return _STRUCTURES[base]._replace(
+        estimator="gmm", gmm_type=gmm_type, gmm_weight_type=gmm_weight_type
+    )
+
+
+# GMM の method。名前は`gmm_<方式>[_<構造>|_<重み>]`。重みの既定は`cluster`（engine の
+# 既定と同じ）で、`robust`は重み行列の種類の違いを見る。`two_way_unbalanced`・`endog3`は
+# 構造の代表点（モーメント数・within変換の費用が変わる）。
+_GMM_STRUCTURES = {
+    "gmm_two_step": _gmm("one_way", "two_step"),
+    "gmm_two_step_robust": _gmm("one_way", "two_step", "robust"),
+    "gmm_iterated": _gmm("one_way", "iterated"),
+    "gmm_iterated_robust": _gmm("one_way", "iterated", "robust"),
+    "gmm_two_way_unbalanced": _gmm("two_way_unbalanced", "two_step"),
+    "gmm_endog3": _gmm("endog3", "two_step"),
+}
+_STRUCTURES.update(_GMM_STRUCTURES)
+_GMM_METHODS = tuple(_GMM_STRUCTURES)
 
 _ENGINE_COV_TYPES = ("classical", "hc1", "hc2", "hc3", "cluster")
 
@@ -155,6 +218,13 @@ _COV_CASES = (
     # 3次元の固定効果のHC2/HC3（モジュールdocstring「軸」参照）。
     CovCase("hc2_three_way", "hc2", method="three_way"),
     CovCase("hc3_three_way", "hc3", method="three_way"),
+    # GMM（2段階・cluster重み）の標準誤差。重みが同じなので、2SLS の同じ標準誤差の
+    # ケースとの差が標準誤差の費用、GMM の method 軸との差が標準誤差の違い。
+    CovCase("gmm_hc1", "hc1", method="gmm_two_step"),
+    CovCase("gmm_hc2", "hc2", method="gmm_two_step"),
+    CovCase("gmm_hc3", "hc3", method="gmm_two_step"),
+    CovCase("gmm_cluster", "cluster", method="gmm_two_step"),
+    CovCase("gmm_dk", "dk", method="gmm_two_step"),
 )
 
 
@@ -219,6 +289,16 @@ def _fit_once_engine(ctx: FitContext) -> FEIVResults:
 
     structure = _STRUCTURES[ctx.method]
     kwargs: dict = {"cov_type": ctx.cov_type}
+    if structure.estimator == "gmm":
+        kwargs.update(
+            estimator="gmm",
+            gmm_type=structure.gmm_type,
+            gmm_weight_type=structure.gmm_weight_type,
+        )
+        if structure.gmm_type == "iterated":
+            kwargs.update(gmm_max_iter=_GMM_MAX_ITER, gmm_tol=_GMM_TOL)
+    elif structure.estimator != "2sls":
+        raise ValueError(f"unknown estimator: {structure.estimator!r}")
     if ctx.cov_type == "dk":
         kwargs["dk_time"] = _TIME_COL
     elif ctx.cov_type not in _ENGINE_COV_TYPES:
@@ -259,12 +339,16 @@ FE_IV_ADAPTER = PerfAdapter(
         "three_way",
         "endog3",
         "inst6",
+        *_GMM_METHODS,
     ),
     method_dataframes={
         "two_way_unbalanced": _build_unbalanced_dataframe,
         "three_way": _build_three_way_dataframe,
         "endog3": _build_endog3_dataframe,
         "inst6": _build_inst6_dataframe,
+        # `gmm_<構造>`は同じ構造のデータを使う。one_way 上の GMM は既定のデータ。
+        "gmm_two_way_unbalanced": _build_unbalanced_dataframe,
+        "gmm_endog3": _build_endog3_dataframe,
     },
 )
 

@@ -304,7 +304,7 @@ fixestの`sargan`と本実装は`(n − n_abs)/n`倍の差があるので、参�
 ## 7. 性能
 
 比較パッケージは置かない（engine単独。`PerfAdapter.libraries=("engine",)`）。理由: `linearmodels`にFEIVは無く、pandasのgroupby demean＋`IV2SLS`は計測の大部分をgroupbyが占め、不均衡2-wayや高次元で
-参照側に交互射影を手書きする必要も出て恣意的になる。`performance/compare_fe_iv.py`の1本で、GMMはmethod軸（`extra_methods`）で測る。
+参照側に交互射影を手書きする必要も出て恣意的になる。`performance/compare_fe_iv.py`の1本で、GMMはmethod軸（`extra_methods`）と、標準誤差のcov軸で測る（変種の一覧・計測範囲・`n_iter`の読み方は`docs/performance/fe_iv.md`）。
 
 - `k`は傾き係数の総数（`x_exog = k − 内生変数の数`。FEの`k`と揃い、`T=6`固定でcov軸のDKが`T > k`を満たす。IVの`k = x_exog`とは定義が違う）。Tを6に固定してNを掃引。
 - 構造と識別の数は`extra_methods`の代表点（`two_way`・`two_way_unbalanced`・`three_way`・`endog3`（内生3・操作変数5）・`inst6`（内生1・操作変数6）、`n=1,000,000`・`k=5`・classical）。

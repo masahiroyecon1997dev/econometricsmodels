@@ -132,9 +132,9 @@ A call is checked in a fixed order, the same for every method, and the **first**
 1. **Argument types.** A wrong type raises `TypeError` (see [Wrong argument types](#wrong-argument-types)), before anything else.
 2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
 3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
-4. **The number of columns in `effects`** (FE, FEIV and RE). An empty list, more than five columns in FE or FEIV, or more than two in RE. This comes before the check of an empty `x`.
-5. **Roles.** In this order: an empty `x` (in IV and FEIV, the regressor roles are `x_exog`, `x_endog` and `instruments`: an empty `x_endog` or `instruments` is rejected, `x_endog` first, and `x_exog` may be empty); the same column used in two roles (`y`, `weight` in WLS, `effects` and `x`); a column named twice in `x`; a column named twice in `effects`; and, for `dk_time`, the roles it may not share. Then, when an intercept is added, `"const"` in `x`.
-6. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values. The order is `y`, then `x`, then `effects`.
+4. **The number of columns in `effects`** (FE, FEIV and RE). An empty list, more than five columns in FE or FEIV, or more than two in RE. This comes before the checks of an empty `x` or an empty role in step 5.
+5. **Roles.** In this order: an empty `x`; in IV and FEIV, which take no `x`, an empty `x_endog` and then an empty `instruments` (`x_exog` may be empty); the same column used in two roles (`y`, `weight` in WLS, `effects` and `x`; in IV and FEIV, `x_exog`, `x_endog` and `instruments` take the place of `x`); a column named twice in `x` (in IV and FEIV, in any of `x_exog`, `x_endog` and `instruments`); a column named twice in `effects`; and, for `dk_time`, the roles it may not share. Then, when an intercept is added, `"const"` in `x` (in IV, in any of `x_exog`, `x_endog` and `instruments`).
+6. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values. The order is `y`, then `x` (in IV and FEIV, `x_exog`, `x_endog` and `instruments`), then `effects`.
 7. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 6.
 8. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
 
@@ -246,7 +246,7 @@ These are in addition to the situations above.
 **IV**
 
 - Fewer instruments than endogenous regressors (the order condition).
-- `x_endog` or `instruments` is empty.
+- `x_endog` or `instruments` is empty (`ROLE_EMPTY`).
 - GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number).
 - With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix.
 

@@ -97,6 +97,23 @@ fn fit_reports_an_invalid_confidence_level_before_the_regressor_and_observation_
     )
     .unwrap();
     assert_eq!(invalid(too_few), expected);
+
+    // 切片ありで`y`が全行で同じ値。
+    let constant_outcome = || {
+        OlsInput::from_columns(
+            &[2.0; 5],
+            &[vec![1.0, 2.0, 3.0, 4.0, 5.0]],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        OlsEstimator::fit(constant_outcome(), CovType::Classical, 0.95).unwrap_err(),
+        LeastSquaresError::Common(CommonError::OutcomeConstant)
+    );
+    assert_eq!(invalid(constant_outcome()), expected);
 }
 
 #[test]

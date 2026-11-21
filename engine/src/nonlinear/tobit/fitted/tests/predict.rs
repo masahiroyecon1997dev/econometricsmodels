@@ -501,6 +501,16 @@ fn fitted_test_estimator() -> TobitEstimator {
 /// `original`と同じ設計行列を、本番の復元と同じ`from_columns`で作り直す。
 fn rebuilt_input(original: &TobitFitted) -> TobitInput {
     let input = original.input();
+    rebuilt_input_with_bounds(original, input.lower(), input.upper())
+}
+
+/// [`rebuilt_input`]と同じで、打ち切り境界だけ差し替える。
+fn rebuilt_input_with_bounds(
+    original: &TobitFitted,
+    lower: Option<f64>,
+    upper: Option<f64>,
+) -> TobitInput {
+    let input = original.input();
     let start = usize::from(input.has_intercept());
     let n = input.nobs();
     let x_columns: Vec<Vec<f64>> = (start..input.k())
@@ -513,8 +523,8 @@ fn rebuilt_input(original: &TobitFitted) -> TobitInput {
         input.param_names()[start..].to_vec(),
         input.has_intercept(),
         input.dep_var_name().to_string(),
-        input.lower(),
-        input.upper(),
+        lower,
+        upper,
     )
     .unwrap()
 }
@@ -568,6 +578,44 @@ fn fitted_rebuilt_from_parts_reproduces_predict_marginal_effects_and_censoring_c
         check.uncensored().model_implied_rate(),
         expected_check.uncensored().model_implied_rate()
     );
+}
+
+/// `from_columns`は次元だけを検証するので、復元は`from_parts`が境界とデータの整合を検査する
+/// （改ざんされたpickleの境界・`source_data`を受け入れない）。
+#[test]
+fn from_parts_rejects_censoring_bounds_that_fit_would_reject() {
+    let original = fitted_test_estimator().into_fitted();
+    let lower = original.input().lower();
+    let upper = original.input().upper();
+    let max_y = (0..original.input().nobs())
+        .map(|i| *original.input().y().get(i, 0))
+        .fold(f64::NEG_INFINITY, f64::max);
+    let make = |lower: Option<f64>, upper: Option<f64>| {
+        TobitFitted::from_parts(
+            rebuilt_input_with_bounds(&original, lower, upper),
+            original.params().to_vec(),
+            original.sigma(),
+            original.cov_params().clone(),
+        )
+    };
+    assert!(make(lower, upper).is_ok());
+    assert_eq!(
+        make(None, None).unwrap_err(),
+        MleError::CensoringBoundsMissing
+    );
+    assert!(matches!(
+        make(Some(f64::NAN), upper).unwrap_err(),
+        MleError::CensoringBoundNotFinite { .. }
+    ));
+    assert!(matches!(
+        make(Some(5.0), Some(5.0)).unwrap_err(),
+        MleError::CensoringBoundsNotOrdered { .. }
+    ));
+    // `y`が上限を超える（差し替えた`source_data`に当たる）。
+    assert!(matches!(
+        make(lower, Some(max_y - 1.0)).unwrap_err(),
+        MleError::YOutOfCensoringBounds { .. }
+    ));
 }
 
 #[test]

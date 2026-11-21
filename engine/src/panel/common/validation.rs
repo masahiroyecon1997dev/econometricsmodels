@@ -8,7 +8,7 @@ use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::{column_is_zero_variance, column_is_zero_variance_with_noise};
 
 /// `confidence_level`が`(0, 1)`の範囲外（NaNを含む）ならエラーにする。FE・RE・FEIVの`fit`が、他のどの
-/// 検査より先（`tol`・`max_iter`より前）に呼ぶ。回帰の失敗を包む[`PanelError::WithinRegressionFailed`]で返す
+/// 検査より先（`tol`・`max_iter`より前。吸収する次元の解決は除く）に呼ぶ。回帰の失敗を包む[`PanelError::WithinRegressionFailed`]で返す
 /// （`stage_allowed=false`の`code`なので`stage`は付かない）。
 ///
 /// # Errors

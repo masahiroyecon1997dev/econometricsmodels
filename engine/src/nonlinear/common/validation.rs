@@ -142,8 +142,9 @@ pub fn validate_mle_options(
 ///   （`tobit/statistics.rs`の`validate_has_uncensored_observations`）を最後に追加で行う
 ///
 /// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::CensoringBoundsMissing`等、
-/// `y`と境界の整合性＝`MleError::YOutOfCensoringBounds`）は`fit()`ではなく
-/// `TobitInput::from_columns`で行う（`tobit.rs`のモジュールdocコメント参照）。
+/// `y`と境界の整合性＝`MleError::YOutOfCensoringBounds`）は、この関数ではなくTobitの`fit()`が
+/// `validate_mle_options`の直後に`TobitInput::validate_censoring_bounds`で行う
+/// （`tobit.rs`のモジュールdocコメント参照）。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
 /// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても

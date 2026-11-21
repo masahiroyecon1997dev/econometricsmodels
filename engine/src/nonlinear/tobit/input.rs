@@ -194,7 +194,6 @@ mod tests {
     use crate::shared::error::CommonError;
 
     /// `TobitInput::from_columns`に続けて`validate_censoring_bounds`（`fit()`が呼ぶ検査）まで行う。
-    #[allow(clippy::too_many_arguments)]
     fn from_columns_validated(
         y: &[f64],
         x_columns: &[Vec<f64>],

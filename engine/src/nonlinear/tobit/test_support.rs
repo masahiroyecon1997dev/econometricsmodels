@@ -92,7 +92,9 @@ pub(super) fn expected_uncensored_closed_form(
             let zb = (c2 - mu) / sigma;
             mu + sigma * (normal.pdf(za) - normal.pdf(zb)) / (normal.cdf(zb) - normal.cdf(za))
         }
-        (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
+        (None, None) => {
+            unreachable!("TobitInput::validate_censoring_bounds rejects both-None bounds")
+        }
     }
 }
 

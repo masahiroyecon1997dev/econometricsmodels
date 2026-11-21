@@ -41,20 +41,25 @@ impl TobitFitted {
     /// 入力データ・係数・`σ`・分散共分散行列から組み立てる。
     ///
     /// 最適性は検証できない（`fit`が収束した結果であることは呼び出し側が保証する）。ここで検査するのは、
-    /// 後続のメソッドが添字の範囲外にならないための次元の整合と、`σ`が正の有限値であることだけ。
+    /// 打ち切り境界とデータの整合（`TobitInput::validate_censoring_bounds`。`from_columns`は次元だけを検証する
+    /// ので、復元でも`fit`と同じ検査を通す）、後続のメソッドが添字の範囲外にならないための次元の整合、
+    /// `σ`が正の有限値であることだけ。
     ///
     /// 壊れた・改ざんされたpickleだけが到達する入力エラーで、`engine_pybind`が`PICKLE_FORMAT_MISMATCH`へ変換する。
     /// `params`・`cov_params`の値が有限かは検査しない（非有限値は後続の計算にNaNとして伝わるだけ）。
     ///
     /// # Errors
-    /// `params`の長さが`k`と合わない、`cov_params`が`(k+1)×(k+1)`でない、`σ`が正の有限値でない:
-    /// `CommonError::Internal`
+    /// - 打ち切り境界が両方`None`・非有限・順序が逆、または`y`が境界の範囲外:
+    ///   `MleError::CensoringBoundsMissing`等（`TobitInput::validate_censoring_bounds`）
+    /// - `params`の長さが`k`と合わない、`cov_params`が`(k+1)×(k+1)`でない、`σ`が正の有限値でない:
+    ///   `CommonError::Internal`
     pub fn from_parts(
         input: TobitInput,
         params: Vec<f64>,
         sigma: f64,
         cov_params: Mat<f64>,
     ) -> Result<Self, MleError> {
+        input.validate_censoring_bounds()?;
         let k = input.k();
         let consistent = params.len() == k
             && cov_params.nrows() == k + 1

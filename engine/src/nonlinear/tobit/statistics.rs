@@ -11,15 +11,15 @@ use statrs::distribution::Normal;
 /// カテゴリの完全分離が実際の退化条件——点に注意。詳細は
 /// `MleError::NoUncensoredObservations`のdocコメント参照）。
 ///
-/// `TobitInput::from_columns`（構造的妥当性: 境界指定自体の整合性・`y`と境界の整合性）
-/// ではなく`fit()`冒頭（推定可能性の前提条件）で検証する。
+/// `TobitInput::validate_censoring_bounds`（構造的妥当性: 境界指定自体の整合性・`y`と境界の整合性）
+/// より後の、`fit()`の最後の検査（推定可能性の前提条件）として検証する。
 /// `validate_sufficient_observations`と同じ位置づけ: 「データとして
-/// 構造的に妥当か」と「このデータで推定を試みる価値があるか」を分離し、後者を`fit()`側の
-/// 責務とする設計方針（`from_columns`はTobitInput単体で完結する検証のみを行い、
+/// 構造的に妥当か」と「このデータで推定を試みる価値があるか」を分離し、後者を推定可能性の
+/// 検査とする設計方針（境界の検証は`TobitInput`単体で完結し、
 /// 推定アルゴリズムの成否に関わる検証は持ち込まない）。
 ///
 /// 打ち切り判定は`censoring_fit_check`と同じ、`yᵢ==lower`/`yᵢ==upper`という浮動小数点の
-/// 完全一致比較（`TobitInput::from_columns`が`y`を変換せず保持する設計と整合）。
+/// 完全一致比較（`TobitInput`が`y`を変換せず保持する設計と整合）。
 ///
 /// # Errors
 /// 非打ち切り観測が1件も無い場合は`MleError::NoUncensoredObservations`を返す。

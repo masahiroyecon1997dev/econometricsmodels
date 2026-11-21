@@ -29,11 +29,11 @@ pub(super) fn fit_gmm(
     crate::shared::parallelism::ensure_serial();
 
     let n = input.nobs();
-    // `confidence_level`の範囲・反復設定（`gmm_max_iter`・`gmm_tol`）・観測数（`n <= k`はサンドイッチSE計算の
-    // NaN/Infinity、`n <= l`は`Z'Z`の特異または
-    // `W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退するのを防ぐ）・`cov_type=Cluster`のクラスター数
-    // （構造方程式の`G <= q`）・被説明変数の定数を、点推定・SE計算より前に弾く
-    // （`TwoSlsEstimator::fit`・`engine_pybind`と同じ`validate_iv_fit_inputs`）。
+    // `confidence_level`の範囲・反復設定（`gmm_max_iter`・`gmm_tol`）・識別の順序条件・観測数・
+    // `cov_type=Cluster`のクラスター数（構造方程式の`G <= q`）・被説明変数の定数を、点推定・SE計算より前に
+    // 弾く（`TwoSlsEstimator::fit`・`engine_pybind`と同じ`validate_iv_fit_inputs`）。観測数の検査は、
+    // `n <= k`がサンドイッチSE計算のNaN/Infinityを、`n <= l`が`Z'Z`の特異または
+    // `W₀ = (Z'Z)⁻¹`のGMMのOLSへの縮退を防ぐ。
     // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
     // `validate_weight_type`側で検証する。
     validate_iv_fit_inputs(&input, &cov_type, confidence_level, Some(&gmm_type))?;

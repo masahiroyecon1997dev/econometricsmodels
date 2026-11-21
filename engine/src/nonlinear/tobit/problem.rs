@@ -128,7 +128,7 @@ impl TobitProblem {
     }
 
     /// 観測`i`の分類（非打ち切り/左打ち切り/右打ち切り）に応じた[`Contribution`]を計算する。
-    /// `TobitInput::from_columns`が`lower <= yᵢ <= upper`を保証しているため、境界値との
+    /// `fit()`が呼ぶ`TobitInput::validate_censoring_bounds`が`lower <= yᵢ <= upper`を保証しているため、境界値との
     /// 一致判定（`==`）で打ち切り観測を識別できる（`y*ᵢ`が境界値ちょうどになる確率は
     /// 連続分布の下で0のため、境界値ちょうどの観測は定義上すべて打ち切り観測）。
     pub(super) fn contribution(&self, i: usize, params: &[f64], normal: &Normal) -> Contribution {

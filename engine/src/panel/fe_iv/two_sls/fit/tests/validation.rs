@@ -4,6 +4,7 @@ use super::{
     entity_cluster, entity_labels, fit, input_with, one_way_input, third_labels, time_labels,
     two_way_input,
 };
+use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{ColumnRole, PanelError};
 use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects};
 use crate::panel::fe_iv::common::{FeIvInput, RoleColumns};
@@ -110,6 +111,18 @@ fn two_way_needs_a_second_dimension() {
     assert_eq!(err, PanelError::TwoWayRequiresTime);
 }
 
+/// 吸収する次元の解決（2-wayで`time`が無い）は、設定値の検査より先に評価される。
+#[test]
+fn two_way_without_a_second_dimension_is_reported_before_the_settings() {
+    let err = error_of(FeTwoSlsEstimator::fit(
+        one_way_input(),
+        FeEffects::TwoWay,
+        FeCovType::Classical,
+        1.5,
+    ));
+    assert_eq!(err, PanelError::TwoWayRequiresTime);
+}
+
 #[test]
 fn an_invalid_absorption_setting_is_rejected() {
     let absorption = FeAbsorption {
@@ -144,16 +157,56 @@ fn settings_are_reported_in_order_before_the_data_checks() {
         fit_with(0.95, 1e-8, 10),
         PanelError::SingletonGroup { .. }
     ));
-    assert!(matches!(
+    assert_eq!(
         fit_with(1.5, -1.0, 0),
-        PanelError::WithinRegressionFailed { .. }
-    ));
+        PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
+                confidence_level: 1.5,
+            }),
+        }
+    );
     assert_eq!(
         fit_with(0.95, -1.0, 0),
         PanelError::InvalidMaxIter { max_iter: 0 }
     );
     assert!(matches!(
         fit_with(0.95, -1.0, 10),
+        PanelError::InvalidTol { .. }
+    ));
+}
+
+/// 設定値は、データを見る最初の検査（操作変数の数）より先に報告される。
+#[test]
+fn settings_are_reported_before_the_identification_check() {
+    // 内生変数2つに操作変数1つ（過小識別）。
+    let (y, x1, x2, z1, _) = columns();
+    let build = || {
+        custom(
+            &y,
+            Vec::<Vec<f64>>::new(),
+            vec![x1.clone(), x2.clone()],
+            vec![z1.clone()],
+        )
+    };
+    let fit_with = |confidence_level: f64, tol: f64| {
+        error_of(FeTwoSlsEstimator::fit_with_absorption(
+            build(),
+            FeEffects::OneWay,
+            FeCovType::Classical,
+            confidence_level,
+            &FeAbsorption { tol, max_iter: 10 },
+        ))
+    };
+    assert!(matches!(
+        fit_with(0.95, 1e-8),
+        PanelError::InsufficientInstruments { .. }
+    ));
+    assert!(matches!(
+        fit_with(1.5, 1e-8),
+        PanelError::WithinRegressionFailed { .. }
+    ));
+    assert!(matches!(
+        fit_with(0.95, -1.0),
         PanelError::InvalidTol { .. }
     ));
 }

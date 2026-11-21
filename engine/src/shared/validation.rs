@@ -93,7 +93,8 @@ pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), Co
 /// モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
 ///
 /// 呼び出し元は`OlsEstimator::fit`と、`OlsEstimator`を経由しないIVの第二段階
-/// （`iv::two_sls`の`validate_second_stage`）。`OlsEstimator::fit`では`confidence_level`の検査の後に呼ぶ。`FeEstimator::fit`が直接呼ぶ
+/// （`iv::two_sls`の`validate_second_stage`）。`OlsEstimator::fit`では`confidence_level`の検査の後に呼ぶ。
+/// `FeEstimator::fit`が直接呼ぶ
 /// `shared::least_squares::least_squares`（固定効果のみモデル、`x=[]`でk=0になりうる
 /// 正当なケース）はこの関数を経由しない（`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
 ///

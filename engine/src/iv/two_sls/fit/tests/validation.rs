@@ -212,6 +212,36 @@ fn fit_reports_an_invalid_confidence_level_before_a_singular_second_stage_design
     );
 }
 
+/// 範囲外の`confidence_level`は、識別の順序条件より先に報告される。
+#[test]
+fn fit_reports_an_invalid_confidence_level_before_the_identification_check() {
+    // 内生変数2つに操作変数1つ（過小識別）。
+    let build = || {
+        IvInput::from_columns(
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[],
+            vec![],
+            &[vec![5.0, 4.0, 3.0, 2.0, 1.0], vec![1.0, 1.0, 2.0, 2.0, 3.0]],
+            vec!["endog1".to_string(), "endog2".to_string()],
+            &[vec![2.0, 1.0, 4.0, 3.0, 6.0]],
+            vec!["z1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    };
+    assert!(matches!(
+        TwoSlsEstimator::fit(build(), CovType::Classical, 0.95).unwrap_err(),
+        IvError::InsufficientInstruments { .. }
+    ));
+    assert_eq!(
+        TwoSlsEstimator::fit(build(), CovType::Classical, 1.5).unwrap_err(),
+        IvError::Common(CommonError::InvalidConfidenceLevel {
+            confidence_level: 1.5
+        })
+    );
+}
+
 /// 範囲外の`confidence_level`は、識別の順序条件・観測数・クラスター数・被説明変数の定数より先に
 /// 報告される（設定値の検査がデータの大きさに依る検査より先、他の手法と同じ順序）。
 #[test]

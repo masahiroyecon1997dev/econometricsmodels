@@ -281,7 +281,7 @@ impl FeEstimator {
     /// - `effects=TwoWay`で`input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`、
     ///   `effects=MultiWay`で入力の次元が3つ未満の場合は`CommonError::Internal`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
-    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（他のどの検査より先）
+    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（吸収する次元の解決の次。他のどの検査より先）
     /// - 打ち切り設定が範囲外なら`PanelError::InvalidMaxIter`・`PanelError::InvalidTol`（この順）、不均衡な2-wayで
     ///   交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
     /// - HC2/HC3で密な行列を解く場合（組合せが欠ける2-way、3次元以上）に、最大の次元を除いた水準数の合計が

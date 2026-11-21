@@ -96,6 +96,21 @@ fn settings_are_reported_in_order_before_the_data_checks() {
     ));
 }
 
+/// 吸収する次元の解決（2-wayで`time`が無い）は、設定値の検査より先に評価される
+/// （`FeTwoSlsEstimator`と同じ順序）。
+#[test]
+fn two_way_without_a_second_dimension_is_reported_before_the_settings() {
+    let err = error_of(FeGmmEstimator::fit(
+        one_way_input(),
+        FeEffects::TwoWay,
+        FeGmmType::OneStep,
+        true,
+        FeCovType::Classical,
+        1.5,
+    ));
+    assert_eq!(err, PanelError::TwoWayRequiresTime);
+}
+
 #[test]
 fn invalid_tol_is_rejected() {
     for invalid in [0.0, -1e-6, f64::NAN, f64::INFINITY] {

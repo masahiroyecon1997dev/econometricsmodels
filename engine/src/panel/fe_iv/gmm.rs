@@ -159,7 +159,7 @@ impl FeGmmEstimator {
     /// 種類（重みとは独立）、`confidence_level`は信頼区間の水準。
     ///
     /// # Errors
-    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（他のどの検査より先。
+    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（吸収する次元の解決の次。他のどの検査より先。
     ///   続けて交互射影の`max_iter`・`tol`）
     /// - `Iterated`の`max_iter`・`tol`が範囲外なら`CommonError::InvalidGmmMaxIter`・`InvalidGmmTol`
     ///   （`PanelError::Common`。交互射影の設定の次）

@@ -661,6 +661,8 @@ _Y_FAULTS = frozenset(
     {"y_in_x", "weight_is_y", "effects_second_is_y", "dk_time_is_y"}
 )
 _Y_CHANGERS = frozenset({"missing_y", "non_binary_y", "uint128_y"})
+# `gmm_type="iterated"`を選ぶと使われてしまう、`gmm_max_iter`/`gmm_tol`の未使用の故障。
+_UNUSED_WITHOUT_ITERATED = frozenset({"unused_gmm_max_iter", "unused_gmm_tol"})
 # `hac`/`dk`を選ぶと使われてしまう、`hac_lags`/`dk_*`の未使用の故障。
 _UNUSED_WITHOUT_TIME_COV = frozenset(
     {"unused_hac_lags", "unused_dk_bandwidth", "unused_dk_time"}
@@ -797,6 +799,8 @@ def compose(
     - `hac_lags`/`dk_*`の未使用の故障と、`hac`/`dk`を選ぶ故障
       （選ぶと`hac_lags`/`dk_*`は使われる）
     - `y`の列名を使う故障と、`y`を別の列に変える故障
+    - `gmm_max_iter`/`gmm_tol`の未使用の故障と、`gmm_type="iterated"`を選ぶ故障
+      （選ぶと`gmm_max_iter`/`gmm_tol`は使われる）
     """
     e_args, e_opts = changes(method, early)
     l_args, l_opts = changes(method, late)
@@ -832,6 +836,11 @@ def compose(
     ):
         return None
     if early in _Y_FAULTS and late in _Y_CHANGERS:
+        return None
+    if (
+        early in _UNUSED_WITHOUT_ITERATED
+        and l_opts.get("gmm_type") == "iterated"
+    ):
         return None
     args = {**method.base_args, **l_args, **e_args}
     opts = {**method.base_opts, **l_opts, **e_opts}
@@ -952,7 +961,33 @@ def test_every_method_covers_every_stage_boundary(method):
         assert boundary in covered, boundary
 
 
-# ── 観測数が足りない入力での`confidence_level` ───────────────────────
+# ── 観測数が足りない入力での設定値 ───────────────────────────────────
+
+# 先頭の2行だけの入力で、`confidence_level`が正しいときに出る、観測数・自由度の不足のエラー。
+_TOO_FEW_ROWS_CODE = {
+    "ols": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "wls": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "logit": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "probit": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "tobit": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "iv": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "iv_gmm": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "fe": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+    "feiv": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+    "feiv_gmm": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+    "re": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+}
+# 観測数より先に報告される設定値の故障（`confidence_level`は別に確かめる）。
+_SETTING_FAULTS = (
+    "bad_max_iter",
+    "bad_tol",
+    "bad_gmm_max_iter",
+    "bad_gmm_tol",
+)
+
+
+def test_every_method_has_a_too_few_rows_code():
+    assert set(_TOO_FEW_ROWS_CODE) == {m.name for m in METHODS}
 
 
 @pytest.mark.parametrize("method", _method_params())
@@ -960,14 +995,31 @@ def test_confidence_level_is_reported_before_the_observation_count(df, method):
     """行数が足りない入力でも、範囲外の`confidence_level`が先に報告される。
 
     故障は入力の行を変えられないので、組合せには入れず、ここで別に確かめる。
-    先頭の2行だけにすると、どの手法も観測数（FE/RE/FEIVは自由度やsingleton）が足りず、
-    `confidence_level`が正しければ`ValidationError`になる。
+    先頭の2行は同じ個体の2行で、どの手法も観測数（FE/RE/FEIVは自由度）が足りない。
     """
     small = df.head(2)
     args = dict(method.base_args)
     opts = dict(method.base_opts)
-    # 前提: 行数が足りない入力は、それだけで`ValidationError`になる。
-    with pytest.raises(ValidationError):
+    # 前提: 行数が足りない入力は、それだけで観測数・自由度の不足になる。
+    with raises_error(_TOO_FEW_ROWS_CODE[method.name]):
         method.run(small, args, opts)
     with raises_error(ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=2.0):
         method.run(small, args, {**opts, "confidence_level": 2.0})
+
+
+def _setting_params():
+    return [
+        pytest.param(m, f, id=f"{m.name}-{f}")
+        for m in METHODS
+        for f in _SETTING_FAULTS
+        if f in m.faults
+    ]
+
+
+@pytest.mark.parametrize(("method", "fault"), _setting_params())
+def test_setting_is_reported_before_the_observation_count(df, method, fault):
+    """行数が足りない入力でも、範囲外の`max_iter`・`tol`・`gmm_max_iter`・`gmm_tol`が先に報告される。"""
+    args_changes, opts = changes(method, fault)
+    args = {**method.base_args, **args_changes}
+    with raises_fault(FAULTS[fault], method):
+        method.run(df.head(2), args, {**method.base_opts, **opts})

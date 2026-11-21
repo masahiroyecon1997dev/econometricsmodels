@@ -95,7 +95,7 @@ mod tests {
     use engine::nonlinear::common::{CovType as EngineCovType, SolverType as EngineSolverType};
     use polars::df;
 
-    /// `y`は`lower=0.0`（既定の境界）以上の値のみで構成する（`TobitInput::from_columns`の
+    /// `y`は`lower=0.0`（既定の境界）以上の値のみで構成する（`TobitEstimator::fit`の
     /// 境界整合性検証を通過させるため）。
     fn well_formed_df() -> DataFrame {
         df!(

@@ -41,6 +41,9 @@ pub(super) fn fit_fe_gmm<T>(
     // faerのグローバル並列度を`Par::Seq`に固定する（`FeEstimator::fit`と同じ理由）。
     crate::shared::parallelism::ensure_serial();
 
+    // 吸収する次元の解決を先に評価する（`FeEstimator::fit`・`FeTwoSlsEstimator::fit`と同じ順序。2-wayで
+    // `time`が無い入力などを、設定値の検査より先に弾く）。
+    effects.levels(input.index().effect_codes())?;
     // 設定値は、データを見る検査より先に、`confidence_level` → `max_iter` → `tol` →
     // `gmm_max_iter` → `gmm_tol`の順に調べる（前の3つは`prepare_within`も同じ順で調べるので、ここでの検査と
     // 重複するが、反復の設定を`prepare_within`の前に挟むために先に行う）。

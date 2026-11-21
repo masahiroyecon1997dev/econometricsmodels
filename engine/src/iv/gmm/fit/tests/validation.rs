@@ -250,6 +250,72 @@ fn fit_reports_options_in_order_before_the_observation_count() {
     );
 }
 
+/// 設定値は、識別の順序条件・被説明変数の定数の検査より先に報告される。
+#[test]
+fn fit_reports_options_before_the_identification_and_constant_outcome_checks() {
+    // 内生変数2つに操作変数1つ（過小識別）。
+    let under_identified = || {
+        IvInput::from_columns(
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[],
+            vec![],
+            &[vec![5.0, 4.0, 3.0, 2.0, 1.0], vec![1.0, 1.0, 2.0, 2.0, 3.0]],
+            vec!["endog1".to_string(), "endog2".to_string()],
+            &[vec![2.0, 1.0, 4.0, 3.0, 6.0]],
+            vec!["z1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    };
+    // 識別は足りているが、`y`が全行で同じ値（切片あり）。
+    let constant_outcome = || {
+        IvInput::from_columns(
+            &[2.0; 5],
+            &[],
+            vec![],
+            &[vec![5.0, 4.0, 3.0, 2.0, 1.0]],
+            vec!["endog1".to_string()],
+            &[vec![2.0, 1.0, 4.0, 3.0, 6.0]],
+            vec!["z1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    };
+    let iterated = |max_iter: i64, tol: f64| GmmType::Iterated {
+        weight: WeightType::Classical,
+        max_iter,
+        tol,
+    };
+    let fit = |input: IvInput, gmm_type: GmmType, confidence_level: f64| {
+        GmmEstimator::fit(input, gmm_type, true, CovType::Classical, confidence_level).unwrap_err()
+    };
+
+    assert!(matches!(
+        fit(under_identified(), iterated(10, 1e-6), 0.95),
+        IvError::InsufficientInstruments { .. }
+    ));
+    assert_eq!(
+        fit(constant_outcome(), iterated(10, 1e-6), 0.95),
+        IvError::Common(CommonError::OutcomeConstant)
+    );
+    for build in [under_identified, constant_outcome] {
+        assert!(matches!(
+            fit(build(), iterated(1, -1.0), 1.5),
+            IvError::Common(CommonError::InvalidConfidenceLevel { .. })
+        ));
+        assert!(matches!(
+            fit(build(), iterated(1, -1.0), 0.95),
+            IvError::Common(CommonError::InvalidGmmMaxIter { .. })
+        ));
+        assert!(matches!(
+            fit(build(), iterated(10, -1.0), 0.95),
+            IvError::Common(CommonError::InvalidGmmTol { .. })
+        ));
+    }
+}
+
 /// 観測数`n`が`k`（構造方程式の係数の数）以下なら`InsufficientObservations`
 /// （`n<=k`のままだと`df_resid=n-k`による除算
 /// 等がNaN/Infinityを静かに生成しうる、`gmm_hc_omega`のdocコメント参照）。

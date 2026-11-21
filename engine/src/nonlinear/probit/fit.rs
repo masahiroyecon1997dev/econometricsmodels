@@ -11,7 +11,7 @@ use super::problem::ProbitProblem;
 use crate::nonlinear::common::{
     GoodnessOfFit, MleError, MleFitOptions, cov_params_for_type, destandardize_cov_params,
     destandardize_params, goodness_of_fit, log_likelihood_null, ols_based_initial_params,
-    run_solver, scores_needed, standardize_columns, validate_fit_preconditions,
+    run_solver_keeping_problem, scores_needed, standardize_columns, validate_fit_preconditions,
 };
 use crate::nonlinear::separation::verify_no_separation;
 use crate::shared::inference;
@@ -68,11 +68,8 @@ pub(super) fn fit_probit(
         )?
     };
     let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
-    // `cov_type`がスコアを使う場合（`scores_needed`）、収束点でのスコア評価に標準化空間の
-    // `ProbitProblem`が必要になる。`run_solver`は`problem`の所有権を取り込むため、事前に複製しておく。
-    let problem_for_scores = scores_needed(&cov_type).then(|| problem.clone());
 
-    let output = run_solver(
+    let (output, problem) = run_solver_keeping_problem(
         problem,
         solver,
         initial_params,
@@ -81,6 +78,11 @@ pub(super) fn fit_probit(
         n,
         raise_on_non_convergence,
     )?;
+    // `cov_type`がスコアを使う場合（`scores_needed`）、収束点でのスコア評価に標準化空間の問題が
+    // 要る。`run_solver_keeping_problem`が返す問題をそのまま使い（最適化の前に複製しない）、
+    // 評価したらすぐ手放す。
+    let scores = scores_needed(&cov_type).then(|| problem.scores(&output.params));
+    drop(problem);
 
     let params = destandardize_params(&output.params, &scale);
 
@@ -94,7 +96,6 @@ pub(super) fn fit_probit(
         output.converged,
         raise_on_non_convergence,
     )?;
-    let scores = problem_for_scores.map(|problem| problem.scores(&output.params));
     let cov_params_std = cov_params_for_type(&cov_type, &hessian_std, scores.as_ref(), n, k)?;
     let cov_params = destandardize_cov_params(&cov_params_std, &scale);
 

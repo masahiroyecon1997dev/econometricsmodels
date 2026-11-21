@@ -37,6 +37,10 @@ impl DesignCoordinates {
     /// 座標の対応を返す。`x_std`は呼び出し側が先に標準化したもので、ランク判定・条件数のガードも
     /// この行列に対して行う。
     ///
+    /// **`x_std`は受け取って、複製せずその場で分解する**（`OrthonormalDesign::new_checked_owned`。
+    /// `x_std`・QRの格納・`Q`の3つが同時に生きる`3·n·k`が`2·n·k`で済む）。呼び出し側は`x_std`を
+    /// その後に使えない（`fit_tobit`も`Q`ができたら不要）。
+    ///
     /// **共線な列は標準化前の`x`で特定する**: 切片ありの標準化は非切片列の平均を引くので、標準化後の
     /// 行列ではダミー変数の罠・定数列が切片を含まない形に見える。報告する列名は元の設計の列。
     ///
@@ -44,11 +48,12 @@ impl DesignCoordinates {
     /// - ランク落ち（完全な多重共線性、列を揃えた条件数が`1e12`超）: `MleError::SingularDesignMatrix`
     /// - 列を揃えた条件数が`5e7`超: `NearSingularMatrix`（`DESIGN_GRAM`。`CommonError`）
     pub(super) fn new(
-        x_std: &Mat<f64>,
+        x_std: Mat<f64>,
         x: &Mat<f64>,
         names: &[String],
     ) -> Result<(Self, Mat<f64>), MleError> {
-        let design = OrthonormalDesign::new_checked(x_std).map_err(|err| match err {
+        let (n, k) = (x_std.nrows(), x_std.ncols());
+        let design = OrthonormalDesign::new_checked_owned(x_std).map_err(|err| match err.kind {
             RankDeficient::Columns => MleError::SingularDesignMatrix {
                 columns: column_names(&collinear_columns(x), names),
             },
@@ -56,8 +61,6 @@ impl DesignCoordinates {
                 matrix: MatrixKind::DesignGram,
             }),
         })?;
-        let n = x_std.nrows();
-        let k = x_std.ncols();
         let (mut q, r) = design.into_parts();
         // `√n`に近い2の冪（`n ≥ 1`なので指数は0以上）。
         let exponent = (n as f64).sqrt().log2().round() as i32;
@@ -148,7 +151,7 @@ mod tests {
     #[test]
     fn q_times_r_reconstructs_the_standardized_design() {
         let (x, names) = design(40);
-        let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
         let back = &q * &coordinates.r;
         for i in 0..40 {
             for j in 0..3 {
@@ -162,7 +165,7 @@ mod tests {
     fn q_is_scaled_by_a_power_of_two_near_the_square_root_of_n() {
         for n in [4, 40, 600, 100_000] {
             let (x, names) = design(n);
-            let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+            let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
             let exponent = coordinates.scale.log2();
             assert_eq!(exponent.fract(), 0.0, "n={n}");
             assert!(
@@ -189,7 +192,7 @@ mod tests {
     #[test]
     fn standardized_params_and_covariance_invert_the_coordinate_map() {
         let (x, names) = design(40);
-        let (coordinates, _) = DesignCoordinates::new(&x, &x, &names).unwrap();
+        let (coordinates, _) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
         // `β̃`から`b = Rβ̃`を作り、戻すと`β̃`。
         let beta = [0.7, -1.3, 2.1];
         let b: Vec<f64> = (0..3)
@@ -230,7 +233,7 @@ mod tests {
     #[test]
     fn initial_params_are_the_ols_coefficients_in_q_coordinates() {
         let (x, names) = design(40);
-        let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
         let beta = [0.5, 0.25, -0.75];
         let y = Mat::from_fn(40, 1, |i, _| {
             (0..3).map(|j| *x.get(i, j) * beta[j]).sum::<f64>() + 0.1 * ((i * 3) % 5) as f64
@@ -251,7 +254,7 @@ mod tests {
     #[test]
     fn initial_params_fall_back_to_sigma_one_for_a_perfect_fit() {
         let (x, names) = design(40);
-        let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
         let y = Mat::from_fn(40, 1, |i, _| 2.0 * *x.get(i, 1) + 1.0);
         let params = coordinates.initial_params(&q, &y);
         assert_eq!(params[3], 0.0);
@@ -267,7 +270,7 @@ mod tests {
                 *x.get(i, j)
             }
         });
-        let err = DesignCoordinates::new(&x, &x, &names).unwrap_err();
+        let err = DesignCoordinates::new(x.clone(), &x, &names).unwrap_err();
         assert!(
             matches!(&err, MleError::SingularDesignMatrix { columns } if columns == &["a", "b"]),
             "{err:?}"
@@ -283,7 +286,7 @@ mod tests {
             2 => a[i] + 1e-9 * (((i * 3) % 7) as f64 - 3.0),
             _ => *x.get(i, j),
         });
-        let err = DesignCoordinates::new(&x, &x, &names).unwrap_err();
+        let err = DesignCoordinates::new(x.clone(), &x, &names).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -345,7 +348,7 @@ mod tests {
             } else {
                 ["x1", "x2"].map(String::from).to_vec()
             };
-            let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+            let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
             // `Q`の座標の観測ごとの行`(q_i, g_i)`。
             let v = Mat::from_fn(n, k + 1, |i, j| if j < k { *q.get(i, j) } else { g(i) });
             let hessian = Mat::from_fn(k + 1, k + 1, |r, c| {
@@ -484,7 +487,7 @@ mod tests {
             _ => ((1.0 - d1(i)) - (1.0 - mean)) / sd,
         });
         let names = ["const", "d1", "d2"].map(String::from);
-        let err = DesignCoordinates::new(&x_std, &x, &names).unwrap_err();
+        let err = DesignCoordinates::new(x_std.clone(), &x, &names).unwrap_err();
         assert!(
             matches!(&err, MleError::SingularDesignMatrix { columns } if columns == &["const", "d1", "d2"]),
             "{err:?}"
@@ -501,7 +504,7 @@ mod tests {
             _ => ((i * i) % 5) as f64,
         });
         let names = ["const", "a", "b"].map(String::from);
-        let (coordinates, q) = DesignCoordinates::new(&x, &x, &names).unwrap();
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
         assert_eq!(coordinates.scale, 2.0);
         let gram = q.transpose() * &q;
         for i in 0..3 {

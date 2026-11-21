@@ -103,6 +103,12 @@
   - **LP定式化の注意**: 目的関数を`Σ‖z‖`などで正規化すると`n`で縮み、和の閾値は`n`で雑音が積もる。単位長の行にそろえ、解の最大マージンを絶対閾値と比べる。分離観測の個数を数える定式化（`s_i≤1`）は`n=1e5`で12〜18秒と超線形に遅く不採用。
   - **実測・限界**: `docs/spec/logit-spec.md`3.2節・4章。再現データは`benchmark/nonlinear/datasets.py`の`quasi_complete_separation`・`complete_separation`と`tests/support/_helpers.py`の`small_sample_separation_dataset`・`strongly_collinear_binary_dataset`。
 
+## fit中のメモリ（ピークRSS）
+
+- **Python側のピークRSSは、確保そのものをなくす変更と、mmapされる大きい行列の解放だけが効く**（列を早くdropしても、glibcの動的なmmap閾値のため、8MB級の列の解放ではRSSが下がらない。詳細は`engine/src/linear/CLAUDE.md`）。変更は`resource.getrusage`で変更前後のピークRSSを測って確かめる。ライブヒープ（`engine/examples/memory_probe.rs`）は見積りで、RSSの代わりにはならない。
+- **Tobitの設計行列は`OrthonormalDesign::new_checked_owned`で、複製せずその場で分解する**（`DesignCoordinates::new`は標準化した`x_std`を受け取って消費する）。`new_checked`は`x_std`・QRの格納・`Q`の3つ（`3·n·k`）を同時に持つ。n=100万・k=5＋定数でのPythonのピークRSSの増分は、classicalが234→188MB、hc0が234→203MBに下がった。
+- **スコアを使う`cov_type`（`scores_needed`）の収束点でのスコア評価は、`run_solver_keeping_problem`が返す問題を使い、最適化の前に`problem`を複製しない**（`run_solver`は最後にHessianを評価するために問題を取り戻しているので、それを捨てずに返すだけでよい）。複製は標準化した設計行列を含むので`n·k`級で、hc0のLogit/Probitは202→187MBに下がった。**新しいMLE手法の`fit()`も同じ形にする**。スコア行列そのもの（n×k）はsandwichに要るので残る（hc0・クラスター・OPGのピークの下限）。
+
 ## Tobitは標準化した設計行列の直交座標`Q`で最適化する（`tobit/coordinates.rs`の`DesignCoordinates`）
 
 - **`X`の座標で`H`を組んで共分散・全体Waldを作ってはいけない（相関の高い傾きで桁を失う）**: `-H`は`X'WX`の形で条件数が設計行列の2乗になり、傾きの相関が約`1 - 1e-11`以上だと、`H`の要素を倍精度で組む丸めだけで統計量が条件数に比例してずれる（`hc0`で傾きの差`1e-5`の相対誤差が`9e-4`、`1e-7`では全く合わない）。`-H`のコレスキー因子の座標で共分散を作っても`H`の丸めは残り、コレスキー分解は条件数`1e15`でも成功して誤った因子を返す（`eps = 1e-8`の準共線でWaldが`735`のところ`764`）ので、受け入れ範囲の判定にも使えない。`fit_tobit`は標準化した設計行列を`DesignCoordinates::new`（`OrthonormalDesign::new_checked`）で`X̃ = QR`に分解し、`Q`の座標`b = Rβ̃`で最適化する。`H`・スコアの条件数が共線性に依らず、`cov_params_for_type`と`wald_chi2_test(b, V_b, k_constant, df_model)`がそのまま使える（`R`が上三角で、先頭が切片・末尾が傾き）。標準化空間への戻しは`R⁻¹b`・`R⁻¹V_bR⁻ᵀ`を三角行列の後退代入で行い、`R⁻¹`を明示的に作らない。

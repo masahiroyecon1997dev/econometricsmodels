@@ -206,6 +206,34 @@ where
         + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
         + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
+    run_solver_keeping_problem(
+        problem,
+        solver,
+        initial_params,
+        max_iter,
+        tol,
+        n_obs,
+        raise_on_non_convergence,
+    )
+    .map(|(output, _)| output)
+}
+
+/// [`run_solver`]と同じ最適化を行い、解を返したあとの`problem`も返す（収束点でスコアを評価する
+/// 呼び出し側が、`problem`を最適化の前に複製しなくて済む）。契約・エラーは`run_solver`と同じ。
+pub fn run_solver_keeping_problem<O>(
+    problem: O,
+    solver: SolverType,
+    initial_params: Vec<f64>,
+    max_iter: u64,
+    tol: f64,
+    n_obs: usize,
+    raise_on_non_convergence: bool,
+) -> Result<(SolverOutput, O), MleError>
+where
+    O: CostFunction<Param = Vec<f64>, Output = f64>
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
+        + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
+{
     // line search（bfgs/lbfgs）の内側ループが収束判定を満たさないまま暴走するのを防ぐ
     // 安全網（`BudgetedProblem`のdocコメント参照）。`newton`はこの経路を
     // 通らず自前のLMラダーで既に有限回に抑えられているが、将来のsolver追加も含めた
@@ -284,8 +312,8 @@ where
     // `into_inner()`でバジェットの対象から外す（`BudgetedProblem::into_inner`のdoc
     // コメント参照）。この1回の呼び出しはline search内側ループの暴走防止という
     // バジェット本来の目的とは無関係なため。
+    let model = model.into_inner();
     let cost_hessian = model
-        .into_inner()
         .hessian(&params)
         .map_err(|e| CommonError::internal(e.to_string()))?;
     let hessian: Vec<Vec<f64>> = cost_hessian
@@ -293,12 +321,15 @@ where
         .map(|row| row.iter().map(|v| -v).collect())
         .collect();
 
-    Ok(SolverOutput {
-        params,
-        hessian,
-        converged,
-        n_iter,
-    })
+    Ok((
+        SolverOutput {
+            params,
+            hessian,
+            converged,
+            n_iter,
+        },
+        model,
+    ))
 }
 
 /// [`last_iterate_ties_best_cost`]が「コストでは区別できない」とみなす幅の係数（`·ε·|best_cost|`）。
@@ -586,6 +617,41 @@ mod tests {
             result,
             Err(MleError::EvaluationBudgetExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn run_solver_keeping_problem_gives_the_same_output_as_run_solver_and_returns_the_problem() {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
+            let (output, problem) = run_solver_keeping_problem(
+                quadratic_problem(),
+                solver,
+                vec![0.0, 0.0],
+                35,
+                1e-6,
+                1,
+                true,
+            )
+            .unwrap();
+            let plain = run_solver(
+                quadratic_problem(),
+                solver,
+                vec![0.0, 0.0],
+                35,
+                1e-6,
+                1,
+                true,
+            )
+            .unwrap();
+
+            assert_eq!(output.params, plain.params, "{solver:?}");
+            assert_eq!(output.hessian, plain.hessian, "{solver:?}");
+            assert_eq!(output.n_iter, plain.n_iter, "{solver:?}");
+            // 返された問題は評価回数の枠の対象外で、収束点でそのまま評価できる（最小点でコストは0）。
+            assert!(
+                problem.cost(&output.params).unwrap() < 1e-9,
+                "{solver:?}: the recovered problem must still be usable"
+            );
+        }
     }
 
     #[test]

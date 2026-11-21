@@ -77,7 +77,7 @@ pub(crate) use numerics::compensated_sum;
 pub use options::{CovType, MleFitOptions, SolverType};
 pub(crate) use predict::linear_predictor;
 pub use predict::{pred_table, predict_from_link, predict_new_data};
-pub use solver::{SolverOutput, run_solver};
+pub use solver::{SolverOutput, run_solver, run_solver_keeping_problem};
 pub use standardize::{
     ColumnScale, destandardize_cov_params, destandardize_params, standardize_columns,
 };

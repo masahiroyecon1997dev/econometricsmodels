@@ -11,7 +11,7 @@ use super::problem::TobitProblem;
 use super::scaling::TobitScaling;
 use super::statistics::{log_likelihood, validate_has_uncensored_observations};
 use crate::nonlinear::common::{
-    MleError, MleFitOptions, cov_params_for_type, run_solver, scores_needed,
+    MleError, MleFitOptions, cov_params_for_type, run_solver_keeping_problem, scores_needed,
     validate_cluster_cov_type, validate_mle_options, validate_sufficient_observations,
 };
 use crate::shared::inference;
@@ -55,15 +55,11 @@ pub(super) fn fit_tobit(
     let upper_std = scaling.standardize_bound(input.upper());
     // 標準化した設計行列を直交座標`Q = X̃R⁻¹`に移し、`Q`の座標`b = Rβ̃`で最適化する
     // （`DesignCoordinates`のdocコメント）。ランク判定と条件数のガードもここで行う。
-    let (coordinates, q) = DesignCoordinates::new(&x_std, input.x(), input.param_names())?;
-    drop(x_std);
+    let (coordinates, q) = DesignCoordinates::new(x_std, input.x(), input.param_names())?;
     let initial_params = coordinates.initial_params(&q, &y_std);
     let problem = TobitProblem::from_standardized(q, y_std, lower_std, upper_std);
-    // `cov_type`がスコアを使う場合（`scores_needed`）、収束点でのスコア評価に標準化空間の
-    // `TobitProblem`が必要になる。`run_solver`は`problem`の所有権を取り込むため、事前に複製しておく。
-    let problem_for_scores = scores_needed(&cov_type).then(|| problem.clone());
 
-    let output = run_solver(
+    let (output, problem) = run_solver_keeping_problem(
         problem,
         solver,
         initial_params,
@@ -72,6 +68,11 @@ pub(super) fn fit_tobit(
         n,
         raise_on_non_convergence,
     )?;
+    // `cov_type`がスコアを使う場合（`scores_needed`）、収束点でのスコア評価に標準化空間の問題が
+    // 要る。`run_solver_keeping_problem`が返す問題をそのまま使い（最適化の前に複製しない）、
+    // 評価したらすぐ手放す。
+    let scores = scores_needed(&cov_type).then(|| problem.scores(&output.params));
+    drop(problem);
     // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、Logit/Probitの分離検出
     // （`nonlinear::separation`）は行わない。全件打ち切りは
     // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
@@ -86,7 +87,6 @@ pub(super) fn fit_tobit(
 
     // `cov_type`別の共分散は`Q`の座標（`H`・スコアが良条件）で求め、`R⁻¹`で標準化空間に戻す。
     let hessian_q = Mat::from_fn(k + 1, k + 1, |i, j| output.hessian[i][j]);
-    let scores = problem_for_scores.map(|problem| problem.scores(&output.params));
     let cov_q = cov_params_for_type(&cov_type, &hessian_q, scores.as_ref(), n, k + 1)?;
     let cov_params_std = coordinates.standardized_covariance(&cov_q);
     // 標準化空間`(β̃, s̃)`の分散共分散行列を、元のスケール`(β, σ)`空間へ

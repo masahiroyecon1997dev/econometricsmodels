@@ -13,9 +13,10 @@
 //!
 //! 第一段階・弱操作変数診断（部分F・`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）・Wu-Hausmanは
 //! 第一段階だけに依存するので、どちらの推定量でも同じ（`common/first_stage.rs`を共有）。`estimator="2sls"`は
-//! 推論がt・F、過剰識別がSargan。`estimator="gmm"`は推論が正規分布・χ²、過剰識別がHansen J、事後診断が
-//! `c_stat()`。`fixed_effects()`はどちらの推定量でも、その推定量の係数から復元する。持たないメソッドは
-//! `METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`。
+//! 推論がt・F、過剰識別がSargan。`estimator="gmm"`は推論が正規分布・χ²、過剰識別がHansen J。
+//! `fixed_effects()`はどちらの推定量でも、その推定量の係数から復元する。`c_stat()`もどちらでも使え、重みは
+//! GMMなら`fit()`の重み、2SLSなら`cov_type`の系統で決める（`dk`は重み行列が無いので
+//! `C_STATISTIC_COV_TYPE_NOT_SUPPORTED`）。持たないメソッドは無い。
 
 use std::collections::HashMap;
 
@@ -33,6 +34,7 @@ use pyo3::types::PyDict;
 use super::super::common::groups_dict;
 use super::super::fe::{FEResult, fixed_effects_dict};
 use super::fit::{Estimated, compute_c_statistic, estimate_again};
+use super::gmm_setup::C_STATISTIC_2SLS_COV_TYPES;
 use super::input::FeIvColumns;
 use super::option_values::EstimatorKind;
 use super::options::FEIVOptions;
@@ -91,9 +93,8 @@ impl crate::shared::pickle::PickleField for Vec<(String, FEResult)> {
 /// endogeneity test that uses the weight. The first-stage regressions and the Cragg-Donald,
 /// Kleibergen-Paap and effective F diagnostics are not fields: they are the methods
 /// `first_stage()`, `cragg_donald()`, `kleibergen_paap()` and `effective_f()`, available with both
-/// estimators. The fixed effects themselves are the method `fixed_effects()`, also available
-/// with both estimators. The C statistic is the method `c_stat()`, available with
-/// `estimator="gmm"` only.
+/// estimators. The fixed effects themselves are the method `fixed_effects()` and the C statistic
+/// is the method `c_stat()`; both are available with both estimators.
 // `Clone`を派生しない: 第一段階の`FEResult`は複製できるが、`source_data`（`Py<PyAny>`）が
 // GILなしでは複製できない（`IVResult`と同じ理由）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
@@ -471,20 +472,22 @@ impl FEIVResult {
             .ok_or_else(|| internal_error("an FEIVResult without its options"))
     }
 
-    /// 結果の`estimator`が`supported`でなければ`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`にする。
-    fn require_estimator(&self, method: &str, supported: EstimatorKind) -> PyResult<()> {
-        let supported = supported.name();
-        if self.estimator == supported {
-            return Ok(());
+    /// `estimator="2sls"`の重みは`cov_type`から決まるが、`dk`には対応する重み行列が無い
+    /// （`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`）。再推定の前に弾く。
+    fn require_c_statistic_cov_type(&self) -> PyResult<()> {
+        if self.estimator == EstimatorKind::TwoSls.name() && self.cov_type == "dk" {
+            return Err(user_error(
+                ErrorCode::CStatisticCovTypeNotSupported,
+                vec![
+                    ("cov_type", ParamValue::from(self.cov_type.as_str())),
+                    (
+                        "allowed",
+                        ParamValue::from(C_STATISTIC_2SLS_COV_TYPES.to_vec()),
+                    ),
+                ],
+            ));
         }
-        Err(user_error(
-            ErrorCode::MethodNotAvailableForEstimator,
-            vec![
-                ("method", ParamValue::from(method)),
-                ("estimator", ParamValue::from(self.estimator.as_str())),
-                ("supported", ParamValue::from(supported)),
-            ],
-        ))
+        Ok(())
     }
 
     fn columns(&self) -> FeIvColumns {
@@ -622,16 +625,20 @@ impl FEIVResult {
 
     /// C statistic (difference-in-Hansen test) of the exogeneity of endogenous variables
     /// and of the orthogonality of excluded instruments, computed on the within-transformed
-    /// data. Available with `estimator="gmm"` only.
+    /// data. Available with both estimators.
     ///
     /// A post-estimation diagnostic: never computed by `fit()`. It re-reads the variables from
     /// the data passed to `fit()` (keep that data unchanged) and estimates the model again on
     /// every call. The model is
     /// estimated twice by two-step GMM, with and without the tested moment conditions, from
     /// the same covariance of the moment conditions; the statistic is the difference of the two
-    /// Hansen J statistics. The weight follows `gmm_weight_type` (`cluster` included) for
-    /// `gmm_type="two_step"` and `"iterated"`, and is `"classical"` for `gmm_type="one_step"`,
-    /// which has no weight type. For the classical weight the variance of the moment
+    /// Hansen J statistics. With `estimator="gmm"` the weight follows `gmm_weight_type`
+    /// (`cluster` included) for `gmm_type="two_step"` and `"iterated"`, and is `"classical"`
+    /// for `gmm_type="one_step"`, which has no weight type. With `estimator="2sls"`, which has
+    /// no weight choice, it follows `cov_type`: the classical weight for `"classical"`, the
+    /// robust weight for `"hc1"`, `"hc2"` and `"hc3"` (the small-sample corrections of those
+    /// types do not apply to the weight), and the cluster weight grouped by `cluster` for
+    /// `"cluster"`. `cov_type="dk"` has no weight matrix. For the classical weight the variance of the moment
     /// conditions uses `n - n_absorbed` like the Hansen J test; the other weights are not
     /// adjusted. As for the Hansen J test, the cluster weight needs no adjustment when every
     /// column of `effects` is nested in the clusters, and the statistic over-rejects with a
@@ -642,9 +649,9 @@ impl FEIVResult {
     /// TypeError
     ///     `variables` or `instruments` is not a list of str.
     /// ValidationError
-    ///     The model was fitted with `estimator="2sls"`, nothing is tested, a list is empty or
-    ///     repeats a name, a name is not an endogenous variable (instrument) of the model, or too
-    ///     many instruments are tested.
+    ///     The model was fitted with `estimator="2sls"` and `cov_type="dk"`, nothing is tested,
+    ///     a list is empty or repeats a name, a name is not an endogenous variable (instrument)
+    ///     of the model, or too many instruments are tested.
     /// ComputationError
     ///     The statistic is undefined for these data (collinear instruments, a perfect fit,
     ///     or fewer clusters than the moment conditions of the full model).
@@ -656,13 +663,13 @@ impl FEIVResult {
         instruments: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<CStatisticOutput> {
         guard(|| {
-            self.require_estimator("c_stat()", EstimatorKind::Gmm)?;
             // 型の検査 → 値（空・重複・名前）の検査の順は`resolve_c_stat_target`が持つ。
             let ResolvedCStatTarget {
                 target,
                 variables: tested_endog,
                 instruments: tested_instruments,
             } = resolve_c_stat_target(variables, instruments, &self.x_endog, &self.instruments)?;
+            self.require_c_statistic_cov_type()?;
             let source = self.retained_source(py)?;
             let options = self.retained_options()?;
             let columns = self.columns();

@@ -17,6 +17,7 @@ import pytest
 from _assertions import assert_close, assert_dict_close
 from _fe_iv_gmm_helpers import fit_case as fit_gmm_case
 from _fe_iv_helpers import fit_case as fit_2sls_case
+from _fe_iv_helpers import overidentified_panel
 from _tolerances import TOLERANCES
 from econometricsmodels import FEIV, FEIVOptions
 
@@ -26,7 +27,7 @@ _TOL = TOLERANCES["fe_iv_gmm_reduction"]
 RTOL, ATOL = _TOL["rtol"], _TOL["atol"]
 
 CASES = reduction_cases()
-N_ENTITIES, N_PERIODS = 30, 6
+N_ENTITIES = 30
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
@@ -44,33 +45,6 @@ def test_gmm_fixed_effects_equal_those_of_fe_2sls_for_equal_coefficients(
             rtol=RTOL,
             atol=ATOL,
         )
-
-
-def _data() -> pl.DataFrame:
-    rng = np.random.default_rng(20261121)
-    n = N_ENTITIES * N_PERIODS
-    entity = np.repeat(np.arange(N_ENTITIES), N_PERIODS)
-    time = np.tile(np.arange(N_PERIODS), N_ENTITIES)
-    alpha = rng.normal(size=N_ENTITIES)
-    gamma = rng.normal(size=N_PERIODS)
-    z1, z2, z3, x1 = rng.normal(size=(4, n))
-    v = rng.normal(size=n)
-    endog = 0.8 * z1 + 0.5 * z2 + 0.3 * z3 + v + alpha[entity]
-    # 不均一分散にして、`robust`重みの係数を2SLSから離す。
-    noise = (1.0 + np.abs(z1)) * rng.normal(size=n)
-    y = x1 + 1.5 * endog + alpha[entity] + gamma[time] + 0.7 * v + noise
-    return pl.DataFrame(
-        {
-            "y": y,
-            "x1": x1,
-            "w": endog,
-            "z1": z1,
-            "z2": z2,
-            "z3": z3,
-            "entity": [f"e{e:02d}" for e in entity],
-            "time": [f"t{t}" for t in time],
-        }
-    )
 
 
 def _fit(data: pl.DataFrame, effects: list[str], estimator: str):
@@ -101,7 +75,7 @@ def _structural_residual(data: pl.DataFrame, params: dict[str, float]):
 
 
 def test_one_way_effects_use_the_gmm_coefficients() -> None:
-    data = _data()
+    data = overidentified_panel()
     gmm = _fit(data, ["entity"], "gmm")
     two_sls = _fit(data, ["entity"], "2sls")
     # この入力では、ロバスト重みの係数が2SLSと違う（違わなければ、GMMの係数で復元したことを確かめられない）。
@@ -127,7 +101,7 @@ def test_one_way_effects_use_the_gmm_coefficients() -> None:
 def test_two_way_effects_solve_the_normal_equations_of_the_gmm_residual() -> (
     None
 ):
-    data = _data()
+    data = overidentified_panel()
     gmm = _fit(data, ["entity", "time"], "gmm")
     residual = _structural_residual(data, gmm.params)
     fixed = gmm.fixed_effects()

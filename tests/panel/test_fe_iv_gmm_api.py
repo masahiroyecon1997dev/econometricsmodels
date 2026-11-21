@@ -11,12 +11,10 @@ import numpy as np
 import polars as pl
 import pytest
 from _assertions import assert_option_case_insensitive
-from _errors import raises_error
 from _helpers import CASE_SPELLINGS
 from econometricsmodels import (
     FEIV,
     CStatisticResult,
-    ErrorCode,
     FEIVOptions,
     FEIVResults,
     _lib,
@@ -218,7 +216,9 @@ def test_effective_f_checks_its_argument_for_gmm_too(data):
         result.effective_f(alpha="0.05")  # type: ignore[arg-type]
 
 
-def test_c_stat_is_not_available_for_two_stage_least_squares(data):
+def test_c_stat_is_available_for_two_stage_least_squares(data):
+    """2SLSの`c_stat()`も使える（重みは`cov_type`の系統から決まる。数値の照合は
+    `test_fe_iv_c_statistic_2sls.py`）。"""
     result = FEIV(
         data,
         y="y",
@@ -227,13 +227,7 @@ def test_c_stat_is_not_available_for_two_stage_least_squares(data):
         instruments=["z1", "z2"],
         effects=["entity"],
     ).fit()
-    with raises_error(
-        ErrorCode.METHOD_NOT_AVAILABLE_FOR_ESTIMATOR,
-        method="c_stat()",
-        estimator="2sls",
-        supported="gmm",
-    ):
-        result.c_stat(variables=["a"])
+    assert result.c_stat(variables=["a"]).df == 1
 
 
 # ── C統計量 ──────────────────────────────────────────────────────────────

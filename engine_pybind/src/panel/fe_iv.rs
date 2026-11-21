@@ -13,8 +13,7 @@
 //! `FEIVResult`）のdocコメントと`ValidationError`のメッセージは英語、それ以外は日本語。
 //!
 //! 2SLSとGMMは別クラスにしない（`IV`と同じ。インターフェースを揃えて利用者が迷わないようにするため）。
-//! 推定量ごとに持たない結果の項目は`None`、持たないメソッドは`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`になる
-//! （`result.rs`のモジュールdoc）。
+//! 結果の項目とメソッドは両方の推定量で同じ（推定量ごとの違いは`result.rs`のモジュールdoc）。
 
 mod fit;
 mod gmm_setup;

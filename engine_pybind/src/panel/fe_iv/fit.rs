@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 
 use super::super::common::panel_error_to_pyerr;
 use super::super::fe::{FEResult, LazyFixedEffects, fe_result_fields};
-use super::gmm_setup::c_statistic_weight;
+use super::gmm_setup::{c_statistic_weight, c_statistic_weight_for_cov_type};
 use super::input::{BuiltFeIvInput, BuiltGmm, FeIvColumns, build_fe_iv_input};
 use super::options::FEIVOptions;
 use super::result::FEIVResult;
@@ -167,7 +167,8 @@ pub(super) fn estimate_again(
     estimate_built(build_fe_iv_input(df, columns, options)?, options, None)
 }
 
-/// 固定効果つきGMMのC統計量を、`fit()`と同じ入力・重みで計算する（`options.estimator`が`"gmm"`のときだけ）。
+/// C統計量を、`fit()`と同じ入力で計算する。重みは、`estimator="gmm"`なら`fit()`の重み（`one_step`は`Classical`）、
+/// `estimator="2sls"`なら`cov_type`の系統から決める（[`c_statistic_weight_for_cov_type`]）。
 pub(super) fn compute_c_statistic(
     df: &DataFrame,
     columns: FeIvColumns,
@@ -175,12 +176,18 @@ pub(super) fn compute_c_statistic(
     target: &CStatisticTarget,
 ) -> PyResult<CStatistic> {
     let built = build_fe_iv_input(df, columns, options)?;
-    let Some(gmm) = &built.gmm else {
-        return Err(internal_error(
-            "the C statistic was requested for a model fitted by two-stage least squares",
-        ));
+    let weight = match &built.gmm {
+        Some(gmm) => c_statistic_weight(&gmm.gmm_type),
+        None => {
+            let entity_groups = &built.input.index().effect_codes()[0];
+            // `dk`は`FEIVResult::c_stat`が先に弾く（再推定の前）。ここに来るのは到達不能な状態。
+            c_statistic_weight_for_cov_type(&built.cov_type, entity_groups).ok_or_else(|| {
+                internal_error(
+                    "the C statistic was requested for a Driscoll-Kraay covariance of a two-stage least squares fit",
+                )
+            })?
+        }
     };
-    let weight = c_statistic_weight(&gmm.gmm_type);
     fe_gmm_c_statistic(
         &built.input,
         built.effects,

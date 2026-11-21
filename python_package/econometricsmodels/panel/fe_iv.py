@@ -272,12 +272,11 @@ class FEIVResults:
     - Weak-instrument diagnostics (methods, computed when called, the
       same for both estimators): `cragg_donald()`,
       `kleibergen_paap()`, `effective_f()`.
-    - Exogeneity and orthogonality (a method, computed when called, with
-      `estimator="gmm"` only): `c_stat()`.
+    - Exogeneity and orthogonality (a method, computed when called, the
+      same for both estimators; not available for `estimator="2sls"`
+      with `cov_type="dk"`): `c_stat()`.
 
-    A method that the estimator does not support raises a
-    `ValidationError`, and a property that it does not support is
-    `None`.
+    Every field and method is available with both estimators.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -810,8 +809,7 @@ class FEIVResults:
         variables: list[str] | None = None,
         instruments: list[str] | None = None,
     ) -> CStatisticResult:
-        """C statistic (difference-in-Hansen test), for
-        `estimator="gmm"` only.
+        """C statistic (difference-in-Hansen test).
 
         Tests whether endogenous variables in `variables` are in fact
         exogenous, and whether excluded instruments in `instruments` are
@@ -825,13 +823,20 @@ class FEIVResults:
         the statistic is never negative. Pass `variables`, `instruments`
         or both.
 
-        The covariance of the moment conditions follows `gmm_weight_type`
-        (grouped by `cluster` for the cluster weight) when `gmm_type` is
-        `"two_step"` or `"iterated"`,
-        and is the classical one for `gmm_type="one_step"`, which has no
-        weight type. It does not depend on `cov_type`, `gmm_max_iter` or
+        With `estimator="gmm"`, the covariance of the moment conditions
+        follows `gmm_weight_type` (grouped by `cluster` for the cluster
+        weight) when `gmm_type` is `"two_step"` or `"iterated"`, and is
+        the classical one for `gmm_type="one_step"`, which has no weight
+        type. It does not depend on `cov_type`, `gmm_max_iter` or
         `gmm_tol`, and a model fitted with `gmm_type="one_step"` or
-        `"iterated"` gets the two-step statistic. As for the Hansen J
+        `"iterated"` gets the two-step statistic. With `estimator="2sls"`,
+        which has no weight choice, the covariance follows `cov_type`: the
+        classical one for `"classical"`, the robust one for `"hc1"`,
+        `"hc2"` and `"hc3"` (the small-sample corrections of those types
+        do not apply to the weight), and the one grouped by `cluster` for
+        `"cluster"`. `cov_type="dk"` has no corresponding weight matrix,
+        so the statistic is not available; use another `cov_type` or
+        `estimator="gmm"`. As for the Hansen J
         statistic, only the classical weight is adjusted by `n - n_absorbed`
         for the absorbed fixed effects. The cluster weight needs no
         adjustment when every column of `effects` is nested in the
@@ -862,8 +867,8 @@ class FEIVResults:
         Raises:
             TypeError: `variables` or `instruments` is not a list of str.
             ValidationError: The model was fitted with
-                `estimator="2sls"`, neither argument is given, a list is
-                empty or repeats a name, a name in `variables` is not in
+                `estimator="2sls"` and `cov_type="dk"`, neither argument
+                is given, a list is empty or repeats a name, a name in `variables` is not in
                 `x_endog`, a name in `instruments` is not among the
                 excluded instruments, or so many instruments are tested
                 that fewer excluded instruments than endogenous variables

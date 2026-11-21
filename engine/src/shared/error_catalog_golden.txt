@@ -24,6 +24,7 @@ C_STATISTIC_NOTHING_TO_TEST [Validation]: The C statistic needs at least one end
 C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS [Validation]: Testing 3 of the 3 excluded instruments leaves fewer than the 3 needed to identify the 3 endogenous variable(s) (order condition). Remove some instruments from the test, or add instruments to the model.
 C_STATISTIC_UNKNOWN_VARIABLE [Validation]: 'abc' (given as abc) is not in abc of this model. Use a name from abc, as passed to the model.
 C_STATISTIC_UNDEFINED [Computation]: The C statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a perfect fit, or too few clusters or observations for the covariance of the moment conditions). Check the instruments for collinearity and the covariance options (cov_type, gmm_weight_type, cluster).
+C_STATISTIC_COV_TYPE_NOT_SUPPORTED [Validation]: The C statistic of a model fitted with estimator="2sls" takes its weight matrix from cov_type, and cov_type="abc" has no weight matrix. Use one of these cov_type values: "a", "b", or fit with estimator="gmm".
 TOLERANCE_NOT_POSITIVE_FINITE [Validation]: abc must be a positive finite number, got 1.5. Omit the option to use the default, or pass a small positive number.
 MAX_ITER_OUT_OF_RANGE [Validation]: max_iter must be an integer from 3 to 3, got 3. Pass a value from 3 to 3.
 GMM_MAX_ITER_OUT_OF_RANGE [Validation]: gmm_max_iter must be an integer from 3 to 3 (the initial estimate counts as one iteration), got 3. Pass a value from 3 to 3, or use gmm_type="two_step" for a two-step estimate without iteration.
@@ -31,7 +32,6 @@ HAC_LAGS_OUT_OF_RANGE [Validation]: hac_lags must be from 0 to 3, one less than 
 DK_BANDWIDTH_OUT_OF_RANGE [Validation]: dk_bandwidth must be from 0 to 3, one less than the number of unique time periods in dk_time (3), got 3. Pass a smaller dk_bandwidth, or omit it to use the default.
 NLAGS_NOT_POSITIVE [Validation]: nlags must be a positive integer, got 3. Pass nlags of 1 or more.
 COV_TYPE_NOT_AVAILABLE_FOR_MODEL [Validation]: cov_type="abc" is not available for abc. Use one of: "a", "b".
-METHOD_NOT_AVAILABLE_FOR_ESTIMATOR [Validation]: abc is not available for a model fitted with estimator="abc". Use estimator="abc" to call abc.
 INSUFFICIENT_OBSERVATIONS [Validation]: Not enough observations: 3 observation(s) for 3 parameter(s); at least 3 are needed. Add observations or remove regressors.
 CLUSTER_COUNT_TOO_SMALL [Validation]: abc="cluster" needs at least 3 clusters, but the cluster column has 3. Use a cluster column with more distinct values, or set a different abc.
 CLUSTER_COUNT_NOT_ABOVE_SLOPES [Validation]: abc="cluster" needs more clusters than slope coefficients for the overall F/Wald test: the cluster column has 3 clusters for 3 slope coefficient(s); at least 3 are needed. Use a cluster column with more distinct values, remove regressors, or set a different abc.

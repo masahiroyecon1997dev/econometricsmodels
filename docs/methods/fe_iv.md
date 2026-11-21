@@ -97,7 +97,7 @@ S = \frac{\hat\varepsilon' \tilde Z(\tilde Z'\tilde Z)^{-1}\tilde Z'\hat\varepsi
 \hat\sigma^2 = \frac{\hat\varepsilon'\hat\varepsilon}{n - n_{\text{abs}}}, \qquad \tilde Z = [\tilde x_1, \tilde z]
 \]
 
-It assumes homoskedasticity and does not depend on `cov_type`. The variance uses \(n - n_{\text{abs}}\), not \(n\): the within residuals have an expected sum of squares of about \(\sigma^2(n - n_{\text{abs}})\) (the estimated slopes are not subtracted, as in [IV](iv.md#overidentification-overid_statistic)), and dividing by \(n\) makes the statistic larger by the factor \(n/(n - n_{\text{abs}})\), which can reject too often when there are few periods. The numerator is the same as in the Sargan statistic of 2SLS with a dummy variable for every group (Frisch-Waugh-Lovell); the variance estimate uses the degrees of freedom that the absorbed fixed effects use up, whereas [IV](iv.md#overidentification-overid_statistic) divides by \(n\). FEIV currently has no overidentification test that is robust to heteroskedasticity or clustering.
+It assumes homoskedasticity and does not depend on `cov_type`. The variance uses \(n - n_{\text{abs}}\), not \(n\): the within residuals have an expected sum of squares of about \(\sigma^2(n - n_{\text{abs}})\) (the estimated slopes are not subtracted, as in [IV](iv.md#overidentification-overid_statistic)), and dividing by \(n\) makes the statistic larger by the factor \(n/(n - n_{\text{abs}})\), which can reject too often when there are few periods. The numerator is the same as in the Sargan statistic of 2SLS with a dummy variable for every group (Frisch-Waugh-Lovell); the variance estimate uses the degrees of freedom that the absorbed fixed effects use up, whereas [IV](iv.md#overidentification-overid_statistic) divides by \(n\). The Sargan statistic is not robust to heteroskedasticity or clustering; with `estimator="gmm"` and a robust or cluster `gmm_weight_type`, Hansen's J is (see [Hansen J statistic](#hansen-j-statistic)).
 
 ### Endogeneity: `wu_hausman_statistic`
 
@@ -124,7 +124,7 @@ Measured with `fixest` 0.14.2 (`feols` with an instrumental-variable part):
 
 ## GMM estimator (`estimator="gmm"`)
 
-With `estimator="gmm"` the within-transformed variables enter the generalized method of moments instead of two-stage least squares: the [IV](iv.md) GMM estimator after the [FE](fe.md) within transformation. The sections above define the model, the degrees of freedom, the first stage, the weak-instrument diagnostics, the Wu-Hausman test and the fixed effects; this part gives what is different for GMM: the moment conditions in the within space, the weight matrix, the covariance of the coefficients, the Hansen J and C statistics and their small-sample treatment of the absorbed effects, and the limits of the supported weights and diagnostics. The first stage, the weak-instrument diagnostics and the Wu-Hausman test depend only on the first stage and on a least-squares auxiliary regression, so they are defined exactly as above and take the same values for the same data and `cov_type`: they follow `cov_type`, never the GMM weight. `fixed_effects()` recovers the effects with the GMM coefficients. The exogeneity of a regressor can also be tested by `c_stat()`, which uses the weight.
+With `estimator="gmm"` the within-transformed variables enter the generalized method of moments instead of two-stage least squares: the [IV](iv.md) GMM estimator after the [FE](fe.md) within transformation. The sections above define the model, the degrees of freedom, the first stage, the weak-instrument diagnostics, the Wu-Hausman test and the fixed effects; this part gives what is different for GMM: the moment conditions in the within space, the weight matrix, the covariance of the coefficients, the Hansen J and C statistics and their small-sample treatment of the absorbed effects, and the limits of the supported weights and diagnostics. The first stage, the weak-instrument diagnostics and the Wu-Hausman test depend only on the first stage and on a least-squares auxiliary regression, so they are defined exactly as above and take the same values for the same data and `cov_type`: they follow `cov_type`, never the GMM weight. `fixed_effects()` recovers the effects with the GMM coefficients. The exogeneity of a regressor can also be tested by `c_stat()`, whose covariance of the moment conditions follows the GMM weight (defined below).
 
 ### Model and weight matrix
 
@@ -136,7 +136,7 @@ Every variable is transformed once with the within transformation of [FE](fe.md#
 \hat\beta(W) = (\tilde X'\tilde Z\, W\, \tilde Z'\tilde X)^{-1}\, \tilde X'\tilde Z\, W\, \tilde Z'\tilde y
 \]
 
-No first-stage regression is run. `gmm_type` selects how \(W\) is obtained:
+The point estimate does not use a first-stage regression (the first stage is run only for the diagnostics, as above). `gmm_type` selects how \(W\) is obtained:
 
 | `gmm_type` | Procedure |
 |---|---|

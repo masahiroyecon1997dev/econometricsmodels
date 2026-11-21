@@ -4,11 +4,10 @@
 
 use statrs::distribution::StudentsT;
 
-use super::super::common::FeIvInput;
 use super::super::common::{
-    FirstStageArgs, FirstStageWithin, FirstStages, WithinPrepared, WuHausmanContext, effect_names,
-    fe_wu_hausman_test, mat_from_columns, pick_absorbed, prepare_within, run_first_stages,
-    structural_fit_is_perfect,
+    FeIvInput, FirstStageArgs, FirstStageWithin, FirstStages, WithinPrepared, WuHausmanContext,
+    effect_names, fe_wu_hausman_test, mat_from_columns, pick_absorbed, prepare_within,
+    run_first_stages, structural_fit_is_perfect,
 };
 use super::FeTwoSlsEstimator;
 use super::sargan::fe_sargan_test;

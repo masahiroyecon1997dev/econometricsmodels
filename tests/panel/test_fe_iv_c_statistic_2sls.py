@@ -30,6 +30,7 @@ from econometricsmodels import (
     FEIVOptions,
     IVOptions,
 )
+from scipy.stats import chi2
 
 _TOL = TOLERANCES["fe_iv_gmm_reduction"]
 RTOL, ATOL = _TOL["rtol"], _TOL["atol"]
@@ -170,14 +171,23 @@ def test_classical_c_stat_equals_the_dummy_variable_iv_rescaled(
     actual = fe.c_stat(**TARGETS[target])
     scale = (n - n_absorbed) / n
     label = f"{'+'.join(effects)}/{target}"
-    assert_close(
-        actual.statistic,
-        expected.statistic * scale,
-        f"{label}/statistic",
-        rtol=RTOL,
-        atol=ATOL,
-    )
+    for field in ("statistic", "j_with_tested", "j_without_tested"):
+        assert_close(
+            getattr(actual, field),
+            getattr(expected, field) * scale,
+            f"{label}/{field}",
+            rtol=RTOL,
+            atol=ATOL,
+        )
     assert actual.df == expected.df, label
+    # p値は、同じ自由度のχ²分布で、尺度を掛けた統計量から出る。
+    assert_close(
+        actual.p_value,
+        float(chi2.sf(expected.statistic * scale, expected.df)),
+        f"{label}/p_value",
+        rtol=_TOL["rtol_p_value"],
+        atol=0.0,
+    )
 
 
 def test_dk_has_no_weight_matrix_for_two_stage_least_squares(data) -> None:
@@ -219,4 +229,51 @@ def test_gmm_c_stat_does_not_depend_on_the_covariance_type(data) -> None:
         dk.c_stat(variables=["w"]),
         classical.c_stat(variables=["w"]),
         "gmm/dk",
+    )
+
+
+@pytest.mark.parametrize("spelling", ["dk", "DK", "Dk"])
+def test_dk_is_rejected_whatever_the_spelling(data, spelling) -> None:
+    """`cov_type`は大文字小文字を区別しないので、`dk`の拒否もどの綴りでも同じ。"""
+    result = _fit(data, FEIVOptions(cov_type=spelling, dk_time="time"))
+    with raises_error(ErrorCode.C_STATISTIC_COV_TYPE_NOT_SUPPORTED):
+        result.c_stat(variables=["w"])
+
+
+# ── 引数の検証（2SLSでもGMMと同じ） ───────────────────────────────────
+
+
+def test_two_sls_c_stat_validates_its_arguments(data) -> None:
+    result = _fit(data, FEIVOptions())
+    with raises_error(ErrorCode.C_STATISTIC_UNKNOWN_VARIABLE):
+        result.c_stat(variables=["x1"])
+    with raises_error(ErrorCode.ROLE_DUPLICATE_COLUMN):
+        result.c_stat(instruments=["z3", "z3"])
+    # 除外操作変数を全て検定すると、内生変数1個が識別されない。
+    with raises_error(ErrorCode.C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS):
+        result.c_stat(instruments=["z1", "z2", "z3"])
+
+
+# ── 不均衡パネル ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "cluster"])
+def test_two_sls_c_stat_equals_gmm_on_an_unbalanced_panel(
+    data, cov_type
+) -> None:
+    unbalanced = data.with_row_index("row").filter(pl.col("row") % 7 != 3)
+    assert unbalanced.height < data.height
+    two_sls = _fit(unbalanced, FEIVOptions(cov_type=cov_type))
+    gmm = _fit(
+        unbalanced,
+        FEIVOptions(
+            estimator="gmm",
+            gmm_type="two_step",
+            gmm_weight_type=WEIGHTS[cov_type],
+        ),
+    )
+    _assert_c_stat_close(
+        two_sls.c_stat(variables=["w"], instruments=["z3"]),
+        gmm.c_stat(variables=["w"], instruments=["z3"]),
+        f"unbalanced/{cov_type}",
     )

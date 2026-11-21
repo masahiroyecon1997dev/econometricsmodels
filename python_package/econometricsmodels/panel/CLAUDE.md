@@ -34,12 +34,12 @@
 - **`FEIVResults(raw, x_endog)`は`x_endog`を保持する**: `_lib`の`weak_instrument_f_statistics`・`first_stage()`は`HashMap`で順序が不定なので、ラッパーが`x_endog`の順の`dict`に直す。pickleはラッパーごと往復する（`_x_endog`も戻る）。
 - `first_stage()`は`dict[str, FEResults]`（既存の`FEResults`をそのまま使う。`f_statistic`等は`None`）。診断（`cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha)`）の`dataclass`への包み方は`IVResults`と共通で、
   `_results_utils.py`の`cragg_donald_result`等に置いた。
-- **両推定量で項目・メソッドは同じ**（`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`は削除した）。第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`はGMMでも持つ。`weak_instrument_f_statistics`は`IVResults`と同じく
+- **両推定量で項目・メソッドは同じ**（推定量ごとに`None`やエラーで表す差は設けない）。第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`はGMMでも持つ。`weak_instrument_f_statistics`は`IVResults`と同じく
   `dict[str, float]`（`None`を取らない。`x_endog`が空でないため）、`*_df_num`・`*_df_denom`は`int | None`のまま（IVと同じ型）。2SLSの`c_stat()`は`cov_type`の系統で重みを決め、`dk`だけ
   `C_STATISTIC_COV_TYPE_NOT_SUPPORTED`（`ValidationError`）。docstringに「2sls only」「gmm only」と書かない（`c_stat()`の重みの決め方だけ書く）。
 - テスト統計量は`IVResults`の命名（`wald_*`・`stat_dist`）。`stat_dist`は2SLSが`"t"`・GMMが`"normal"`（`stat_df`は`None`）、`wald_dist`は`"f"`・`"chi2"`（GMMの`wald_df_denom`は`None`、`wald_df_num`は`k`。Waldは`k`で割らない）。
   `estimator`・`gmm_type`・`gmm_weight_type`（`one_step`と2SLSは`None`）・`n_iter`・`converged`を結果に持つ。`log_likelihood`・`aic`・`bic`は出さない。診断・`fixed_effects()`・`c_stat()`は呼ぶたびに再推定する（`source_data`を保持）。
-- **`c_stat()`は`IVResults.c_stat()`と同じ`CStatisticResult`を返す**（組み立ては`_results_utils.c_statistic_result`で共有）。重みは`gmm_weight_type`（`one_step`はclassical）で、`cov_type`に依らない。
+- **`c_stat()`は`IVResults.c_stat()`と同じ`CStatisticResult`を返す**（組み立ては`_results_utils.c_statistic_result`で共有）。重みは、GMMなら`gmm_weight_type`（`one_step`はclassical）で`cov_type`に依らず、2SLSなら`cov_type`の系統（classical→classical、`hc1`〜`hc3`→robust、cluster→cluster。`dk`は重み行列が無いので`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`）。
   クラスター数が`Z_full`の列数に足りないと`ComputationError`（`fit`の`GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL`は`ValidationError`で、クラスが違う。docstringとmethodsに書いた）。
 - 横断テストへの登録先（足し忘れ注意）: `test_call_signatures`・`test_gil_release`（`FITS`は手法ごとなので、GMMは`FEIV.fit_gmm`・`FEIV.c_stat`のケース）・`test_results_repr`・`test_keyword_only_arguments`・`test_options_repr`・`test_option_types`・
   `test_option_value_echo`・`test_validation_order`（`feiv`・`feiv_gmm`。`feiv_gmm`は`base_opts={"estimator": "gmm"}`。`unused_cluster`は既定の重み`cluster`も`cluster`を使うので`gmm_weight_type="robust"`を足す）・

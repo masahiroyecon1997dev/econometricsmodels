@@ -27,7 +27,6 @@ _TOL = TOLERANCES["fe_iv_gmm_reduction"]
 RTOL, ATOL = _TOL["rtol"], _TOL["atol"]
 
 CASES = reduction_cases()
-N_ENTITIES = 30
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
@@ -84,7 +83,7 @@ def test_one_way_effects_use_the_gmm_coefficients() -> None:
     residual = _structural_residual(data, gmm.params)
     labels = data["entity"].to_numpy()
     effects = gmm.fixed_effects()["entity"]
-    assert len(effects) == N_ENTITIES
+    assert len(effects) == data["entity"].n_unique()
     for group in np.unique(labels):
         assert_close(
             effects[str(group)],
@@ -112,4 +111,11 @@ def test_two_way_effects_solve_the_normal_equations_of_the_gmm_residual() -> (
     )
     for column, values in labels.items():
         for group in np.unique(values):
-            assert abs(rest[values == group].sum()) <= 1e-9, (column, group)
+            # 正規方程式: 各水準で、残差から効果の和を引いたものの和は0（許容誤差は絶対）。
+            assert_close(
+                float(rest[values == group].sum()),
+                0.0,
+                f"{column}/{group}",
+                rtol=0.0,
+                atol=ATOL,
+            )

@@ -48,7 +48,7 @@ FE/REとも、IVの「データ抽出・pyclass定義」→「engine呼び出し
 - `fit.rs`: `FeTwoSlsEstimator`・`FeGmmEstimator`の推定（`estimator`で振り分ける）と、診断の再計算用の`estimate_two_sls`・`compute_c_statistic`。`fit`は`#[cfg(test)]`から呼べないので、
   `tests/panel/test_fe_iv_binding.py`・`test_fe_iv_gmm_binding.py`が`_lib.fit_fe_iv`を直接呼び、数値を照合する。
 - `result.rs`: `FEIVResult`（FEの項目に、IVの命名の`wald_*`（2SLSは`f`、GMMは`chi2`）・`weak_instrument_f_*`・`overid_*`（2SLSはSargan、GMMはHansen J）・`wu_hausman_*`・`estimator`・`gmm_type`・`gmm_weight_type`（`one_step`と2SLSは`None`）・`n_iter`・`converged`を足したもの）。
-  `log_likelihood`・AIC/BICは出さない。`first_stage()`は`dict[str, FEResult]`（`LazyFixedEffects::Computed`を持つ）。**両推定量で項目・メソッドは同じ**（`require_estimator`・`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`は削除した）。`first_stage`は両推定量で`fit()`が`FEResult`を作って持つ
+  `log_likelihood`・AIC/BICは出さない。`first_stage()`は`dict[str, FEResult]`（`LazyFixedEffects::Computed`を持つ）。**両推定量で項目・メソッドは同じ**（推定量ごとに`None`やエラーで表す差は設けない）。`first_stage`は両推定量で`fit()`が`FEResult`を作って持つ
   （`FeGmmEstimator::fit_with_first_stages`の`consume`。`estimate_built`が`consume`を1つ作って両アームへ渡す）。`c_stat()`の2SLSの`Dk`だけ`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`
   （`FEIVResult::require_c_statistic_cov_type`が再推定の前に弾く）。
 - **診断・`fixed_effects()`・`c_stat()`は呼び出し時に再計算**: `fit()`に渡した`DataFrame`（`source_data`）・`FEIVOptions`・列名を結果が保持し、`with_estimator`が`fit()`と同じ`build_fe_iv_input`から推定量（`estimator`の指す方。`fit.rs`の`Estimated`）を作り直して呼ぶ

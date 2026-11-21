@@ -211,6 +211,10 @@ pub(super) fn fit_fe_gmm<T>(
         )
     };
 
+    // 共分散・Waldに使った行列（白色化した`Z̃`を持つ`solution`、`Ω̃`、直交座標）は、以降の第一段階・診断では
+    // 使わない。第一段階を回す前に手放して、ピークメモリを増やさない。
+    drop((solution, omega_tilde, wald_coordinates, ztz_tilde));
+
     // R²は構造残差ベース。between・overallは変換前の`y`と実際の`X`で`FeEstimator`と同じ式。
     let ssr: f64 = residual_values.iter().map(|r| r * r).sum();
     let mut structural_x: Vec<Vec<f64>> = input.x_exog().to_vec();
@@ -218,6 +222,7 @@ pub(super) fn fit_fe_gmm<T>(
     let r_squared_within = 1.0 - ssr / sst_within;
     let r_squared_between = fe_r_squared_between(input.y(), &structural_x, &beta, &groups[0]);
     let r_squared_overall = fe_r_squared_overall(input.y(), &structural_x, &beta);
+    drop((structural_x, residual_values));
 
     // 第一段階と、第一段階だけに依存する診断（弱操作変数・Wu-Hausman）。GMMの点推定・共分散・Waldの後に
     // 回す（GMMのエラーを先に返す。Wu-Hausmanは構造式のエラーが補助回帰のエラーに隠れないよう最後）。

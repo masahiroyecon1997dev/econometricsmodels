@@ -224,7 +224,6 @@ pub struct FEIVResult {
     #[pyo3(get)]
     pub wu_hausman_df_denom: Option<usize>,
     // `first_stage()`が読む。内生変数ごとの第一段階（固定効果は計算済み）。Python側には公開しない。
-    // `estimator="gmm"`では空。
     first_stage: Vec<(String, FEResult)>,
     // 診断・`fixed_effects()`・`c_stat()`が入力を作り直すために保持する（`IVResult`と同じ）。`source_data`は
     // `fit()`に渡された`polars.DataFrame`（参照を増やすだけ）、`options`は渡した`FEIVOptions`の複製。
@@ -601,7 +600,9 @@ impl FEIVResult {
     }
 
     /// Montiel Olea-Pflueger effective F statistic and its critical values. Available with both
-    /// estimators; it does not depend on the GMM weight.
+    /// estimators; it does not depend on the GMM weight. The bias bounds of the critical values
+    /// describe two-stage least squares, so with `estimator="gmm"` read the statistic as a
+    /// measure of instrument strength, not as a bound on the GMM bias.
     ///
     /// A post-estimation diagnostic: never computed by `fit()`; it estimates the model again
     /// on every call. Defined for one endogenous variable; the covariance follows the options

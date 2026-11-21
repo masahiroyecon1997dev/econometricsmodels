@@ -8,7 +8,11 @@
 //! # 範囲
 //!
 //! 点推定（係数・構造残差・点推定に使った重み行列`S`・反復回数・収束）、`cov_type`別の標準誤差・
-//! z統計量・p値・信頼区間・傾き係数の同時Wald χ²検定、R²（within・between・overall）、Hansen J過剰識別検定。
+//! z統計量・p値・信頼区間・傾き係数の同時Wald χ²検定、R²（within・between・overall）、Hansen J過剰識別検定、
+//! 第一段階・弱操作変数診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）・Wu-Hausman内生性検定、
+//! 固定効果自体の復元（`fixed_effects()`）。第一段階・弱操作変数診断・Wu-Hausmanは第一段階（と最小二乗の補助回帰）
+//! だけに依存し、GMMの点推定にも重みにも依らない（`cov_type`は`fit`のもの）。同じデータ・`cov_type`なら
+//! `FeTwoSlsEstimator`と同じ値になる（`common/`の共有実装）。
 //! 内生性・操作変数の直交性の検定（C統計量）は、推定量のメソッドではなく独立した事後診断の関数
 //! `fe_gmm_c_statistic`（`gmm/c_statistic.rs`）で、`fit()`では計算しない。
 //!
@@ -30,6 +34,11 @@
 //!    正規分布の推論表と、傾き係数の同時Wald χ²検定（自由度`k`）を計算する。
 //! 7. R²: 構造残差ベース。within = `1 − e'e/ỹ'ỹ`、between・overallは`β̂`と実際の`X`で`FeEstimator`と同じ式。
 //! 8. Hansen J過剰識別検定（`len(instruments) > len(x_endog)`のとき。`gmm/hansen_j.rs`）。
+//! 9. 第一段階（内生変数ごと。`common/first_stage.rs`の`run_first_stages`。FE-2SLSと共有）・弱操作変数の部分F、
+//!    Wu-Hausman（`common/wu_hausman.rs`）。**点推定・共分散・Waldの後**に回す（GMMのエラーを先に返す）。点推定と
+//!    共分散に使った行列（`Z̃`・`X̃`・`ỹ`・`solution`・`Ω̃`）は、ピークメモリを増やさないよう第一段階の前に手放す。
+//!    第一段階が失敗する入力（内生変数を操作変数が完全に説明するなど）は、2SLSやIVのGMMと同じく
+//!    `stage=FIRST_STAGE`つきで`fit`全体を失敗させる。
 //!
 //! # `cov_type`と自由度
 //!
@@ -66,8 +75,11 @@
 //!
 //! - `gmm/fit.rs`: `fit_fe_gmm`（上のパイプライン）
 //! - `gmm/hansen_j.rs`: `fe_hansen_j`（Hansen J検定）
-//! - `gmm/c_statistic.rs`: `fe_gmm_c_statistic`（C統計量。事後診断。within変換し直して`shared::gmm_c_statistic`を呼ぶ）
+//! - `gmm/c_statistic.rs`: `fe_gmm_c_statistic`（C統計量。事後診断。within変換し直して`shared::gmm_c_statistic`を呼ぶ。
+//!   2SLSの`c_stat()`も、`engine_pybind`が`cov_type`の系統から決めた`FeWeightType`で同じ関数を呼ぶ）
 //! - `gmm/gmm_type.rs`: `FeGmmType`・`FeWeightType`（推定方式と重みの種類。`Hac`を持たない）
+//!
+//! 入力型・前段（`prepare_within`）・第一段階・弱操作変数診断・Wu-Hausmanは`common/`にあり、FE-2SLS（`two_sls.rs`）と共有する。
 
 use faer::Mat;
 
@@ -163,6 +175,10 @@ impl FeGmmEstimator {
     /// - `cov_type`の検証は`FeTwoSlsEstimator::fit`と同じ（クラスター数・時点数が`k`以下、2グループ退化、
     ///   DKのバンド幅など）。Wald χ²検定が数値的に定義できなければ`PanelError::WaldTestFailed`（`stage=OVERALL_WALD_TEST`。DKの`T <= k`も同じ段階）
     /// - Hansen Jの`S`が数値的に特異なら`CommonError::NearSingularMatrix`（点推定で反転成功済みなので到達しない）
+    /// - 第一段階の推定・部分F統計量の失敗（内生変数を操作変数が完全に説明して`PerfectFit`、設計行列の特異など）は、
+    ///   原因の`code`に`stage=FIRST_STAGE`を付けて返す。Wu-Hausmanの補助回帰が診断だけの理由（自由度不足・完全適合・
+    ///   特異など）で定義できないときは`None`にして`fit`は失敗させず、それ以外の失敗は`stage=WU_HAUSMAN_REGRESSION`つき
+    ///   （FE-2SLSと同じ）。第一段階とWu-Hausmanは点推定・共分散・Waldの後に回すので、GMMのエラーが先に返る
     /// - 構造残差が丸め誤差の範囲で0なら`CommonError::PerfectFit`（完全適合。GMMに第二段階は無いので`stage`は付けない。`iv::gmm`と同じ）
     /// - `Iterated`が収束せず`raise_on_non_convergence`なら`CommonError::GmmNonConvergence`
     /// - 不均衡な2-wayと3次元以上で、交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
@@ -189,7 +205,7 @@ impl FeGmmEstimator {
     ///
     /// # Errors
     /// [`Self::fit`]のエラーに加えて、`absorption`の値が範囲外なら`PanelError::InvalidTol`・
-    /// `PanelError::InvalidMaxIter`。
+    /// `PanelError::InvalidMaxIter`。第一段階の失敗は`fit`のエラーに含まれる。
     pub fn fit_with_absorption(
         input: FeIvInput,
         effects: FeEffects,

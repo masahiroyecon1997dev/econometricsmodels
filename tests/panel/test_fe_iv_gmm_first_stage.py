@@ -5,28 +5,30 @@
 `benchmark/panel/fe_iv_gmm_cases.py`の`reduction_cases()`（FE-2SLSの全ケースをGMMに写したもの）で、次を比べる。
 
 - 内生変数ごとの部分F・その自由度・Kleibergen-Paapのrk Wald F・Wu-Hausman（統計量・p値・自由度）を、
-  FE-2SLSの主リファレンス（R fixest: `fe_iv.json`）と
-- 第一段階（`first_stage()`の係数・標準誤差）・Cragg-Donald・有効F・rk LMを、同じケースのFE-2SLSの結果と
+  FE-2SLSの主リファレンス（R fixest: `fe_iv.json`）と（**参照テスト**。公開の検証ページの表に数える）
+- 第一段階（`first_stage()`の係数・標準誤差・t値）・Cragg-Donald・rk LM・有効Fを、同じケースのFE-2SLSの結果と
+  （**整合性テスト**。エンジンの同じ共有実装を2つの推定量から呼んだ結果が一致することを確かめるもので、独立した
+  参照ではない。fixestが持たない統計量は、FE-2SLS側で済んでいるダミー変数2SLS・ivDiagとの照合
+  （`test_fe_iv_dummy_crosscheck.py`・`test_fe_iv_weak_diagnostics_crosscheck.py`）に載せる橋渡しになる）
 
-後者は、fixestが持たない統計量（Cragg-Donald・有効F・rk LM・第一段階の標準誤差の全て）を、FE-2SLS側で済んでいる
-ダミー変数2SLS・ivDiagとの照合に載せるための橋渡しになる（`test_fe_iv_dummy_crosscheck.py`・
-`test_fe_iv_weak_diagnostics_crosscheck.py`）。
+前提（GMMの係数がFE-2SLSと同じ）は`reduction_cases()`の定義による（`one_step`と`classical`重みの2段階、
+丁度識別の全重み）。診断は係数に依らないので前提が崩れても変わらないが、係数の一致は
+`test_fe_iv_gmm_reduction.py`が確かめている。
 """
 
 from __future__ import annotations
 
+from functools import cache
+
 import pytest
-from _assertions import (
-    assert_close,
-    assert_dict_close,
-)
+from _assertions import assert_close, assert_dict_close
 from _fe_iv_gmm_helpers import FIXTURE_DIR
 from _fe_iv_gmm_helpers import fit_case as fit_gmm_case
 from _fe_iv_helpers import fit_case as fit_2sls_case
 from _fe_iv_helpers import leaf
 from _fixture_cov import load_fixtures_with_cov
 from _tolerances import TOLERANCES
-from econometricsmodels import ComputationError
+from econometricsmodels import ComputationError, ValidationError
 
 from benchmark.panel.fe_iv_gmm_cases import reduction_cases
 
@@ -37,11 +39,14 @@ _P_RTOL = _TOL["rtol_p_value"]
 CASES = reduction_cases()
 
 
-class _Fe2slsLeaf:
-    """FE-2SLSの葉を`leaf()`で引けるようにする（`path`はFE-2SLSのケースのもの）。"""
+def _close(actual: float, expected: float, label: str) -> None:
+    assert_close(actual, expected, label, rtol=RTOL, atol=ATOL)
 
-    def __init__(self, case) -> None:
-        self.path = case.base.path
+
+@cache
+def _fits(case):
+    """ケースのGMMとFE-2SLSの推定（ケースごとに1回）。"""
+    return fit_gmm_case(case), fit_2sls_case(case.base)
 
 
 @pytest.fixture(scope="module")
@@ -53,10 +58,13 @@ def test_the_reduction_cases_are_not_empty() -> None:
     assert CASES
 
 
+# ── fixestの参照値との照合（合成データ） ──────────────────────────────
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
-def test_gmm_diagnostics_match_fixest(fixtures, case) -> None:
+def test_matches_fixest(fixtures, case) -> None:
     res = fit_gmm_case(case)
-    ref = leaf(fixtures, _Fe2slsLeaf(case))
+    ref = leaf(fixtures, case.base)
     label = case.label
 
     # 内生変数ごとの部分F（`cov_type`によらず等分散）。
@@ -64,35 +72,31 @@ def test_gmm_diagnostics_match_fixest(fixtures, case) -> None:
         ref["weak_instrument_f"]
     ), label
     for name, expected in ref["weak_instrument_f"].items():
-        assert_close(
+        _close(
             res.weak_instrument_f_statistics[name],
             expected,
             f"{label}/weak_instrument_f/{name}",
-            rtol=RTOL,
-            atol=ATOL,
         )
     assert res.weak_instrument_f_df_num == ref["weak_instrument_f_df_num"]
     assert res.weak_instrument_f_df_denom == ref["weak_instrument_f_df_denom"]
 
     # Kleibergen-Paapのrk Wald F（内生変数が1個のとき。複数のときは参照が無い）。
-    if ref["rk_wald_f"] is not None:
-        assert_close(
+    if ref["rk_wald_f"] is None:
+        assert len(case.base.x_endog) > 1, label
+    else:
+        _close(
             res.kleibergen_paap().rk_wald_f,
             ref["rk_wald_f"],
             f"{label}/rk_wald_f",
-            rtol=RTOL,
-            atol=ATOL,
         )
 
     # Wu-Hausman（補助回帰は`cov_type`と同じ共分散で回す。GMMの重みには依らない）。
     assert res.wu_hausman_df_num == ref["wu_hausman_df_num"], label
     assert res.wu_hausman_df_denom == ref["wu_hausman_df_denom"], label
-    assert_close(
+    _close(
         res.wu_hausman_statistic,
         ref["wu_hausman_statistic"],
         f"{label}/wu_hausman",
-        rtol=RTOL,
-        atol=ATOL,
     )
     assert_close(
         res.wu_hausman_p_value,
@@ -103,16 +107,19 @@ def test_gmm_diagnostics_match_fixest(fixtures, case) -> None:
     )
 
 
-@pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
-def test_gmm_first_stage_and_diagnostics_equal_those_of_fe_2sls(case) -> None:
-    gmm = fit_gmm_case(case)
-    two_sls = fit_2sls_case(case.base)
-    label = case.label
+# ── FE-2SLSの結果との整合（同じ共有実装の2つの呼び出し） ───────────────
 
-    # 第一段階（内生変数の順、係数・標準誤差・t値・自由度）。
-    assert list(gmm.first_stage()) == list(two_sls.first_stage()), label
-    for name, stage in two_sls.first_stage().items():
-        other = gmm.first_stage()[name]
+
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
+def test_first_stage_equals_that_of_fe_2sls(case) -> None:
+    gmm, two_sls = _fits(case)
+    label = case.label
+    gmm_stages, two_sls_stages = gmm.first_stage(), two_sls.first_stage()
+
+    # 内生変数の順、係数・標準誤差・t値・自由度。
+    assert list(gmm_stages) == list(two_sls_stages), label
+    for name, stage in two_sls_stages.items():
+        other = gmm_stages[name]
         for field in ("params", "std_errors", "test_stats"):
             assert_dict_close(
                 getattr(other, field),
@@ -125,53 +132,84 @@ def test_gmm_first_stage_and_diagnostics_equal_those_of_fe_2sls(case) -> None:
         assert other.stat_df == stage.stat_df, label
         assert other.f_statistic is None, label
 
-    # Cragg-Donald・Kleibergen-Paap・有効F。定義できない入力では、同じ理由で両方が定義できない。
-    for method in ("cragg_donald", "kleibergen_paap", "effective_f"):
-        try:
-            expected = getattr(two_sls, method)()
-        except ComputationError as err:
-            with pytest.raises(ComputationError) as raised:
-                getattr(gmm, method)()
-            assert raised.value.code == err.code, f"{label}/{method}"
-            continue
-        except Exception as err:  # noqa: BLE001 有効Fは内生変数が1個のときだけ
-            with pytest.raises(type(err)):
-                getattr(gmm, method)()
-            continue
-        actual = getattr(gmm, method)()
-        if method == "cragg_donald":
-            assert_close(
-                actual.statistic,
-                expected.statistic,
-                f"{label}/cragg_donald",
-                rtol=RTOL,
-                atol=ATOL,
-            )
-        elif method == "kleibergen_paap":
-            assert (actual.rk_lm_statistic is None) == (
-                expected.rk_lm_statistic is None
-            ), label
-            if expected.rk_lm_statistic is not None:
-                assert_close(
-                    actual.rk_lm_statistic,
-                    expected.rk_lm_statistic,
-                    f"{label}/rk_lm",
-                    rtol=RTOL,
-                    atol=ATOL,
-                )
-            if expected.rk_wald_f is not None:
-                assert_close(
-                    actual.rk_wald_f,
-                    expected.rk_wald_f,
-                    f"{label}/rk_wald_f",
-                    rtol=RTOL,
-                    atol=ATOL,
-                )
-        else:
-            assert_close(
-                actual.statistic,
-                expected.statistic,
-                f"{label}/effective_f",
-                rtol=RTOL,
-                atol=ATOL,
-            )
+
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
+def test_cragg_donald_equals_that_of_fe_2sls(case) -> None:
+    gmm, two_sls = _fits(case)
+    try:
+        expected = two_sls.cragg_donald()
+    except ComputationError as err:
+        with pytest.raises(ComputationError) as raised:
+            gmm.cragg_donald()
+        assert raised.value.code == err.code, case.label
+        return
+    _close(
+        gmm.cragg_donald().statistic,
+        expected.statistic,
+        f"{case.label}/cragg_donald",
+    )
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
+def test_kleibergen_paap_equals_that_of_fe_2sls(case) -> None:
+    gmm, two_sls = _fits(case)
+    label = case.label
+    try:
+        expected = two_sls.kleibergen_paap()
+    except ComputationError as err:
+        with pytest.raises(ComputationError) as raised:
+            gmm.kleibergen_paap()
+        assert raised.value.code == err.code, label
+        return
+    actual = gmm.kleibergen_paap()
+    assert (actual.rk_lm_statistic is None) == (
+        expected.rk_lm_statistic is None
+    ), label
+    if expected.rk_lm_statistic is not None:
+        _close(
+            actual.rk_lm_statistic,
+            expected.rk_lm_statistic,
+            f"{label}/rk_lm",
+        )
+    assert (actual.rk_wald_f is None) == (expected.rk_wald_f is None), label
+    if expected.rk_wald_f is not None:
+        _close(actual.rk_wald_f, expected.rk_wald_f, f"{label}/rk_wald_f")
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
+def test_effective_f_equals_that_of_fe_2sls(case) -> None:
+    gmm, two_sls = _fits(case)
+    label = case.label
+    if len(case.base.x_endog) != 1:
+        # 有効Fは内生変数が1個のときだけ定義される（どちらの推定量でも同じ）。
+        with pytest.raises(ValidationError):
+            two_sls.effective_f()
+        with pytest.raises(ValidationError):
+            gmm.effective_f()
+        return
+    try:
+        expected = two_sls.effective_f()
+    except ComputationError as err:
+        with pytest.raises(ComputationError) as raised:
+            gmm.effective_f()
+        assert raised.value.code == err.code, label
+        return
+    _close(
+        gmm.effective_f().statistic,
+        expected.statistic,
+        f"{label}/effective_f",
+    )
+
+
+def test_the_diagnostics_are_defined_in_many_cases() -> None:
+    """比較が、両方が定義できない入力ばかりで空振りしていない。"""
+    defined = {"cragg_donald": 0, "kleibergen_paap": 0, "effective_f": 0}
+    for case in CASES:
+        _, two_sls = _fits(case)
+        for method in defined:
+            try:
+                getattr(two_sls, method)()
+            except (ComputationError, ValidationError):
+                continue
+            defined[method] += 1
+    assert all(count > len(CASES) // 3 for count in defined.values()), defined

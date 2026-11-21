@@ -282,7 +282,7 @@ fn time_invariant_regressor_is_reported_with_its_role() {
     );
 }
 
-/// 自由度の不足は段階のないエラー（FE-2SLSと違い第一段階の`stage`を付けない）。
+/// 自由度の不足は段階のないエラー（GMMの点推定が先に必要とする検査なので、第一段階の`stage`を付けない）。
 #[test]
 fn insufficient_degrees_of_freedom_has_no_stage() {
     // 4個体×2時点、2-wayで`neffects = 4 + 2 − 1 = 5`、`l = 1 + 2 = 3`、`n = 8 <= l + neffects`。
@@ -347,5 +347,75 @@ fn entity_cluster_weight_is_accepted() {
             two_step(entity_cluster_weight()),
         )
         .is_ok()
+    );
+}
+
+// ── 第一段階（点推定・共分散・Waldの後に回す）──────────────────────
+
+/// 点推定の後のエラー（反復GMMの非収束）は、第一段階を回さずに返る。
+#[test]
+fn an_error_after_the_point_estimate_is_reported_before_the_first_stage_is_run() {
+    let mut calls = 0;
+    let err = FeGmmEstimator::fit_with_first_stages(
+        input_spec(&all_rows(), &[entity_labels()], 1, 1, 2),
+        FeEffects::OneWay,
+        FeGmmType::Iterated {
+            weight: FeWeightType::Robust,
+            max_iter: 3,
+            tol: 1e-300,
+        },
+        true,
+        FeCovType::Classical,
+        0.95,
+        &FeAbsorption::default(),
+        |_, _| calls += 1,
+    )
+    .map(|_| ())
+    .unwrap_err();
+    assert_eq!(
+        err,
+        PanelError::Common(CommonError::GmmNonConvergence { n_iter: 3 })
+    );
+    assert_eq!(calls, 0, "the first stage must not run after a GMM error");
+}
+
+/// 内生変数を操作変数が完全に説明すると、GMMの点推定は定義できるが、第一段階が完全適合になる。
+/// 第一段階は2SLSと同じ共有の経路（IVのGMMも第一段階を回す）なので、`fit`は`stage=FIRST_STAGE`つきで
+/// 失敗する。
+#[test]
+fn a_first_stage_that_fits_perfectly_fails_the_fit_with_the_first_stage_stage() {
+    let base = one_way_input();
+    // 内生変数が1つ目の操作変数と全く同じ（第一段階の残差が0）。
+    let endog = base.instruments()[0].clone();
+    let input = FeIvInput::from_group_codes(
+        base.y(),
+        "y".to_string(),
+        RoleColumns {
+            names: base.x_exog_names().to_vec(),
+            columns: base.x_exog(),
+        },
+        RoleColumns {
+            names: vec!["w".to_string()],
+            columns: &[endog],
+        },
+        RoleColumns {
+            names: base.instrument_names().to_vec(),
+            columns: base.instruments(),
+        },
+        vec![GroupCodes::from_labels(&entity_labels())],
+    )
+    .unwrap();
+    let err = error_of(fit(
+        input,
+        FeEffects::OneWay,
+        two_step(FeWeightType::Classical),
+    ));
+    let report = err.report();
+    assert_eq!(report.code(), ErrorCode::PerfectFit);
+    assert_eq!(
+        report.stage(),
+        Some(&crate::shared::error_catalog::Stage::FirstStage {
+            endog_name: "w".to_string()
+        })
     );
 }

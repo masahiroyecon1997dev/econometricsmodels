@@ -11,7 +11,7 @@ Pass an `FEIVOptions` as `options=`. `effects` is an argument of `FEIV`, not an 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
 | `estimator` | `"2sls"` or `"gmm"` | `"2sls"` | |
-| `cov_type` | Standard error type: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, `"dk"` | `"cluster"` | `"hc0"` is not available. Also used by the first-stage regressions, by `kleibergen_paap()` and `effective_f()`, and by the Wu-Hausman test; with `estimator="gmm"` independent of `gmm_weight_type`. With `estimator="2sls"` it also sets the weight of `c_stat()`, except that `"dk"` is not allowed there |
+| `cov_type` | Standard error type: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, `"dk"` | `"cluster"` | `"hc0"` is not available. Also used by the first-stage regressions, by `kleibergen_paap()` and `effective_f()`, and by the Wu-Hausman test; with `estimator="gmm"` independent of `gmm_weight_type`. With `estimator="2sls"` it also sets the weight of `c_stat()`; `"dk"` has no weight matrix, so `c_stat()` raises a `ValidationError` with it |
 | `cluster` | Column that defines the clusters | `None` (the first column of `effects`) | With `cov_type="cluster"` or, with GMM, `gmm_weight_type="cluster"` |
 | `dk_time` | Column that defines the time periods of the Driscoll-Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `effects` |
 | `dk_bandwidth` | Kernel bandwidth | `None` (automatic) | Only with `cov_type="dk"` |
@@ -43,7 +43,7 @@ Every field and method is available with both estimators; there is no result tha
 
 | Result | `estimator="2sls"` | `estimator="gmm"` |
 |---|---|---|
-| `first_stage()`, `fixed_effects()` | yes | yes |
+| `first_stage()`, `fixed_effects()` | yes | yes (`fixed_effects()` uses that estimator's coefficients) |
 | `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | yes, the same values |
 | `weak_instrument_f_statistics` and its degrees of freedom, `wu_hausman_*` | yes | yes, the same values |
 | `overid_*` | Sargan | Hansen J |

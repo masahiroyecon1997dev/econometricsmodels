@@ -28,7 +28,7 @@ IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、�
 
 `FEIVOptions.estimator`（`"2sls"`既定・`"gmm"`）で切り替え、`FEIV`・`FEIVResults`は1組にする。IVとのインターフェースが大きく異なると利用者が分かりにくくなるため、IVと同じ形にする（IVで推定量ごとにクラスを分けなかったのも同じ理由）。
 2SLSとGMMで結果の項目・メソッドは同じにする（IVのGMMだけが`wu_hausman_*`を持たない差は別Issueで解消する）。**推定量が持たない項目・メソッドは無く**、
-`None`や`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`で表す差は設けない（このコードは削除した）。違いは次のとおり:
+`None`やエラーで表す差は設けない。違いは次のとおり:
 
 - 推論の分布（2SLSはt・F、GMMは正規・χ²）、過剰識別検定（Sargan・Hansen J）。
 - `c_stat()`の重み: GMMは`fit()`の重み（`one_step`は`Classical`）、2SLSは`cov_type`の系統（3.5）。2SLSの`cov_type="dk"`はDK型の重みが型に無いので

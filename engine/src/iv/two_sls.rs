@@ -34,7 +34,9 @@
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
-//! （`first_stage_estimators()`、`first_stage()`実装で利用済み）。
+//! （`compute_first_stage`が返し、`engine_pybind`の`first_stage()`が使う）。`TwoSlsEstimator`
+//! 自体は第一段階の推定量を保持しない（`fit`が必要な当てはめ値・残差の列だけを取り出して
+//! 手放す。設計行列を内生変数の数だけ`fit`の終わりまで持つとピークメモリが増えるため）。
 //!
 //! ## 第一段階・第二段階での`cov_type`/`confidence_level`の扱い
 //!
@@ -58,7 +60,7 @@
 //! `mod tests`に置く（`fit`を通すテストと、テストが大きいファイルは`<ファイル名>/tests/`にテーマ別で置く）。
 
 use crate::iv::common::{IvError, IvEstimate, IvInput};
-use crate::linear::ols::{CovType, OlsEstimator};
+use crate::linear::ols::CovType;
 use crate::shared::inference;
 use faer::Mat;
 
@@ -74,12 +76,9 @@ mod wu_hausman;
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
 pub struct TwoSlsEstimator {
-    /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）。
-    /// タプルの`String`は内生変数名（`IvInput::x_endog_names`と対応）。
-    first_stage: Vec<(String, OlsEstimator)>,
     /// 内生変数ごとの弱操作変数診断（部分F統計量、`docs/spec/iv-spec.md`3.4節）。
-    /// `first_stage`と同じ順序・同じ内生変数名（`Vec<(String, f64)>`にしている理由も
-    /// `first_stage`と同じ、`HashMap`にすると走査順序が非決定的になるため）。
+    /// 内生変数名（`IvInput::x_endog_names`と対応する順序）との組。`Vec<(String, f64)>`にして
+    /// いるのは、`HashMap`にすると走査順序が非決定的になるため。
     weak_instrument_f_statistics: Vec<(String, f64)>,
     /// 2SLSの点推定値（第二段階`y ~ x_exog + x̂_endog`の係数）(k, 1)。`param_names`と対応する順序。
     params: Mat<f64>,
@@ -135,8 +134,8 @@ pub struct TwoSlsEstimator {
 impl TwoSlsEstimator {
     /// `IvInput`から2SLSの点推定・標準誤差・適合度統計量を求める。
     ///
-    /// `cov_type`/`confidence_level`は第一段階（`first_stage_estimators()`で公開する
-    /// `OlsEstimator`）・第二段階（このメソッドが独立に計算するサンドイッチ型SE）の
+    /// `cov_type`/`confidence_level`は第一段階（`compute_first_stage`の`OlsEstimator`）・
+    /// 第二段階（このメソッドが独立に計算するサンドイッチ型SE）の
     /// どちらにも反映される（モジュール冒頭のdocコメント「第一段階・第二段階での
     /// `cov_type`/`confidence_level`の扱い」参照）。
     ///
@@ -174,13 +173,7 @@ impl TwoSlsEstimator {
         fit::fit_two_sls(input, cov_type, confidence_level)
     }
 
-    /// 内生変数ごとの第一段階回帰結果（`x_endog_names`と対応する順序）。
-    /// タプルの`String`は内生変数名。
-    pub fn first_stage_estimators(&self) -> &[(String, OlsEstimator)] {
-        &self.first_stage
-    }
-
-    /// 内生変数ごとの弱操作変数診断（部分F統計量、`first_stage_estimators()`と同じ順序）。
+    /// 内生変数ごとの弱操作変数診断（部分F統計量、`x_endog_names`と同じ順序）。
     /// タプルの`String`は内生変数名。Stock-Yogo臨界値との照合は行わない（v1スコープ外、
     /// `docs/spec/iv-spec.md`3.4節）。
     pub fn weak_instrument_f_statistics(&self) -> &[(String, f64)] {

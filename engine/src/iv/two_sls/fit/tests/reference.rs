@@ -120,7 +120,7 @@ fn fit_matches_ols_when_x_endog_and_instruments_are_empty() {
 
     let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
     assert_eq!(estimator.param_names(), ["const", "x1"]);
-    assert!(estimator.first_stage_estimators().is_empty());
+    assert!(estimator.weak_instrument_f_statistics().is_empty());
     assert!((*estimator.params().get(0, 0) - 0.0).abs() < 0.5);
     assert!((*estimator.params().get(1, 0) - 2.0).abs() < 0.2);
 
@@ -223,7 +223,7 @@ fn fit_computes_r_squared_matching_manual_formula() {
 
 /// 第一段階回帰（`x_endog[j] ~ x_exog + instruments`）の係数を、通常のOLS閉形式解
 /// `β̂=(Z'Z)⁻¹Z'x_endog`（`Z=[x_exog, instruments]`）で独立に計算し、
-/// `first_stage_estimators()`が返す`OlsEstimator`の`params()`と数値一致することを
+/// `compute_first_stage`が返す`OlsEstimator`の`params()`と数値一致することを
 /// 確認する（既存テストは操作変数が内生変数を完全予測する退化ケースでしか第一段階を
 /// 検証しておらず、一般的な非退化ケースでの独立検証が無かったため追加）。
 #[test]
@@ -231,7 +231,9 @@ fn first_stage_estimators_match_independently_recomputed_ols_closed_form() {
     use faer::Side;
     use faer::prelude::Solve;
 
-    let (x1, x_endog, z1, z2, _y, estimator) = nontrivial_x_exog_fitted_estimator();
+    let (x1, x_endog, z1, z2, _y, _estimator) = nontrivial_x_exog_fitted_estimator();
+    let first_stages =
+        first_stage_estimators(&nontrivial_x_exog_input(), &CovType::Classical, 0.95);
 
     let n = x1.len();
     // 第一段階の設計行列 Z = [const, x1, z1, z2]（`x_exog ++ instruments`のunion）
@@ -247,8 +249,8 @@ fn first_stage_estimators_match_independently_recomputed_ols_closed_form() {
     let zt_x_endog = z.transpose() * &x_endog_mat;
     let expected_beta = ztz.llt(Side::Lower).unwrap().solve(zt_x_endog);
 
-    assert_eq!(estimator.first_stage_estimators().len(), 1);
-    let (name, first_stage) = &estimator.first_stage_estimators()[0];
+    assert_eq!(first_stages.len(), 1);
+    let (name, first_stage) = &first_stages[0];
     assert_eq!(name, "endog1");
     assert_params_close(first_stage.params(), &expected_beta);
 }

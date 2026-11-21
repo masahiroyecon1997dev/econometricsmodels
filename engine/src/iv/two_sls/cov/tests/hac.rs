@@ -147,7 +147,11 @@ fn hac_lags_used_reflects_resolved_lags() {
         time_order: row_time_order(8),
     });
     assert_eq!(auto.hac_lags_used(), Some(2));
-    for (_, first_stage) in auto.first_stage_estimators() {
+    let auto_cov = CovType::Hac {
+        lags: None,
+        time_order: row_time_order(8),
+    };
+    for (_, first_stage) in first_stage_estimators(&nontrivial_x_exog_input(), &auto_cov, 0.95) {
         assert_eq!(first_stage.hac_lags_used(), Some(2));
     }
 

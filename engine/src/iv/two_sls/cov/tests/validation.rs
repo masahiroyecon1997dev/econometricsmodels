@@ -106,16 +106,13 @@ fn fit_returns_validation_error_when_cluster_count_at_most_slopes() {
 fn fit_succeeds_when_cluster_count_is_between_structural_and_first_stage_slopes() {
     let n = nontrivial_x_exog_input().nobs();
     let groups: Vec<String> = (0..n).map(|i| format!("g{}", i % 3)).collect();
-    let estimator = TwoSlsEstimator::fit(
-        nontrivial_x_exog_input(),
-        CovType::Cluster {
-            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
-        },
-        0.95,
-    )
-    .unwrap();
+    let cluster_cov = || CovType::Cluster {
+        groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+    };
+    let estimator = TwoSlsEstimator::fit(nontrivial_x_exog_input(), cluster_cov(), 0.95).unwrap();
 
-    let (_, first_stage) = &estimator.first_stage_estimators()[0];
+    let first_stages = first_stage_estimators(&nontrivial_x_exog_input(), &cluster_cov(), 0.95);
+    let (_, first_stage) = &first_stages[0];
     assert_eq!(first_stage.f_statistic(), None);
     assert_eq!(first_stage.f_df(), None);
     assert!(estimator.wald_statistic().is_finite());
@@ -165,14 +162,15 @@ fn fit_succeeds_with_cluster_g2_boundary_when_x_exog_is_empty() {
     let cov_type = CovType::Cluster {
         groups: Some(GroupCodes::from_labels_without_keys(&groups)),
     };
-    let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
+    let first_stages = first_stage_estimators(&input, &cov_type, 0.95);
+    let _estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
     // 第一段階（`endog1 ~ const + z1`）が、素の`OlsEstimator::fit`
     // （同じG=2クラスター、`has_intercept=true`）と一致することを確認する
     // （`compute_first_stage`の`has_intercept`修正が正しく効いていることの直接確認、
     // `test_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`と
     // 同じ発想）。
-    let (_, first_stage_estimator) = &estimator.first_stage_estimators()[0];
+    let (_, first_stage_estimator) = &first_stages[0];
     let ols_input = OlsInput::from_columns(
         &x_endog,
         &[z1],

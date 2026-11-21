@@ -8,7 +8,11 @@ use crate::shared::least_squares::residual_sum_of_squares;
 
 /// [`compute_first_stage`]の戻り値: 内生変数ごとの第一段階回帰（`x_endog_names`と同じ順序）、
 /// 弱操作変数診断（部分F統計量、同じく`x_endog_names`と同じ順序）。
-pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
+pub type FirstStageResult = FirstStageOutput<OlsEstimator>;
+
+/// [`compute_first_stage_with`]の戻り値: 内生変数ごとに`consume`が返した値`T`と、弱操作変数診断
+/// （部分F統計量）。どちらも`x_endog_names`と同じ順序。
+pub type FirstStageOutput<T> = (Vec<(String, T)>, Vec<(String, f64)>);
 
 /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）と弱操作変数診断
 /// （部分F統計量、`iv-spec.md`3.4節）を計算する。
@@ -40,6 +44,26 @@ pub fn compute_first_stage(
     cov_type: &CovType,
     confidence_level: f64,
 ) -> Result<FirstStageResult, IvError> {
+    compute_first_stage_with(input, cov_type, confidence_level, |_, estimator| estimator)
+}
+
+/// [`compute_first_stage`]と同じ計算を、各内生変数の第一段階の`OlsEstimator`を`consume`に渡して
+/// 受け取った値だけを残す形で行う（`FirstStageResult`の第1要素の型が`T`になる）。
+///
+/// 第一段階の`OlsEstimator`は設計行列（n×(`k_exog + k_instruments`)）を持つため、内生変数の数だけ
+/// 同時に保持するとピークメモリが大きくなる。この関数は、部分F統計量を求めた直後に`consume`へ
+/// 渡して手放す（`consume`が返す値より大きいものは、次の内生変数の回帰の間、保持されない）。
+/// 呼び出し側は、必要な量（2SLSは当てはめ値と残差の列、`engine_pybind`は`OLSResult`）だけを
+/// 取り出して返す。
+///
+/// # Errors
+/// [`compute_first_stage`]と同じ。
+pub fn compute_first_stage_with<T>(
+    input: &IvInput,
+    cov_type: &CovType,
+    confidence_level: f64,
+    mut consume: impl FnMut(&str, OlsEstimator) -> T,
+) -> Result<FirstStageOutput<T>, IvError> {
     let x_exog_columns = mat_to_columns(input.x_exog());
     // 定数項列は`OlsInput::from_columns`側の`include_intercept=input.has_intercept()`で
     // 追加させるため、ここでは焼き込み済みの定数項列を除いた「素の」x_exog列を使う
@@ -54,6 +78,7 @@ pub fn compute_first_stage(
     instrument_names.extend(input.instrument_names().iter().cloned());
 
     let mut first_stage = Vec::with_capacity(input.k_endog());
+    let mut weak_instrument_f_statistics = Vec::with_capacity(input.k_endog());
     for (j, endog_name) in input.x_endog_names().iter().enumerate() {
         let y_endog = mat_column_to_vec(input.x_endog(), j);
         // `y_endog`・`instrument_columns`はどちらも`IvInput`（同じnで構築済み）から
@@ -76,13 +101,11 @@ pub fn compute_first_stage(
                 endog_name: endog_name.clone(),
                 source,
             })?;
-        first_stage.push((endog_name.clone(), estimator));
-    }
-
-    let mut weak_instrument_f_statistics = Vec::with_capacity(first_stage.len());
-    for (j, (endog_name, unrestricted)) in first_stage.iter().enumerate() {
-        let f_stat = partial_f_statistic(input, unrestricted, j)?;
+        // 部分F統計量は制限なしモデル（この`estimator`）の残差平方和と係数の数だけを使うので、
+        // `consume`に渡して手放す前に求める。
+        let f_stat = partial_f_statistic(input, &estimator, j)?;
         weak_instrument_f_statistics.push((endog_name.clone(), f_stat));
+        first_stage.push((endog_name.clone(), consume(endog_name, estimator)));
     }
 
     Ok((first_stage, weak_instrument_f_statistics))

@@ -23,7 +23,9 @@ pub use crate::shared::effective_f::{EffectiveF, PatnaikCriticalValue};
 pub use crate::shared::kleibergen_paap::RankTest;
 pub use error::IvError;
 pub use estimate::IvEstimate;
-pub use first_stage::{FirstStageResult, compute_first_stage};
+pub use first_stage::{
+    FirstStageOutput, FirstStageResult, compute_first_stage, compute_first_stage_with,
+};
 pub use input::IvInput;
 pub(crate) use input::{hcat, mat_column_to_vec, mat_to_columns, without_baked_in_intercept};
 pub use validation::validate_iv_fit_inputs;

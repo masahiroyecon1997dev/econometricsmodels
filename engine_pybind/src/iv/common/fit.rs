@@ -3,7 +3,7 @@
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::SelectedData;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
-use engine::iv::common::{IvEstimate, compute_first_stage, validate_iv_fit_inputs};
+use engine::iv::common::{IvEstimate, compute_first_stage_with, validate_iv_fit_inputs};
 use engine::iv::gmm::GmmEstimator;
 use engine::iv::two_sls::TwoSlsEstimator;
 use polars::prelude::DataFrame;
@@ -97,20 +97,29 @@ fn fit_frame(
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
     // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。
-    let (first_stage, weak_instrument_f_statistics) =
-        compute_first_stage(&input, &cov_type, options.confidence_level)
-            .map_err(iv_error_to_pyerr)?;
-    let weak_instrument_f_df = first_stage.first().map(|(_, first_stage_estimator)| {
-        (input.k_instruments(), first_stage_estimator.df_resid())
-    });
-    // 第一段階の推定量（設計行列を持つ）は結果に変えて手放す。`IVResult`が持つのは結果だけで、
-    // `first_stage()`の戻り値にも、pickleの状態にもそのまま使える。
-    let first_stage: Vec<(String, OLSResult)> = first_stage
+    //
+    // 第一段階の推定量（設計行列を持つ）は、内生変数ごとに結果へ変えてすぐ手放す（内生変数の数だけ
+    // 設計行列を同時に持たない）。`IVResult`が持つのは結果だけで、`first_stage()`の戻り値にも、
+    // pickleの状態にもそのまま使える。
+    let (first_stage_with_df, weak_instrument_f_statistics) = compute_first_stage_with(
+        &input,
+        &cov_type,
+        options.confidence_level,
+        |_, estimator| {
+            let df_resid = estimator.df_resid();
+            (
+                ols_estimator_to_result(&estimator, cov_type_name.clone()),
+                df_resid,
+            )
+        },
+    )
+    .map_err(iv_error_to_pyerr)?;
+    let weak_instrument_f_df = first_stage_with_df
+        .first()
+        .map(|(_, (_, df_resid))| (input.k_instruments(), *df_resid));
+    let first_stage: Vec<(String, OLSResult)> = first_stage_with_df
         .into_iter()
-        .map(|(name, estimator)| {
-            let result = ols_estimator_to_result(&estimator, cov_type_name.clone());
-            (name, result)
-        })
+        .map(|(name, (result, _))| (name, result))
         .collect();
 
     let shared = SharedFit {

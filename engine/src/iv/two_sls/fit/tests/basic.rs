@@ -12,8 +12,8 @@ fn fit_does_not_judge_the_second_stage_regression_for_a_perfect_fit() {
     // y = 1 + 2*x̂（x̂は第一段階の当てはめ値）は、第二段階の回帰`y ~ const + x̂`が厳密に成り立つ
     // が、構造残差`y - 1 - 2*x_endog = -2v`は0ではない。標準誤差の基準は構造残差なので、
     // 第二段階の回帰は完全フィットの判定をしない。
-    let base = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
-    let v = base.first_stage_estimators()[0].1.residuals();
+    let first_stages = first_stage_estimators(&just_identified_input(), &CovType::Classical, 0.95);
+    let v = first_stages[0].1.residuals();
     let (_, x_endog, z) = just_identified_data();
     let y: Vec<f64> = (0..5)
         .map(|i| 1.0 + 2.0 * (x_endog[i] - *v.get(i, 0)))
@@ -100,14 +100,16 @@ fn fit_succeeds_when_over_identified() {
     assert_eq!(estimator.nobs(), 6);
     assert_eq!(estimator.k(), 2);
     assert_eq!(estimator.dep_var_name(), "y");
-    assert_eq!(estimator.first_stage_estimators().len(), 1);
-    assert_eq!(estimator.first_stage_estimators()[0].0, "endog1");
+    assert_eq!(estimator.weak_instrument_f_statistics().len(), 1);
+    assert_eq!(estimator.weak_instrument_f_statistics()[0].0, "endog1");
 }
 
 /// `confidence_level`が第一段階に反映されていることを、信頼区間の幅の変化で間接的に
 /// 確認する（`OlsEstimator`は`confidence_level`自体を公開するgetterを持たないため）。
+/// `TwoSlsEstimator`は第一段階の推定量を保持しないので、`fit`が使うのと同じ
+/// `compute_first_stage`の結果を見る。
 #[test]
-fn fit_uses_caller_provided_confidence_level_for_first_stage() {
+fn first_stage_uses_caller_provided_confidence_level() {
     let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     let x_endog = vec![vec![5.0, 4.0, 3.0, 6.0, 2.0, 1.0]];
     let instruments = vec![
@@ -129,11 +131,11 @@ fn fit_uses_caller_provided_confidence_level_for_first_stage() {
         .unwrap()
     };
 
-    let narrow = TwoSlsEstimator::fit(build_input(), CovType::Classical, 0.80).unwrap();
-    let wide = TwoSlsEstimator::fit(build_input(), CovType::Classical, 0.99).unwrap();
+    let narrow = first_stage_estimators(&build_input(), &CovType::Classical, 0.80);
+    let wide = first_stage_estimators(&build_input(), &CovType::Classical, 0.99);
 
-    let narrow_first_stage = &narrow.first_stage_estimators()[0].1;
-    let wide_first_stage = &wide.first_stage_estimators()[0].1;
+    let narrow_first_stage = &narrow[0].1;
+    let wide_first_stage = &wide[0].1;
     let narrow_width =
         *narrow_first_stage.conf_upper().get(0, 0) - *narrow_first_stage.conf_lower().get(0, 0);
     let wide_width =
@@ -303,10 +305,8 @@ fn fit_uses_caller_provided_cov_type_for_first_stage_and_second_stage_se() {
     )
     .unwrap();
 
+    let first_stages = first_stage_estimators(&input, &CovType::Hc0, 0.95);
+    assert_eq!(first_stages[0].1.cov_type(), &CovType::Hc0);
     let estimator = TwoSlsEstimator::fit(input, CovType::Hc0, 0.95).unwrap();
-    assert_eq!(
-        estimator.first_stage_estimators()[0].1.cov_type(),
-        &CovType::Hc0
-    );
     assert_eq!(estimator.cov_type(), &CovType::Hc0);
 }

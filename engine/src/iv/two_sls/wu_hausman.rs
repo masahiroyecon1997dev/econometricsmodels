@@ -1,6 +1,6 @@
 //! Wu-Hausman内生性検定（回帰ベース）。
 
-use crate::iv::common::{IvError, IvInput, mat_column_to_vec, mat_to_columns};
+use crate::iv::common::{IvError, IvInput, mat_to_columns};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::error::CommonError;
@@ -52,7 +52,7 @@ pub(super) struct WuHausmanTest {
 /// （`without_baked_in_intercept`のdocコメント参照）。
 pub(super) fn wu_hausman_test(
     input: &IvInput,
-    first_stage: &[(String, OlsEstimator)],
+    first_stage_residuals: Vec<Vec<f64>>,
     x_exog_bare: &[Vec<f64>],
     x_exog_names_bare: &[String],
     y: &[f64],
@@ -63,10 +63,6 @@ pub(super) fn wu_hausman_test(
         return Ok(None);
     }
 
-    let first_stage_residuals: Vec<Vec<f64>> = first_stage
-        .iter()
-        .map(|(_, estimator)| mat_column_to_vec(estimator.residuals(), 0))
-        .collect();
     let (hausman_columns, hausman_names) = wu_hausman_columns(
         x_exog_bare,
         x_exog_names_bare,
@@ -125,8 +121,9 @@ mod tests {
         // y = 1 + 2*x_endog + 3*v（vは第一段階残差）は、構造残差(= 3v)も第一段階も完全フィット
         // ではないが、Wu-Hausmanの拡張回帰`y ~ const + x_endog + v`は厳密に成り立つ。
         // sigma^2が0でワルド統計量が定義できないので、`fit()`は成功し、検定統計量だけ`None`にする。
-        let base = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
-        let v = base.first_stage_estimators()[0].1.residuals();
+        let first_stages =
+            first_stage_estimators(&just_identified_input(), &CovType::Classical, 0.95);
+        let v = first_stages[0].1.residuals();
         let (_, x_endog, z) = just_identified_data();
         let y: Vec<f64> = (0..5)
             .map(|i| 1.0 + 2.0 * x_endog[i] + 3.0 * *v.get(i, 0))
@@ -286,6 +283,7 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
+        let first_stages = first_stage_estimators(&input, &CovType::Classical, 0.95);
         let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         // 第一段階（オラクル側で独立に計算）: endog[j] ~ const + x1 + z1 + z2 + z3。
@@ -300,9 +298,9 @@ mod tests {
         let y_endog2 = Mat::from_fn(n, 1, |i, _| endog2[i]);
         let v_hat1 = &y_endog1 - &x_first_stage * manual_ols_beta(&x_first_stage, &y_endog1);
         let v_hat2 = &y_endog2 - &x_first_stage * manual_ols_beta(&x_first_stage, &y_endog2);
-        // 手計算した第一段階残差が、SUTの`first_stage_estimators()`と一致することを確認する
+        // 手計算した第一段階残差が、SUTが使う`compute_first_stage`の結果と一致することを確認する
         // （これが食い違うと以降のオラクル自体が無意味になるため、先に固定しておく）。
-        for (name, fs) in estimator.first_stage_estimators() {
+        for (name, fs) in &first_stages {
             let manual = if name == "endog1" { &v_hat1 } else { &v_hat2 };
             for i in 0..n {
                 assert!(

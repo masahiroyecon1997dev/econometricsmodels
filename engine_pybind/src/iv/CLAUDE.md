@@ -37,7 +37,7 @@
 
 `IVResult`の組み立ては`fit.rs`の`build_result`が一度だけ行う。2SLSとGMMで同じ値の読み出しは`engine::iv::common::IvEstimate`（両推定量が実装するtrait）から、推定量ごとに違うフィールド（収束・反復、GMM専用の設定、Wald検定の分布、過剰識別検定、Wu-Hausman検定）は`EstimatorSpecific`（`Default`なしで全フィールド必須）から詰める。`IVResult`にフィールドを足すときは、`IvEstimate`にメソッドを足す（共通）か`EstimatorSpecific`に足す（推定量ごと）かを選ぶ。どちらもコンパイラが両分岐の書き漏れを検出する。
 
-`first_stage`/`weak_instrument_f_statistics`は`estimator`によらず`engine::iv::common::compute_first_stage`（2SLS/GMM間で共有）から構築する。**`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため`TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、OLS自体が軽量という前提で許容した設計判断。恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある（着手前にユーザー確認すること）。
+`first_stage`/`weak_instrument_f_statistics`は`estimator`によらず`engine::iv::common::compute_first_stage`（2SLS/GMM間で共有）から構築する。**`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）。`TwoSlsEstimator`は第一段階の推定量を保持せず（当てはめ値と残差の列だけを取り出して手放す）、`IVResult`へ移せる推定量が無いため、OLS自体が軽量という前提で許容した設計判断。`fit`は`compute_first_stage_with`で各第一段階の`OlsEstimator`をすぐ`OLSResult`へ変えて手放す（設計行列を内生変数の数だけ同時に持たない）。恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある（着手前にユーザー確認すること）。
 
 ## `fit`の事前チェックの順序
 

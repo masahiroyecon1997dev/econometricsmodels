@@ -7,7 +7,7 @@ use super::cov::{CovStage, covariance_stage};
 use super::sargan::sargan_test;
 use super::wu_hausman::wu_hausman_test;
 use crate::iv::common::{
-    IvError, IvInput, compute_first_stage, hcat, mat_column_to_vec, mat_to_columns,
+    IvError, IvInput, compute_first_stage_with, hcat, mat_column_to_vec, mat_to_columns,
     validate_iv_fit_inputs, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
@@ -66,8 +66,19 @@ pub(super) fn fit_two_sls(
     // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
     // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
     // `engine_pybind`が`estimator="gmm"`でも同じ診断情報を独立に提供するために使う）。
+    //
+    // 第一段階の`OlsEstimator`（設計行列を持つ）は、内生変数ごとに当てはめ値と残差の列だけを取り出して
+    // 手放す。第二段階の`X̂`には当てはめ値、Wu-Hausmanの拡張回帰には残差だけが要り、推定量を
+    // 最後まで保持するとピークメモリが内生変数の数だけ増える。
     let (first_stage, weak_instrument_f_statistics) =
-        compute_first_stage(&input, &cov_type, confidence_level)?;
+        compute_first_stage_with(&input, &cov_type, confidence_level, |_, estimator| {
+            (
+                estimator.fitted_values(),
+                mat_column_to_vec(estimator.residuals(), 0),
+            )
+        })?;
+    let (fitted_columns, first_stage_residuals): (Vec<Mat<f64>>, Vec<Vec<f64>>) =
+        first_stage.into_iter().map(|(_, columns)| columns).unzip();
 
     // 第二段階: y ~ x_exog + x̂_endog。係数と構造残差は行列版の点推定
     // （`shared::instrumental_variables::two_sls_point_estimate`）で求める。
@@ -75,11 +86,7 @@ pub(super) fn fit_two_sls(
     // 同じ列の並び。`x_exog`は定数項込み（`IvInput::x_exog`）。
     let n = input.nobs();
     let y = mat_column_to_vec(input.y(), 0);
-    // `fitted_values()`は呼ぶたびに`n×1`を計算するので、列ごとに1回だけ呼ぶ。
-    let fitted_columns: Vec<Mat<f64>> = first_stage
-        .iter()
-        .map(|(_, estimator)| estimator.fitted_values())
-        .collect();
+    // `fitted_values()`は呼ぶたびに`n×1`を計算するので、列ごとに1回だけ呼ぶ（上のクロージャ）。
     let k_exog = input.x_exog().ncols();
     let x_hat = Mat::from_fn(n, k_exog + input.k_endog(), |i, j| {
         if j < k_exog {
@@ -165,7 +172,7 @@ pub(super) fn fit_two_sls(
 
     let wu_hausman = wu_hausman_test(
         &input,
-        &first_stage,
+        first_stage_residuals,
         x_exog_bare,
         x_exog_names_bare,
         &y,
@@ -175,7 +182,6 @@ pub(super) fn fit_two_sls(
     let sargan = sargan_test(&input, &residuals, ssr)?;
 
     Ok(TwoSlsEstimator {
-        first_stage,
         weak_instrument_f_statistics,
         params: beta,
         param_names,

@@ -499,9 +499,12 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - `estimator`によらず`engine::iv::common::compute_first_stage`から構築する共通ロジック
   （GMMでも2SLSと同じ診断情報を提供する）。
 - **`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、
-  `TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため
-  `TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、
-  OLS自体が軽量という前提で許容した設計判断。
+  `TwoSlsEstimator::fit`が内部でもう1回）。`TwoSlsEstimator`は第一段階の推定量を保持せず
+  （第二段階に要る当てはめ値とWu-Hausmanに要る残差の列だけを取り出して手放す）、`IVResult`へ
+  移せる推定量が無いため、OLS自体が軽量という前提で許容した設計判断。第一段階の推定量
+  （設計行列を持つ）は`compute_first_stage_with`が内生変数ごとに消費して手放し、
+  同時に持つ設計行列を1つに抑える（内生変数の数だけ`fit`の終わりまで持つと、ピークメモリが
+  その数に比例して増えた）。
 - 返す`OLSResults.f_statistic`/`f_p_value`は`x_exog`の寄与を含む通常のOLS F検定であり、
   弱操作変数診断の部分F統計量（3.4節）とは別物。
 - **`cov_type="cluster"`でクラスター数`G`が第一段階の傾き係数の数`q_first`以下（構造方程式は

@@ -1,6 +1,8 @@
 //! 複数のファイルのテストが共有するフィクスチャと独立実装の参照計算。
 
 use super::*;
+use crate::iv::common::compute_first_stage;
+use crate::linear::ols::OlsEstimator;
 use faer::Side;
 use faer::prelude::Solve;
 
@@ -18,6 +20,19 @@ pub(super) fn just_identified_data() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         .map(|(&x, u)| 1.0 + 2.0 * x + u)
         .collect();
     (y, x_endog, z)
+}
+
+/// 内生変数ごとの第一段階の`OlsEstimator`（`compute_first_stage`が返すもの）。`TwoSlsEstimator`は
+/// 第一段階の推定量を保持しない（`fit`が当てはめ値と残差の列だけを取り出して手放す）ので、
+/// 第一段階を確かめるテストは、同じ入力・`cov_type`・`confidence_level`で組み立て直す。
+pub(super) fn first_stage_estimators(
+    input: &IvInput,
+    cov_type: &CovType,
+    confidence_level: f64,
+) -> Vec<(String, OlsEstimator)> {
+    compute_first_stage(input, cov_type, confidence_level)
+        .unwrap()
+        .0
 }
 
 pub(super) fn just_identified_input() -> IvInput {
@@ -93,14 +108,23 @@ pub(super) fn nontrivial_x_exog_x_hat_and_structural_residuals(
     });
     let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
     let e = &y_mat - &x_structural * estimator.params();
-    let x_hat = second_stage_design(estimator, &x1);
+    let x_hat = second_stage_design(&x1);
     (x_hat, e)
 }
 
 /// 第二段階の設計行列`X̂ = [const, x1, x̂_endog]`を、`TwoSlsEstimator`とは独立に組む
-/// （外生変数の列と、第一段階の予測値`x̂_endog`から。内生変数が1個のモデル用）。
-pub(super) fn second_stage_design(estimator: &TwoSlsEstimator, x1: &[f64]) -> Mat<f64> {
-    let fitted = estimator.first_stage_estimators()[0].1.fitted_values();
+/// （外生変数の列と、第一段階の予測値`x̂_endog`から。内生変数が1個のモデル用。第一段階は
+/// `nontrivial_x_exog_input()`のもの）。
+pub(super) fn second_stage_design(x1: &[f64]) -> Mat<f64> {
+    second_stage_design_for(&nontrivial_x_exog_input(), x1)
+}
+
+/// [`second_stage_design`]の、第一段階を`input`で組むもの（`input`が`fit`に渡す入力と同じ
+/// 外生変数・内生変数・操作変数を持つこと。第一段階の当てはめ値は`cov_type`によらない）。
+pub(super) fn second_stage_design_for(input: &IvInput, x1: &[f64]) -> Mat<f64> {
+    let fitted = first_stage_estimators(input, &CovType::Classical, 0.95)[0]
+        .1
+        .fitted_values();
     Mat::from_fn(x1.len(), 3, |i, j| match j {
         0 => 1.0,
         1 => x1[i],

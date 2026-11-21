@@ -132,7 +132,7 @@ fn fit_computes_classical_std_errors_using_structural_residuals() {
     // 構造残差は第二段階回帰自身の残差（`y - X̂β̂`）とは異なる値になるはず
     // （`x_endog`が操作変数に完全予測されない、内生性が残る非退化ケースのため）。
     let (x1, _x_endog, _z1, _z2, y) = nontrivial_x_exog_columns();
-    let x_hat = second_stage_design(&estimator, &x1);
+    let x_hat = second_stage_design(&x1);
     let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
     let second_stage_residuals = &y_mat - &x_hat * estimator.params();
     let mut any_differs = false;
@@ -211,11 +211,12 @@ fn fit_computes_cluster_std_errors_matching_manual_formula() {
     let cov_type = CovType::Cluster {
         groups: Some(GroupCodes::from_labels_without_keys(&groups)),
     };
-    let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
-
     let y = [5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];
     let x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
     let x_endog = [2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0];
+    let x_hat = second_stage_design_for(&input, &x1);
+    let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
     let n = y.len();
     let x_structural = Mat::from_fn(n, 3, |i, j| match j {
         0 => 1.0,
@@ -224,7 +225,6 @@ fn fit_computes_cluster_std_errors_matching_manual_formula() {
     });
     let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
     let e = &y_mat - &x_structural * estimator.params();
-    let x_hat = second_stage_design(&estimator, &x1);
     let k = x_hat.ncols();
 
     let expected_se = manual_cluster_std_errors(&x_hat, &e, n, k, &groups);

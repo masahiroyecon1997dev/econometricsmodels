@@ -25,7 +25,7 @@ print(result.pseudo_r_squared)
 
 ## Standard errors and solvers
 
-`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `solver` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see [Options and results](../api/logit.md) for the full list of options. The coefficients do not depend on `cov_type`. Tests and confidence intervals always use the normal distribution (`stat_dist` is `"normal"`).
+`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `solver` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see [Options and results](../api/logit.md) for the full list of options. The coefficients do not depend on `cov_type`. Tests and confidence intervals always use the normal distribution (`stat_dist` is `"normal"`). All three solvers target the same estimate; `"bfgs"` and `"lbfgs"` stop at a convergence criterion and agree with `"newton"` to about `2e-7` in relative terms (see [Solvers and convergence](../methods/logit.md#solvers-and-convergence)); use `"newton"` when the closest agreement is needed.
 
 | `cov_type` | Use it when |
 |---|---|

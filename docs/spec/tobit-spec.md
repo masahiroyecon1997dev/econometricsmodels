@@ -414,7 +414,7 @@ Tobit固有の差分:
   newton用の全シナリオ×`cov_type`フィクスチャをそのまま使い、代表的な組み合わせ（`heavy_censoring`×
   classical/opg/hc0、`interval_censoring`×hc1、cluster・cluster_imbalanced）を全統計量で照合する
   （`rtol_solver_combination=2e-6`、実測最大~5e-7）。主リファレンスのみ`mroz`×classical/hc0も照合する
-  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~1e-6、推論`rtol_mroz_solver_inference=3e-4`・実測最大~1e-4）。差の機序は合成シナリオと同じ（勾配基準の停止点の`|H⁻¹g|`。
+  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~2e-7、推論`rtol_mroz_solver_inference=3e-4`・実測最大~2e-5）。差の機序は合成シナリオと同じ（勾配基準の停止点の`|H⁻¹g|`。
   `nonlinear-common.md`1.3節）で、許容誤差で受ける（`lbfgs`×hc0のSE系が最大）。
   交差検証は`censReg`が`mroz`で`survreg`と~1e-4乖離するため`mroz`×`solver`を掛け合わせない。
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`

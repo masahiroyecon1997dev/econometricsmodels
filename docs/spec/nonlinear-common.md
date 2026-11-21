@@ -190,7 +190,14 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   勾配が下がっても返却点が動かなかった。`extract_outcome`は`bfgs`/`lbfgs`のとき、最終反復点の
   コストが最良点と`10·ε·|cost|`以内なら最終反復点を返す（`newton`は対象外）。既定`tol`の出力は
   変わらず、`tol`を締めたときだけ縮む（`moderate_censoring`の係数で`1.44e-8→2.7e-9`・
-  `2.32e-8→6.1e-10`）。`|Δcost|<ε`の判定そのものを外す案は、反復が2〜3倍に増えるため見送った。
+  `2.32e-8→6.1e-10`）。`|Δcost|<ε`の判定そのものを外す案は、反復が2〜3倍に増えるため見送った。収束後の最終Newtonステップ、既定`tol`の引き下げ（`1e-10`）も、効果が部分的、または参照実装にない処理で`tol`の意味が曖昧になるため見送った（比較の実測は`engine/src/nonlinear/CLAUDE.md`）。参照実装の準ニュートン法もnewtonとの差は同程度以上（下の実測）。
+
+- **参照実装の準ニュートン法と、そのnewtonの差（実測。公開ドキュメントには載せない）**: 利用者にとって重要なのは本実装の`bfgs`/`lbfgs`が`newton`と一致する度合い（公開ページに記載）と、他パッケージの同名solverとの一致（`docs/guide/verification.md`のstatsmodels`bfgs`/`lbfgs`との比較）で、他パッケージの準ニュートン法と`newton`の差は判断に影響しないため載せない。ただし最終Newtonステップや既定`tol`の引き下げを検討するときの根拠になるので、ここに残す。同じデータ（合成データ`baseline`・`moderate_censoring`と`mroz`）で測った、各実装の自身のNewton（Tobitは`survreg`）に対するパラメータの最大相対差:
+  - 本実装`bfgs`/`lbfgs`（既定`tol`）: `2e-7`以下。
+  - statsmodels 0.15.0（Logit/Probit）: `bfgs`の既定（`gtol=1e-5`、観測あたり勾配の最大ノルム）で`2e-5`〜`4e-4`、`lbfgs`の既定で`1e-6`〜`3e-4`。`bfgs`を`gtol=1e-10`に締めても`1e-9`〜`5e-8`で止まり、`lbfgs`を最大限に締めると`5e-11`〜`2e-9`。`mroz`（Logit）の`lbfgs`は既定・締めた設定とも収束しない。
+  - R `censReg` 0.5.40（Tobit）: `BFGS`の既定で`1e-5`〜`2e-5`（締めて`4e-9`〜`3e-8`）、`BHHH`の既定で`1e-7`〜`8e-4`、`NR`は`1e-14`前後。`mroz`（生スケール`hours`）の`BFGS`は既定・締めた設定とも収束しない。
+  - 最終Newtonステップは行っていない: statsmodelsは`base/model.py`でscipyの`xopt`をそのまま推定値にし、正確なHessianは共分散にだけ使う。R `maxLik`は`optim`の結果をそのまま推定値にし、収束点の勾配とHessianは報告用に計算するだけ。
+  - 測定の限界: 単一seed（42）、Tobitは左打ち切りのみ、他パッケージの設定は文書化された既定と締めた設定の2通りで調整していない。
 
 **スケール依存への対処（標準化）**: 説明変数のスケールが異なると勾配の絶対閾値の妥当性が
 崩れるため、`nonlinear/common/standardize.rs`の`standardize_columns`/`destandardize_params`で

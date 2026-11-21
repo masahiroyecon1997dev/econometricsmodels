@@ -10,7 +10,8 @@
 # - 係数・標準誤差・共分散行列・t値・p値・信頼区間・`df_model`・`df_resid`:
 #   `summary(model, vcov = ...)`。cov_typeの対応と小標本補正は`run_fixest_benchmark.R`（FE）と
 #   同じ（clusterは`K.fixef = "nonnested"`・`t.df = "min"`、hetero・DKは`K.fixef = "full"`）。
-#   fixestはIVのHC2/HC3を提供しない（エラー）ため、hc2・hc3はこのスクリプトの対象外。
+#   fixestはIVのHC2/HC3を提供しない（エラー）ため、hc2・hc3はこのスクリプトの対象外。rk Wald Fの
+#   hc2・hc3は、第一段階を通常の`feols`として回す`run_fixest_first_stage_benchmark.R`が参照になる。
 # - Wald F（`wald_statistic`）: `wald(model, keep = <全係数>, vcov = vc)`。`fitstat(model, "f")`は
 #   固定効果ダミーも検定する別の定義、`fitstat(model, "wald")`は`iid`固定なので使わない。
 #   p値は`t.df`（clusterは`G-1`、DKは`T-1`、それ以外は`df_resid`）の分母自由度から`pf()`で求め直す。

@@ -249,6 +249,19 @@ def dummy_cases() -> list[Case]:
     return cases
 
 
+def first_stage_hc_cases() -> list[Case]:
+    """fixestの第一段階（通常の`feols`）のWald Fを参照にするHC2・HC3のケース。
+
+    `dummy_cases()`のHC2・HC3のうち、内生変数が1個のもの。内生変数が複数のときのrk Wald Fは
+    第一段階のWald Fに等しくないため、含めない。
+    """
+    return [
+        case
+        for case in dummy_cases()
+        if case.cov.cov_type in ("hc2", "hc3") and len(case.x_endog) == 1
+    ]
+
+
 def plm_cases() -> list[Case]:
     """plm（`model = "within"`）のケース。1-wayの個体FE、classical・hc1・個体クラスター・DK（既定式と明示のバンド幅）。
 
@@ -315,6 +328,15 @@ def formula(case: Case) -> str:
     endog = " + ".join(case.x_endog)
     inst = " + ".join(case.instruments)
     return f"y ~ {exog} | {fe} | {endog} ~ {inst}"
+
+
+def first_stage_formula(case: Case) -> str:
+    """fixestの第一段階の式（内生変数を外生変数と除外操作変数・固定効果に回す通常の`feols`）。
+
+    内生変数が1個のケースだけで使う。
+    """
+    rhs = " + ".join([*case.x_exog, *case.instruments])
+    return f"{case.x_endog[0]} ~ {rhs} | {' + '.join(case.effects)}"
 
 
 def n_rows(case: Case) -> int:

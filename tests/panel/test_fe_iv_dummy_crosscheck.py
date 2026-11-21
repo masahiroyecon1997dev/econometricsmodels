@@ -19,7 +19,9 @@
 
 - HC2・HC3の標準誤差・共分散: linearmodelsに無く、numpyで書いたダミー変数2SLSが唯一の参照
 - HC2・HC3・DKのKleibergen-Paap: ダミー変数を入れても、linearmodelsが計算するのはclassical・robust・
-  clusteredだけ。有効Fのうちhc2・hc3は上のMOP実装が参照
+  clusteredだけ。有効Fのうちhc2・hc3は上のMOP実装が参照。rk Wald Fのhc2・hc3（内生変数が1個）は
+  fixestの第一段階のWald Fが参照（`test_fe_iv_first_stage_hc_crosscheck.py`）。rk LMのhc2・hc3・
+  DKは参照が無い
 - hc1のKleibergen-Paap rk LM: linearmodelsの`robust`のLMはHC0基準で、本実装に`hc0`は無い（rk Wald Fは
   hc1と一致するので比べる）
 

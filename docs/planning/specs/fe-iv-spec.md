@@ -43,10 +43,10 @@ FEIV（FE-2SLS・FE-GMM。`estimator`で切り替え）の実装・テスト・�
 
 ## D. 検証・テストの見送り
 
-- **独立な参照が無い統計量**: DKのrk LM・有効F、複数内生変数のKP・有効F、HC2・HC3（FEIV・GMM。numpyの手計算だけ。`plm`のHC2・HC3は定義が違う）、FEGMMの過剰識別のrobust・cluster重みと
+- **独立な参照が無い統計量**: DKのrk LM・有効F、複数内生変数のKP・有効F、HC2・HC3（FEIV・GMM。numpyの手計算だけ。`plm`のHC2・HC3は定義が違う。FEIVのrk Wald Fだけは`fixest`の第一段階で確認済み）、FEGMMの過剰識別のrobust・cluster重みと
   小標本補正・`K`の組合せ（還元はclassical重みの経路まで）、GMMのR²・`df_*`。FE-2SLSの3次元の固定効果は`fixest`との比較が無い（ダミー変数2SLSのみ）。
 - **実データのフィクスチャ**: FEIV・FEGMMとも合成データだけ（`jtrain`等は変数の定義の確認が要る）。
-- **起票済みの候補**: HC2/HC3のrk Wald Fを`fixest`の第一段階で独立に確かめる（#655）、`ivDiag`の2-wayクラスター頑健Fが本実装・`fixest`の第一段階Wald Fと一致しない原因（#656。baselineの
+- **起票済みの候補**: `ivDiag`の2-wayクラスター頑健Fが本実装・`fixest`の第一段階Wald Fと一致しない原因（#656。baselineの
   個体クラスターで160.9対157.5）。
 - **`fixest`の`cd`が本実装と一致しない原因**（baselineで206.9対172.7）は追っていない。
 - **FEGMMの`gmm_tol`**: 小さくしても絶対下限`1e-8`が残る（参照ケースでは早く停止しないので影響なし）。

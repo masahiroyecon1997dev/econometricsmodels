@@ -9,7 +9,8 @@ Pythonのラッパー（`FEIV`）を通さず、`_lib`を直接呼ぶ。数値�
     - ダミー変数2SLSのオラクルとの照合（係数・共分散・標準誤差・検定・診断・固定効果）: このファイル
     - 主リファレンス（R: fixest）・独立実装（ダミー変数を明示した2SLS・plm・ivDiag）との凍結
       フィクスチャ照合: `test_fe_iv_reference.py`・`test_fe_iv_dummy_crosscheck.py`・
-      `test_fe_iv_plm_crosscheck.py`・`test_fe_iv_weak_diagnostics_crosscheck.py`
+      `test_fe_iv_plm_crosscheck.py`・`test_fe_iv_weak_diagnostics_crosscheck.py`・
+      `test_fe_iv_first_stage_hc_crosscheck.py`（HC2・HC3のrk Wald F、R: fixestの第一段階）
 
 テスト用のデータ（`Y`・`X1`・`X2`・`Z1`・`Z2`、10個体×4時点）は小数4桁に丸めた固定値で、オラクルが
 同じ入力から計算する。

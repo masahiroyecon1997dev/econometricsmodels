@@ -11,7 +11,7 @@ ivDiag（`generate_fe_iv_weak_diagnostics_crosscheck_fixtures.py`）。
 係数・標準誤差・`t`値・`p`値・信頼区間・係数の分散共分散行列（cov_typeごと）・`df_model`・`df_resid`・
 全係数のWald F・内生変数ごとの部分F・Kleibergen-Paapのrk Wald F（内生変数が1個のとき、同じ`vcov`での
 第一段階のWald F）・Wu-Hausman・Sargan。定義と本実装との対応は`run_fixest_iv_benchmark.R`のヘッダが正本。
-fixestがIVで提供しないHC2・HC3、定義が違うCragg-Donald（`cd`）・Kleibergen-Paap（`kpr`）・within R²
+fixestがIVで提供しないHC2・HC3（rk Wald Fだけは`generate_fe_iv_first_stage_hc_crosscheck_fixtures.py`）、定義が違うCragg-Donald（`cd`）・Kleibergen-Paap（`kpr`）・within R²
 （`wr2`）、rk LM・有効Fは含めない。
 
 ## Sarganの尺度

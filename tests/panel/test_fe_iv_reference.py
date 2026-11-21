@@ -14,7 +14,7 @@ classical・hc1・cluster（個体・時点・region・不均衡なregion・3つ
 - Wu-Hausman（第一段階の残差を足した補助回帰を、同じ`cov_type`で回したWald F）
 - Sargan（fixestの`e'e/n`の尺度を`(n − 吸収した効果数)/n`倍した本実装の尺度）
 
-fixestが提供しないHC2・HC3、定義が違うCragg-Donald・`kpr`・within R²、内生変数が複数のときのrk Wald F、
+fixestが提供しないHC2・HC3（rk Wald Fだけは`test_fe_iv_first_stage_hc_crosscheck.py`）、定義が違うCragg-Donald・`kpr`・within R²、内生変数が複数のときのrk Wald F、
 rk LM・有効Fは比べない
 （定義と理由は`benchmark/panel/references/run_fixest_iv_benchmark.R`のヘッダ）。HC2・HC3と
 診断の独立した参照は`test_fe_iv_dummy_crosscheck.py`。
@@ -25,6 +25,7 @@ rk LM・有効Fは比べない
     - 独立実装（ダミー変数を明示した2SLS）: `test_fe_iv_dummy_crosscheck.py`
     - 独立実装（R: plm）: `test_fe_iv_plm_crosscheck.py`
     - 独立実装（R: ivDiag、弱操作変数診断）: `test_fe_iv_weak_diagnostics_crosscheck.py`
+    - HC2・HC3のrk Wald F（R: fixestの第一段階）: `test_fe_iv_first_stage_hc_crosscheck.py`
 """
 
 from __future__ import annotations

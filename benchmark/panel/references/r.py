@@ -177,6 +177,11 @@ _FIXEST_IV_R_SCRIPT = (
 )
 
 
+_FIXEST_FIRST_STAGE_R_SCRIPT = (
+    Path(__file__).resolve().parent / "run_fixest_first_stage_benchmark.R"
+)
+
+
 def run_fixest_iv_r(
     csv_path: Path,
     formula: str,
@@ -216,6 +221,32 @@ def run_fixest_iv_r(
         cov_type,
         extra_args=extra,
         env={"FE_IV_LEVEL": str(confidence_level)},
+    )
+
+
+def run_fixest_first_stage_r(
+    csv_path: Path,
+    first_stage_formula: str,
+    cov_type: str,
+    instruments: list[str],
+) -> dict:
+    """`run_fixest_first_stage_benchmark.R`を呼び、第一段階の頑健Wald Fを得る。
+
+    Args:
+        csv_path: データCSV。
+        first_stage_formula: 通常の`feols`の式（例: "endog1 ~ x1 + z1 + z2 | entity"）。
+        cov_type: hc2 / hc3（IVではないので、fixestが提供する）。
+        instruments: Wald Fで同時にゼロと検定する除外操作変数の列名。
+
+    Returns:
+        Rスクリプトの出力そのまま（`rk_wald_f`・`df_num`・`df_resid`）。
+    """
+    return run_r(
+        _FIXEST_FIRST_STAGE_R_SCRIPT,
+        csv_path,
+        first_stage_formula,
+        cov_type,
+        extra_args=[",".join(instruments)],
     )
 
 

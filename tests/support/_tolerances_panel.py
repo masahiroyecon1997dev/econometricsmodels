@@ -139,6 +139,13 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 0.0,
     },
+    # FE-2SLSのHC2・HC3のrk Wald Fの、R fixestの第一段階（通常の`feols`）のWald Fとの照合
+    # （`fe_iv_first_stage_hc_crosscheck.json`。fixestはIVのHC2・HC3を提供しない）。実測の最大:
+    # rk Wald F 1.5e-12（相対。自由度の境界`df1_boundary`のHC3、それ以外は4e-14以下）。
+    "fe_iv_first_stage_hc_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 0.0,
+    },
     # 3次元以上の固定効果（`effects`が3〜4列）の主リファレンスはR fixest（`fe_multi_way.json`・
     # `fe_multi_way_cov.json`）。classical/hc1/hc2/hc3/cluster/dkとも、fixestの`ssc()`既定に本実装の
     # 小標本補正と自由度が合っているため機械精度で一致する。実測の最大（9シナリオ×全ケース）:

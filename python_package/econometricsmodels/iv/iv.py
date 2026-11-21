@@ -318,25 +318,29 @@ class IVResults:
         return self._raw.hac_lags_used
 
     @property
-    def estimator(self) -> str:
+    def estimator(self) -> Literal["2sls", "gmm"]:
         """Estimator actually used (normalized to lowercase):
         `"2sls"` or `"gmm"`."""
         return self._raw.estimator
 
     @property
-    def gmm_weight_type(self) -> str | None:
+    def gmm_weight_type(
+        self,
+    ) -> Literal["classical", "robust", "hac", "cluster"] | None:
         """Weight matrix actually used for GMM point estimation
-        (normalized to lowercase). Only meaningful for `estimator="gmm"`;
-        always `None` for `estimator="2sls"`, which has no such concept,
-        and for `gmm_type="one_step"`, which does not use a weight
-        type."""
+        (normalized to lowercase): `"classical"`, `"robust"`, `"hac"` or
+        `"cluster"`. `None` for `estimator="2sls"`, which has no such
+        concept, and for `gmm_type="one_step"`, which does not use a
+        weight type."""
         return self._raw.gmm_weight_type
 
     @property
-    def gmm_type(self) -> str | None:
+    def gmm_type(
+        self,
+    ) -> Literal["one_step", "two_step", "iterated"] | None:
         """GMM estimation type actually used (normalized to
-        lowercase): `"one_step"`, `"two_step"` or `"iterated"`. Always
-        `None` for `estimator="2sls"`."""
+        lowercase): `"one_step"`, `"two_step"` or `"iterated"`. `None`
+        for `estimator="2sls"`."""
         return self._raw.gmm_type
 
     @property
@@ -407,16 +411,18 @@ class IVResults:
     def weak_instrument_f_df_num(self) -> int | None:
         """Numerator degrees of freedom of the weak-instrument F
         statistics (the number of excluded instruments; the same for
-        every endogenous variable). Never `None`, because `x_endog`
-        always has at least one variable."""
+        every endogenous variable). The type allows `None`, but the value
+        is always an integer, because `x_endog` always has at least one
+        variable."""
         return self._raw.weak_instrument_f_df_num
 
     @property
     def weak_instrument_f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of the weak-instrument F
         statistics (residual degrees of freedom of the first-stage
-        regressions; the same for every endogenous variable). Never
-        `None`, because `x_endog` always has at least one variable."""
+        regressions; the same for every endogenous variable). The type
+        allows `None`, but the value is always an integer, because
+        `x_endog` always has at least one variable."""
         return self._raw.weak_instrument_f_df_denom
 
     @property
@@ -449,7 +455,7 @@ class IVResults:
     def overid_p_value(self) -> float | None:
         """P-value of the overidentification test.
 
-        Same conditions as `overid_statistic` for when this is `None`.
+        `None` under the same conditions as `overid_statistic`.
         """
         return self._raw.overid_p_value
 
@@ -486,20 +492,23 @@ class IVResults:
     def wu_hausman_df_num(self) -> int | None:
         """Numerator degrees of freedom of the Wu-Hausman F test (the
         number of endogenous variables). `None` under the same conditions
-        as `wu_hausman_statistic`."""
+        as `wu_hausman_statistic`, and always `None` for
+        `estimator="gmm"` (not implemented for GMM)."""
         return self._raw.wu_hausman_df_num
 
     @property
     def wu_hausman_df_denom(self) -> int | None:
         """Denominator degrees of freedom of the Wu-Hausman F test.
-        `None` under the same conditions as `wu_hausman_statistic`."""
+        `None` under the same conditions as `wu_hausman_statistic`, and
+        always `None` for `estimator="gmm"` (not implemented for GMM)."""
         return self._raw.wu_hausman_df_denom
 
     @property
     def wu_hausman_p_value(self) -> float | None:
         """P-value of the Wu-Hausman test.
 
-        `None` under the same conditions as `wu_hausman_statistic`.
+        `None` under the same conditions as `wu_hausman_statistic`, and
+        always `None` for `estimator="gmm"` (not implemented for GMM).
         """
         return self._raw.wu_hausman_p_value
 
@@ -658,17 +667,18 @@ class IVResults:
         Tests whether endogenous variables in `variables` are in fact
         exogenous, and whether excluded instruments in `instruments` are
         uncorrelated with the error. The model is estimated by two-step GMM
-        with and without the tested moment conditions, and the statistic is
-        the difference of the two Hansen J statistics, which is chi-squared
-        distributed under the null that the tested moment conditions are
-        valid. The test is conditional: the remaining instruments are taken
-        as valid. Both J statistics use the same estimate of the covariance
-        of the moment conditions, so the statistic is never negative. Pass
+        with and without the tested moment conditions. The statistic is the
+        difference of the two Hansen J statistics. Under the null that the
+        tested moment conditions are valid, it is chi-squared distributed.
+        The test is conditional: the remaining instruments are taken as
+        valid. Both J statistics use the same estimate of the covariance of
+        the moment conditions, so the statistic is never negative. Pass
         `variables`, `instruments` or both.
 
         The covariance of the moment conditions follows `gmm_weight_type`
-        (with `cluster`, `hac_lags` and `hac_time`) when `estimator="gmm"`
-        with `gmm_type` `"two_step"` or `"iterated"`, and the covariance of
+        (grouped by `cluster` for the cluster weight, and using `hac_lags`
+        and `hac_time` for the HAC weight) when `estimator="gmm"` with
+        `gmm_type` `"two_step"` or `"iterated"`, and the covariance of
         the same kind as `cov_type` otherwise, that is for 2SLS and for
         `gmm_type="one_step"` (`"classical"`; `"hc0"` to `"hc3"` as a robust
         covariance; `"hac"`; `"cluster"`). It does not depend on
@@ -678,7 +688,9 @@ class IVResults:
         statistics that share one error variance.
 
         This is a post-estimation diagnostic: it is never computed by
-        `fit()`. It re-reads the variables from the data passed to `fit()`.
+        `fit()`. It re-reads the variables from the data passed to `fit()`
+        (keep that data unchanged) and estimates the model again on every
+        call.
 
         Args:
             variables: Names from `x_endog` whose exogeneity is tested.
@@ -705,6 +717,10 @@ class IVResults:
                 example because the instruments are collinear, or because
                 there are fewer clusters than the columns of the full
                 instrument set (the exogenous regressors, the tested
-                endogenous variables and all excluded instruments).
+                endogenous variables and all excluded instruments). Unlike
+                `fit()`, which rejects too few clusters for the cluster
+                weight of GMM (`gmm_weight_type="cluster"`) with a
+                `ValidationError`, the diagnostic can only detect this
+                while computing.
         """
         return c_statistic_result(self._raw.c_stat(variables, instruments))

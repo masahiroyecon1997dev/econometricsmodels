@@ -367,8 +367,9 @@ Tobit固有の差分:
     信頼区間・限界効果SEが ~1e-7〜3e-5 乖離するため`1e-4`（点推定・σ・対数尤度・限界効果dydx・
     予測値・打ち切り適合度は ~3e-9 で一致。engineと`survreg`は同データで ~3e-10 一致するため
     `censReg`側の収束限界であって本実装の問題ではない）。
-  - `solver="bfgs"/"lbfgs"`: `newton`と異なる最適化経路でリファレンス（solver非依存）から僅かに
-    ずれた点に収束するため全フィールドに緩めた`rtol_solver`を使う。`tobit_crosscheck`は`1e-7`
+  - `solver="bfgs"/"lbfgs"`: 勾配基準（`‖g‖ < tol·n`）で止まる点が、`newton`の解（リファレンスと
+    一致）から停止点の`|H⁻¹g|`だけずれるため、全フィールドに緩めた`rtol_solver`を使う
+    （機序は`docs/spec/nonlinear-common.md`1.3節「`bfgs`/`lbfgs`の返却点」）。`tobit_crosscheck`は`1e-7`
     （実測は変わらず）、主リファレンス`tobit_reference`は`2e-7`（`FaerLbfgs`導入後、
     `predict/expected_latent`の1点が実測1.055e-7で`1e-7`を超えたため）。
 - **`expected_uncensored`の第三者実装による照合**: `AER::tobit`・`censReg`にこの量のネイティブな
@@ -413,8 +414,8 @@ Tobit固有の差分:
   newton用の全シナリオ×`cov_type`フィクスチャをそのまま使い、代表的な組み合わせ（`heavy_censoring`×
   classical/opg/hc0、`interval_censoring`×hc1、cluster・cluster_imbalanced）を全統計量で照合する
   （`rtol_solver_combination=2e-6`、実測最大~5e-7）。主リファレンスのみ`mroz`×classical/hc0も照合する
-  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~1e-6、推論`rtol_mroz_solver_inference=3e-4`・実測最大~1e-4）。`tol`を1e-10まで締めても`bfgs`/`lbfgs`はline searchの
-  停滞で打ち切られ`newton`との差が縮まない（`lbfgs`×hc0のSE系が最大）ため、許容誤差で受ける。
+  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~1e-6、推論`rtol_mroz_solver_inference=3e-4`・実測最大~1e-4）。差の機序は合成シナリオと同じ（勾配基準の停止点の`|H⁻¹g|`。
+  `nonlinear-common.md`1.3節）で、許容誤差で受ける（`lbfgs`×hc0のSE系が最大）。
   交差検証は`censReg`が`mroz`で`survreg`と~1e-4乖離するため`mroz`×`solver`を掛け合わせない。
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`
   引数（`survreg` / `censReg`）違いで構造が完全に同一のため、pytest本体は`_tobit_checks.py`に

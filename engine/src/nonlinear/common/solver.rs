@@ -229,7 +229,7 @@ where
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
-            extract_outcome(result.state, result.problem)?
+            extract_outcome(result.state, result.problem, false)?
         }
         SolverType::Bfgs => {
             // `n_obs`で正規化した「観測あたり平均勾配」基準（run_solverのdocコメント
@@ -245,7 +245,7 @@ where
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
-            extract_outcome(result.state, result.problem)?
+            extract_outcome(result.state, result.problem, true)?
         }
         SolverType::Lbfgs => {
             // Bfgsと同じ正規化（`n_obs`で正規化した「観測あたり平均勾配」基準）。
@@ -263,7 +263,7 @@ where
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
                 .run()
                 .map_err(convert_optimizer_error)?;
-            extract_outcome(result.state, result.problem)?
+            extract_outcome(result.state, result.problem, true)?
         }
     };
 
@@ -301,6 +301,30 @@ where
     })
 }
 
+/// [`last_iterate_ties_best_cost`]が「コストでは区別できない」とみなす幅の係数（`·ε·|best_cost|`）。
+/// `FaerNewton`のコスト分解能（`NEWTON_COST_RESOLUTION_FACTOR`）と同じ`10`で、コストを
+/// 補償和で評価したときの誤差（約1 ULP）に対する余裕。
+const LAST_ITERATE_COST_TIE_FACTOR: f64 = 10.0;
+
+/// `bfgs`/`lbfgs`の最終反復点のコスト`cost`が、最良点のコスト`best_cost`と区別できないか
+/// （`cost ≤ best_cost + 10·ε·|best_cost|`）。非有限（`NaN`）なら偽。
+///
+/// **なぜ`best_param`をそのまま返さないか**: argminの`IterState`は`best_param`を、コストが
+/// 厳密に下がったときだけ更新する。収束点近傍では1ステップの減少量`≈‖g‖²/2H`がコストの
+/// 分解能（`≈ε·|cost|`）を下回り、コストが同じ値（または丸めで僅かに大きい値）のまま勾配だけが
+/// 下がり続ける。その間も`best_param`は動かず、勾配が`10`分の1になった最終反復点を返さない。
+/// すると`tol`を締めても返却点が変わらず、返却点の勾配は`terminate`が判定した最終反復点の
+/// 勾配より大きいこともある。コストで区別できない点の中では、新しい点の方が勾配が小さい
+/// （line searchはstrong Wolfe条件の曲率条件で勾配を下げる向きに進む）ので最終反復点を採る。
+/// コストが分解能を超えて悪化した最終反復点（line searchの異常終了等）は採らず、
+/// 従来どおり`best_param`を返す。
+///
+/// `newton`には適用していない: `newton`は参照実装（`survreg`）と`1e-11`台で一致する現状の
+/// 出力を変えず、返却点の選び方は`bfgs`/`lbfgs`だけを対象にしている。
+fn last_iterate_ties_best_cost(cost: f64, best_cost: f64) -> bool {
+    cost <= best_cost + LAST_ITERATE_COST_TIE_FACTOR * f64::EPSILON * best_cost.abs()
+}
+
 /// `Executor::run()`の結果から`(params, converged, n_iter, model)`を取り出す。
 /// `SolverType`の3分岐で共通の後処理のため、`run_solver`から切り出している。
 /// `I`はソルバーごとに異なる状態型（`FaerLbfgs`はHessianスロットを使わないため`H=()`）だが、
@@ -327,19 +351,30 @@ where
 fn extract_outcome<O, I>(
     state: I,
     mut problem: Problem<O>,
+    prefer_last_iterate: bool,
 ) -> Result<(Vec<f64>, bool, usize, O), MleError>
 where
-    I: State<Param = Vec<f64>>,
+    I: State<Param = Vec<f64>, Float = f64>,
 {
     let converged = matches!(
         state.get_termination_reason(),
         Some(TerminationReason::SolverConverged)
     );
     let n_iter = state.get_iter() as usize;
-    let params = state
+    let best_param = state
         .get_best_param()
         .cloned()
         .ok_or_else(|| CommonError::internal("the solver did not produce a parameter estimate"))?;
+    // `prefer_last_iterate`のとき、最終反復点のコストが最良点と区別できなければ最終反復点を返す
+    // （[`last_iterate_ties_best_cost`]参照）。`get_param()`は`init()`が必ず設定する
+    // （下の到達不能の注記）ので`None`にならないが、`None`なら最良点に戻す。
+    let params = if prefer_last_iterate
+        && last_iterate_ties_best_cost(state.get_cost(), state.get_best_cost())
+    {
+        state.get_param().cloned().unwrap_or(best_param)
+    } else {
+        best_param
+    };
     let model = problem
         .take_problem()
         .ok_or_else(|| CommonError::internal("the optimization problem could not be recovered"))?;
@@ -354,11 +389,107 @@ mod tests {
     use super::*;
 
     use argmin::core::Error as OptimizerError;
+    use argmin::core::IterState;
 
     /// [`BudgetedProblem`]が実際にバジェットを共有カウンタで管理し、
     /// 使い切ると`MleError::EvaluationBudgetExceeded`を返すことを直接検証する
     /// （`run_solver`経由の統合テストとは別に、この低レベルの building block 自体を
     /// 単体で検証する。`bfgs_rank2_update_matches_hand_computed_values_...`と同じ方針）。
+    /// `last_iterate_ties_best_cost`: 最良点と同じ・分解能（`10·ε·|best_cost|`）以内の増加は
+    /// 「区別できない」（真）、分解能を超える悪化と`NaN`は偽。
+    #[test]
+    fn last_iterate_ties_best_cost_accepts_only_differences_within_the_cost_resolution() {
+        let best = 1.0e3;
+        let resolution = LAST_ITERATE_COST_TIE_FACTOR * f64::EPSILON * best;
+        assert!(last_iterate_ties_best_cost(best, best));
+        assert!(last_iterate_ties_best_cost(best + 0.5 * resolution, best));
+        assert!(!last_iterate_ties_best_cost(best + 2.0 * resolution, best));
+        assert!(!last_iterate_ties_best_cost(f64::NAN, best));
+        // 負のコスト（対数尤度が正の問題）でも幅は`|best_cost|`に比例する。
+        assert!(last_iterate_ties_best_cost(-best, -best));
+        assert!(!last_iterate_ties_best_cost(
+            -best + 2.0 * resolution,
+            -best
+        ));
+    }
+
+    /// `argmin`の`IterState`に、最良点（コスト`best_cost`）と、その後に進んだ最終反復点
+    /// （コスト`last_cost`）を持たせる。`IterState::update`は厳密に小さいコストでしか
+    /// `best_param`を更新しないので、`last_cost`が`best_cost`以上なら`best_param`は
+    /// 最初の点のまま。
+    fn state_with_best_then_last(
+        best: Vec<f64>,
+        best_cost: f64,
+        last: Vec<f64>,
+        last_cost: f64,
+    ) -> IterState<Vec<f64>, Vec<f64>, (), (), (), f64> {
+        let mut state = IterState::new().param(best).cost(best_cost);
+        state.update();
+        let mut state = state.param(last).cost(last_cost);
+        state.update();
+        state
+    }
+
+    /// `prefer_last_iterate`のとき、最終反復点のコストが最良点と同じなら最終反復点を返す
+    /// （コストの分解能以下の改善は`best_param`に反映されないため）。
+    #[test]
+    fn extract_outcome_returns_the_last_iterate_when_its_cost_ties_the_best() {
+        let state = state_with_best_then_last(vec![1.0], 1.0e3, vec![2.0], 1.0e3);
+        assert_eq!(state.get_best_param(), Some(&vec![1.0]));
+
+        let (params, ..) = extract_outcome(state, Problem::new(quadratic_problem()), true).unwrap();
+        assert_eq!(params, vec![2.0]);
+    }
+
+    /// `prefer_last_iterate=false`（`newton`）は従来どおり`best_param`を返す。
+    #[test]
+    fn extract_outcome_returns_the_best_param_when_not_asked_for_the_last_iterate() {
+        let state = state_with_best_then_last(vec![1.0], 1.0e3, vec![2.0], 1.0e3);
+
+        let (params, ..) =
+            extract_outcome(state, Problem::new(quadratic_problem()), false).unwrap();
+        assert_eq!(params, vec![1.0]);
+    }
+
+    /// 最終反復点のコストがコストの分解能を超えて悪化していれば、`prefer_last_iterate`でも
+    /// `best_param`を返す（line searchの異常終了等で上り方向に進んだ点を採らない）。
+    #[test]
+    fn extract_outcome_keeps_the_best_param_when_the_last_iterate_is_clearly_worse() {
+        let worse = 1.0e3 + 100.0 * f64::EPSILON * 1.0e3;
+        let state = state_with_best_then_last(vec![1.0], 1.0e3, vec![2.0], worse);
+
+        let (params, ..) = extract_outcome(state, Problem::new(quadratic_problem()), true).unwrap();
+        assert_eq!(params, vec![1.0]);
+    }
+
+    /// コストが丸めで平坦になる収束点近傍（真の減少量がULP未満）でも、勾配は下がり続ける。
+    /// 返却点が`best_param`のままだと、`tol`を締めても勾配が最終反復点より大きい点で止まる
+    /// （実測: 勾配ノルム`1.4e-10`。最終反復点を返すと`5.8e-11`）。
+    #[test]
+    fn run_solver_quasi_newton_returns_the_point_with_the_smaller_gradient_when_cost_is_flat() {
+        for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
+            let output = run_solver(
+                FlatCostQuarticProblem,
+                solver,
+                vec![3.0, 2.0],
+                200,
+                1e-13,
+                1,
+                true,
+            )
+            .unwrap();
+            let grad_norm = output
+                .params
+                .iter()
+                .zip(FlatCostQuarticProblem::TARGET)
+                .map(|(x, t)| (x - t).powi(6))
+                .sum::<f64>()
+                .sqrt();
+            assert!(output.converged);
+            assert!(grad_norm < 1.0e-10, "{solver:?}: |g| = {grad_norm:e}");
+        }
+    }
+
     #[test]
     fn budgeted_problem_returns_evaluation_budget_exceeded_error_after_budget_is_exhausted() {
         let wrapped = BudgetedProblem::new(quadratic_problem(), 3);

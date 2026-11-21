@@ -74,26 +74,27 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         # `two_loop_recursion`のゼロ除算未ガード）は修正済みで、この1点の乖離量
         # （`diff=3.361856272532382e-09`）は両方の修正の前後で**完全に不変**だった。
         # したがって既知の実装不具合とは無関係と判断した。
-        # **再測定**: baseline相当のsolverシナリオで、`tol`を1e-8から1e-14、`max_iter`を
-        # 2000まで締めても、newton解（survregと6.9e-12で一致）との係数の最大相対差は
-        # bfgsが1.44e-8、lbfgsが2.32e-8のまま全く変わらず、反復数も11→12・9→10しか増えない。
-        # つまり収束基準の緩さが原因ではなく、準Newton法がコスト関数の丸め誤差の床で
-        # line searchの停滞検出により止まるため（`engine/src/nonlinear/CLAUDE.md`
-        # 「line search停滞を検出して終了する」）。到達できる精度の下限であり、
-        # 参照実装との差ではない。mroz（hours生スケール）で`tol`を締めても差が縮まない
-        # 同じ挙動も、同じ機序と整合する（未確認: 勾配ノルムの直接測定）。
+        # **機序（計装で確認）**: 既定の`tol`では、bfgs/lbfgsは勾配基準（`‖g‖ < tol·n`）で
+        # 止まる。停滞検出は発火しない。newton解（survregと6.9e-12で一致）との差は、停止点の
+        # `|H⁻¹g|`そのもの（実測で3桁一致）で、係数の最大相対差はbfgsが1.44e-8、lbfgsが
+        # 2.32e-8。`tol`を締めて止まるのは`|Δcost| < ε`の判定で、勾配の床ではない（この判定を
+        # 外すと勾配は4e-12まで下がる）。argminの`best_param`はコストが厳密に下がったときしか
+        # 更新されないため、返却点は最終反復点のコストが最良点と区別できないとき最終反復点にした
+        # （`engine/src/nonlinear/CLAUDE.md`「bfgs/lbfgsの返却点と、newtonとの差の機序」）。
+        # 既定`tol`の出力は変わらないので、この許容誤差の値も変えていない。
         "rtol_solver": 2e-7,
         # solver="bfgs"/"lbfgs"を打ち切り重い・区間打ち切りシナリオ、opg/hc0/hc1、
         # クラスターと掛け合わせた組み合わせ（`_tobit_checks.SOLVER_COMBINATION_CASES`）。
         # 実測最大相対誤差5e-7（heavy_censoring/lbfgs、値の小さい予測値）。反復解法の
         # OS・BLAS差の揺れに備え約4倍（2e-6）のマージンを置く。
         "rtol_solver_combination": 2e-6,
-        # 実データmroz（hours生スケール）× solver="bfgs"/"lbfgs"。tolを1e-10まで締めても
-        # bfgs/lbfgsはline searchの停滞で打ち切られ、newtonとの差が縮まない（実測最大
-        # 相対誤差1e-4、lbfgs×hc0の標準誤差系。classicalは2e-6〜1e-5）。生スケールの
-        # yと大きなスケール差の説明変数が絡む精度の下限。点推定（係数・σ・対数尤度・
+        # 実データmroz（hours生スケール）× solver="bfgs"/"lbfgs"。上の`rtol_solver`と同じ機序
+        # （勾配基準の停止点の`|H⁻¹g|`）で、newtonとの差は残る。点推定（係数・σ・対数尤度・
         # 予測値・限界効果の点推定）は実測最大1e-6、推論（SE・z・p値・信頼区間・Wald・
-        # 限界効果のSE系）は実測最大1e-4で、それぞれ約3倍のマージンを置く。
+        # 限界効果のSE系）は実測最大1e-4で、それぞれ約3倍のマージンを置く（実測はリファレンス
+        # との比較）。newton解との比較では、係数・SE・Waldの最大相対差は約1e-8で、最大の
+        # 1.6e-5は限界効果の信頼区間端点（参照値がゼロ近傍で、絶対誤差は2e-11〜4e-8）。
+        # 相対誤差の増幅であり、解の精度の限界ではない。
         "rtol_mroz_solver_point": 3e-6,
         "rtol_mroz_solver_inference": 3e-4,
     },

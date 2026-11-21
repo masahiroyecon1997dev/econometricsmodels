@@ -281,3 +281,60 @@ impl Hessian for NoisyCostFloorProblem {
         Ok(vec![vec![Self::H_DIAG, 0.0], vec![0.0, Self::H_DIAG]])
     }
 }
+
+/// 収束点近傍でコストが丸めで平坦になる問題: `COST_OFFSET + Σ dᵢ⁴/4`（`d = θ - target`）。
+/// コストが`1e3`のため、`|d|`が約`5e-4`を切ると真の減少量（`d⁴/4`）がコストのULP（約`1.1e-13`）を
+/// 下回り、コストは同じ値のまま勾配`d³`だけが下がり続ける（`n`個の対数尤度の和が大きい大標本の
+/// 収束点近傍の模擬）。コストの`COST_OFFSET`は`f64`で丸めずに足すので、減少量がULPを下回ると
+/// 隣のパラメータ点のコストが完全に一致する。
+pub(super) struct FlatCostQuarticProblem;
+
+impl FlatCostQuarticProblem {
+    pub(super) const TARGET: [f64; 2] = [1.0, -0.5];
+    const COST_OFFSET: f64 = 1.0e3;
+}
+
+impl CostFunction for FlatCostQuarticProblem {
+    type Param = Vec<f64>;
+    type Output = f64;
+    fn cost(&self, p: &Self::Param) -> Result<Self::Output, OptimizerError> {
+        let quartic: f64 = p
+            .iter()
+            .zip(Self::TARGET)
+            .map(|(x, t)| (x - t).powi(4) / 4.0)
+            .sum();
+        Ok(Self::COST_OFFSET + quartic)
+    }
+}
+
+impl Gradient for FlatCostQuarticProblem {
+    type Param = Vec<f64>;
+    type Gradient = Vec<f64>;
+    fn gradient(&self, p: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+        Ok(p.iter()
+            .zip(Self::TARGET)
+            .map(|(x, t)| (x - t).powi(3))
+            .collect())
+    }
+}
+
+impl Hessian for FlatCostQuarticProblem {
+    type Param = Vec<f64>;
+    type Hessian = Vec<Vec<f64>>;
+    fn hessian(&self, p: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+        let k = p.len();
+        Ok((0..k)
+            .map(|i| {
+                (0..k)
+                    .map(|j| {
+                        if i == j {
+                            3.0 * (p[i] - Self::TARGET[i]).powi(2)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect())
+    }
+}

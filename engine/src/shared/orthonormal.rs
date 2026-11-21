@@ -143,6 +143,11 @@ impl OrthonormalDesign {
     /// [`Self::new_checked`]と同じ判定。失敗したときは、列名の特定（`collinear_columns`）に要る
     /// 元の`x`を、QRから復元して[`ConsumedRankDeficient::x`]で返す（`x`はその場で壊れているため。
     /// 失敗は稀で、成功時の計算は増えない）。
+    ///
+    /// **非有限値（NaN・Inf）を含む`x`**でも`new_checked`と同じく失敗するが、復元した`x`は
+    /// 元の`x`と一致しない（非有限値が他の列へ広がる）ので、列名の特定は`new_checked`と
+    /// 異なる列を指しうる。入力の非有限値は、呼び出し側（`engine_pybind`の列抽出）が先に
+    /// 拒否する前提で、その事前走査は二重になるため置かない。
     pub(crate) fn new_checked_owned(x: Mat<f64>) -> Result<Self, ConsumedRankDeficient> {
         let (n, k) = (x.nrows(), x.ncols());
         if n < k {
@@ -910,6 +915,24 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn new_checked_owned_rejects_a_design_with_non_finite_values_like_new_checked() {
+        // 復元した設計行列は、非有限値が他の列へ広がるため元と一致しない（列名の特定は
+        // `new_checked`と異なりうる）。ここでは、どちらも失敗として弾くことだけを固定する。
+        for bad in [f64::NAN, f64::INFINITY] {
+            let x = Mat::from_fn(12, 3, |i, j| match (i, j) {
+                (0, 2) => bad,
+                (_, 0) => 1.0,
+                _ => ((i * 7 + j * 3) % 11) as f64,
+            });
+            assert!(OrthonormalDesign::new_checked(&x).is_err(), "{bad}");
+            assert!(
+                OrthonormalDesign::new_checked_owned(x).is_err(),
+                "{bad}: owned"
+            );
         }
     }
 

@@ -206,10 +206,13 @@ impl OlsInput {
 
     /// 設計行列 (n, k)。
     ///
+    /// クレート内専用。`OlsEstimator::fit_releasing_design`が設計行列を手放した推定量の入力は、
+    /// 公開の`OlsEstimator::input()`から取り出せるので、利用者から`x()`を呼べないようにしている。
+    ///
     /// # Panics
-    /// `OlsEstimator::fit_releasing_design`が設計行列を手放した後の入力では使えない
-    /// （行が0の空の行列を黙って返さず、呼び出し側の実装誤りとして検出する）。
-    pub fn x(&self) -> &Mat<f64> {
+    /// 設計行列を手放した後の入力では使えない（行が0の空の行列を黙って返さず、クレート内の
+    /// 実装誤りとして検出する）。
+    pub(crate) fn x(&self) -> &Mat<f64> {
         assert!(
             !self.design_released,
             "the design matrix was released by OlsEstimator::fit_releasing_design"

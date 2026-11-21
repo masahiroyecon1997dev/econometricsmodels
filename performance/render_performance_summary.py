@@ -312,6 +312,13 @@ def render(report: dict) -> str:
         lines += [f"> {w}" for w in warnings]
         lines.append("")
 
+    # PerfAdapter.max_n_iter の超過（ジョブを失敗させる検査。警告とは別扱い）。
+    failures: list[str] = meta.get("failures") or []
+    if failures:
+        lines.append("> [!CAUTION]")
+        lines += [f"> {f}" for f in failures]
+        lines.append("")
+
     n_subtitle = (
         f"{default_case(meta)}。実行時間（秒、中央値） / ピークRSS（MB）"
     )

@@ -120,6 +120,15 @@ pub(crate) enum ColumnExtractionError {
         source: SourceNames,
     },
 
+    /// 空文字列・空白だけの文字列のラベルを含む。`row`は最初に見つかった行（0始まり）、
+    /// `count`は該当する行の数。
+    BlankLabel {
+        name: String,
+        count: usize,
+        row: usize,
+        source: SourceNames,
+    },
+
     /// NaN・無限大を含む。`row`は最初に見つかった行（0始まり）。
     NonFinite {
         name: String,
@@ -180,6 +189,20 @@ impl ColumnExtractionError {
         Self::ContainsNull {
             name: name.to_string(),
             count,
+            source: source.into(),
+        }
+    }
+
+    pub(crate) fn blank_label(
+        name: &str,
+        count: usize,
+        row: usize,
+        source: ColumnSource<'_>,
+    ) -> Self {
+        Self::BlankLabel {
+            name: name.to_string(),
+            count,
+            row,
             source: source.into(),
         }
     }
@@ -256,6 +279,14 @@ impl ErrorInfo for ColumnExtractionError {
                 count,
                 source,
             } => located(ErrorCode::ColumnContainsNull, name, source).param("count", *count),
+            Self::BlankLabel {
+                name,
+                count,
+                row,
+                source,
+            } => located(ErrorCode::ColumnBlankLabel, name, source)
+                .param("count", *count)
+                .param("row", *row),
             Self::NonFinite {
                 name,
                 row,
@@ -368,6 +399,18 @@ mod tests {
     }
 
     #[test]
+    fn blank_label_has_count_and_zero_based_first_row() {
+        let err = ColumnExtractionError::blank_label("id", 5, 2, SRC);
+        assert_eq!(err.report().code(), ErrorCode::ColumnBlankLabel);
+        assert_eq!(
+            full(&err),
+            "Column 'id' (given as x) in data contains 5 empty or whitespace-only label(s), the \
+             first at row 2 (0-based), and blank labels are never treated as missing \
+             automatically. Remove the rows with blank labels, or correct the labels first."
+        );
+    }
+
+    #[test]
     fn non_finite_has_value_and_zero_based_row() {
         let err = ColumnExtractionError::non_finite("wage", 4, f64::NAN, SRC);
         assert_eq!(err.report().code(), ErrorCode::ColumnNonFinite);
@@ -453,6 +496,7 @@ mod tests {
         let errors = [
             ColumnExtractionError::not_found("c", SRC),
             ColumnExtractionError::contains_null("c", 1, SRC),
+            ColumnExtractionError::blank_label("c", 1, 0, SRC),
             ColumnExtractionError::non_finite("c", 0, 1.0, SRC),
             ColumnExtractionError::unsupported_dtype("c", "String".into(), ColumnRole::Time, SRC),
             ColumnExtractionError::time_zone_not_supported("c", "UTC", SRC),

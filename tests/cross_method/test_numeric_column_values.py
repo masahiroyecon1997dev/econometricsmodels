@@ -15,11 +15,13 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     Logit,
     Probit,
     Tobit,
@@ -116,6 +118,34 @@ FIT_CASES = {
     "FE": (
         lambda d: FE(d, "y", ["x1", "x2"], ["entity"]).fit(),
         [("y", "y"), ("x1", "x"), ("x2", "x")],
+    ),
+    "FEIV": (
+        lambda d: FEIV(d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]).fit(),
+        [
+            ("y", "y"),
+            ("x2", "x_exog"),
+            ("x1", "x_endog"),
+            ("z", "instruments"),
+            ("z2", "instruments"),
+        ],
+    ),
+    "FEIV_GMM": (
+        lambda d: FEIV(
+            d,
+            "y",
+            ["x2"],
+            ["x1"],
+            ["z", "z2"],
+            ["entity"],
+            options=FEIVOptions(estimator="gmm"),
+        ).fit(),
+        [
+            ("y", "y"),
+            ("x2", "x_exog"),
+            ("x1", "x_endog"),
+            ("z", "instruments"),
+            ("z2", "instruments"),
+        ],
     ),
     "RE": (
         lambda d: RE(d, "y", ["x1", "x2"], ["entity"]).fit(),

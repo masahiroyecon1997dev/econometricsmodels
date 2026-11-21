@@ -32,7 +32,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照
 `h_ii`によるスケーリングは未実装）ため、本スクリプトの対象外（`iv-spec.md`
 3.1節の既存の記述通り。R `ivreg`側にも確立した参照実装が無いことは以前から判明
 済み）。`engine`側は独自のOLS拡張として実装済みで、`engine`のRust単体テスト
-（`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
+（`two_sls/cov/tests/reference.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
 独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
 
 ## 検定分布（`iv-spec.md`3.2節）
@@ -501,7 +501,7 @@ def run_gmm(
     表通り）と検定統計量に必要な`debiased=False`相当（カイ二乗形式）が両立
     できない。`res.cov`（係数の分散共分散行列）から傾き係数の部分行列を
     切り出し、カイ二乗形式のWald統計量を直接計算し直す（本実装の
-    `gmm_wald_chi2_test`と同じ定義）。
+    `wald_chi2_test`と同じ定義）。
 
     ## Hansen J検定（過剰識別検定）の対応関係
 

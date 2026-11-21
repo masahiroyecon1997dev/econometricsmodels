@@ -1,0 +1,483 @@
+{
+  "synthetic": {
+    "baseline": {
+      "classical": {
+        "variables": {
+          "statistic": 38.671229469092715,
+          "p_value": 5.015476464452117e-10,
+          "df": 1,
+          "j_with_tested": 38.993388035939326,
+          "j_without_tested": 0.3221585668466091
+        },
+        "instruments": {
+          "statistic": 0.2901630809068268,
+          "p_value": 0.5901160431600132,
+          "df": 1,
+          "j_with_tested": 0.2901630809068268,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 38.993388035939326,
+          "p_value": 3.4095210230356056e-09,
+          "df": 2,
+          "j_with_tested": 38.993388035939326,
+          "j_without_tested": 0.0
+        }
+      },
+      "robust": {
+        "variables": {
+          "statistic": 39.123550878024126,
+          "p_value": 3.978161652601503e-10,
+          "df": 1,
+          "j_with_tested": 39.57043440346475,
+          "j_without_tested": 0.44688352544062926
+        },
+        "instruments": {
+          "statistic": 0.41370030596915786,
+          "p_value": 0.520097326136997,
+          "df": 1,
+          "j_with_tested": 0.41370030596915786,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 39.57043440346475,
+          "p_value": 2.554990831548077e-09,
+          "df": 2,
+          "j_with_tested": 39.57043440346475,
+          "j_without_tested": 0.0
+        }
+      },
+      "cluster": {
+        "variables": {
+          "statistic": 19.565029881524087,
+          "p_value": 9.72327574236811e-06,
+          "df": 1,
+          "j_with_tested": 19.93380137689101,
+          "j_without_tested": 0.36877149536692655
+        },
+        "instruments": {
+          "statistic": 0.3263256341576311,
+          "p_value": 0.5678307402120286,
+          "df": 1,
+          "j_with_tested": 0.3263256341576311,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 19.93380137689101,
+          "p_value": 4.6927782127113956e-05,
+          "df": 2,
+          "j_with_tested": 19.93380137689101,
+          "j_without_tested": 0.0
+        }
+      }
+    },
+    "multi_endog": {
+      "classical": {
+        "variables": {
+          "statistic": 32.90234942003653,
+          "p_value": 9.690608418236656e-09,
+          "df": 1,
+          "j_with_tested": 33.97281655806558,
+          "j_without_tested": 1.0704671380290451
+        },
+        "instruments": {
+          "statistic": 0.973208471113594,
+          "p_value": 0.3238812969441052,
+          "df": 1,
+          "j_with_tested": 0.973208471113594,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 33.97281655806558,
+          "p_value": 4.196590730900574e-08,
+          "df": 2,
+          "j_with_tested": 33.97281655806558,
+          "j_without_tested": 0.0
+        },
+        "variables_all": {
+          "statistic": 88.28552374574753,
+          "p_value": 6.745934229301071e-20,
+          "df": 2,
+          "j_with_tested": 89.67501234187536,
+          "j_without_tested": 1.3894885961278487
+        },
+        "both_all": {
+          "statistic": 89.67501234187536,
+          "p_value": 2.572519827813227e-19,
+          "df": 3,
+          "j_with_tested": 89.67501234187536,
+          "j_without_tested": 0.0
+        }
+      },
+      "robust": {
+        "variables": {
+          "statistic": 33.01664761319992,
+          "p_value": 9.137312055168336e-09,
+          "df": 1,
+          "j_with_tested": 34.480409083335196,
+          "j_without_tested": 1.4637614701352732
+        },
+        "instruments": {
+          "statistic": 1.2696025145455927,
+          "p_value": 0.2598412611383031,
+          "df": 1,
+          "j_with_tested": 1.2696025145455927,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 34.480409083335196,
+          "p_value": 3.255924312374122e-08,
+          "df": 2,
+          "j_with_tested": 34.480409083335196,
+          "j_without_tested": 0.0
+        },
+        "variables_all": {
+          "statistic": 66.56849258842492,
+          "p_value": 3.5061904307538396e-15,
+          "df": 2,
+          "j_with_tested": 68.21574265711156,
+          "j_without_tested": 1.6472500686866418
+        },
+        "both_all": {
+          "statistic": 68.21574265711156,
+          "p_value": 1.0286179946704787e-14,
+          "df": 3,
+          "j_with_tested": 68.21574265711156,
+          "j_without_tested": 0.0
+        }
+      },
+      "cluster": {
+        "variables": {
+          "statistic": 18.77768386300362,
+          "p_value": 1.4687570926368109e-05,
+          "df": 1,
+          "j_with_tested": 20.319483016732438,
+          "j_without_tested": 1.5417991537288165
+        },
+        "instruments": {
+          "statistic": 1.2701847999628793,
+          "p_value": 0.2597320144186132,
+          "df": 1,
+          "j_with_tested": 1.2701847999628793,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 20.319483016732438,
+          "p_value": 3.8697269794371474e-05,
+          "df": 2,
+          "j_with_tested": 20.319483016732438,
+          "j_without_tested": 0.0
+        },
+        "variables_all": {
+          "statistic": 26.258273567656214,
+          "p_value": 1.986498962776414e-06,
+          "df": 2,
+          "j_with_tested": 27.928945031912754,
+          "j_without_tested": 1.670671464256539
+        },
+        "both_all": {
+          "statistic": 27.928945031912754,
+          "p_value": 3.758924677475669e-06,
+          "df": 3,
+          "j_with_tested": 27.928945031912754,
+          "j_without_tested": 0.0
+        }
+      }
+    },
+    "unbalanced": {
+      "classical": {
+        "variables": {
+          "statistic": 30.500367100889846,
+          "p_value": 3.3380333685618374e-08,
+          "df": 1,
+          "j_with_tested": 31.02041337202784,
+          "j_without_tested": 0.5200462711379953
+        },
+        "instruments": {
+          "statistic": 0.4654433458704538,
+          "p_value": 0.4950909455146939,
+          "df": 1,
+          "j_with_tested": 0.4654433458704538,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 31.02041337202784,
+          "p_value": 1.8365502816099238e-07,
+          "df": 2,
+          "j_with_tested": 31.02041337202784,
+          "j_without_tested": 0.0
+        }
+      },
+      "robust": {
+        "variables": {
+          "statistic": 26.357285023557466,
+          "p_value": 2.837466498730863e-07,
+          "df": 1,
+          "j_with_tested": 27.074332469401302,
+          "j_without_tested": 0.7170474458438341
+        },
+        "instruments": {
+          "statistic": 0.6722777347973082,
+          "p_value": 0.4122586104372874,
+          "df": 1,
+          "j_with_tested": 0.6722777347973082,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 27.074332469401302,
+          "p_value": 1.3209409496125119e-06,
+          "df": 2,
+          "j_with_tested": 27.074332469401302,
+          "j_without_tested": 0.0
+        }
+      },
+      "cluster": {
+        "variables": {
+          "statistic": 13.744504381142702,
+          "p_value": 0.0002094326641190552,
+          "df": 1,
+          "j_with_tested": 14.232227448771448,
+          "j_without_tested": 0.4877230676287457
+        },
+        "instruments": {
+          "statistic": 0.44813443832557637,
+          "p_value": 0.5032222137674343,
+          "df": 1,
+          "j_with_tested": 0.44813443832557637,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 14.232227448771448,
+          "p_value": 0.000811915957004077,
+          "df": 2,
+          "j_with_tested": 14.232227448771448,
+          "j_without_tested": 0.0
+        }
+      }
+    },
+    "two_way": {
+      "baseline": {
+        "classical": {
+          "variables": {
+            "statistic": 45.088542075772615,
+            "p_value": 1.883240511204082e-11,
+            "df": 1,
+            "j_with_tested": 45.24224651695867,
+            "j_without_tested": 0.15370444118605883
+          },
+          "instruments": {
+            "statistic": 0.1357364934113594,
+            "p_value": 0.7125568520758693,
+            "df": 1,
+            "j_with_tested": 0.1357364934113594,
+            "j_without_tested": 0.0
+          },
+          "both": {
+            "statistic": 45.24224651695867,
+            "p_value": 1.4988942527888028e-10,
+            "df": 2,
+            "j_with_tested": 45.24224651695867,
+            "j_without_tested": 0.0
+          }
+        },
+        "robust": {
+          "variables": {
+            "statistic": 37.600915617360144,
+            "p_value": 8.680372477338536e-10,
+            "df": 1,
+            "j_with_tested": 37.78912116921967,
+            "j_without_tested": 0.188205551859528
+          },
+          "instruments": {
+            "statistic": 0.16575023245680914,
+            "p_value": 0.6839166635727536,
+            "df": 1,
+            "j_with_tested": 0.16575023245680914,
+            "j_without_tested": 0.0
+          },
+          "both": {
+            "statistic": 37.78912116921967,
+            "p_value": 6.225820571240195e-09,
+            "df": 2,
+            "j_with_tested": 37.78912116921967,
+            "j_without_tested": 0.0
+          }
+        },
+        "cluster": {
+          "variables": {
+            "statistic": 19.454763460433547,
+            "p_value": 1.0301061326560363e-05,
+            "df": 1,
+            "j_with_tested": 19.609697233820096,
+            "j_without_tested": 0.15493377338654998
+          },
+          "instruments": {
+            "statistic": 0.12318057343825015,
+            "p_value": 0.7256101789993534,
+            "df": 1,
+            "j_with_tested": 0.12318057343825015,
+            "j_without_tested": 0.0
+          },
+          "both": {
+            "statistic": 19.609697233820096,
+            "p_value": 5.51833866255088e-05,
+            "df": 2,
+            "j_with_tested": 19.609697233820096,
+            "j_without_tested": 0.0
+          }
+        }
+      },
+      "unbalanced": {
+        "classical": {
+          "variables": {
+            "statistic": 33.34984034076696,
+            "p_value": 7.698414003522306e-09,
+            "df": 1,
+            "j_with_tested": 33.4789032123901,
+            "j_without_tested": 0.12906287162314292
+          },
+          "instruments": {
+            "statistic": 0.11368914546178267,
+            "p_value": 0.7359825622256012,
+            "df": 1,
+            "j_with_tested": 0.11368914546178267,
+            "j_without_tested": 0.0
+          },
+          "both": {
+            "statistic": 33.4789032123901,
+            "p_value": 5.372155033302503e-08,
+            "df": 2,
+            "j_with_tested": 33.4789032123901,
+            "j_without_tested": 0.0
+          }
+        },
+        "robust": {
+          "variables": {
+            "statistic": 26.18841368368436,
+            "p_value": 3.096750106714354e-07,
+            "df": 1,
+            "j_with_tested": 26.355652922797837,
+            "j_without_tested": 0.1672392391134777
+          },
+          "instruments": {
+            "statistic": 0.1406760172947229,
+            "p_value": 0.7076098824447541,
+            "df": 1,
+            "j_with_tested": 0.1406760172947229,
+            "j_without_tested": 0.0
+          },
+          "both": {
+            "statistic": 26.355652922797837,
+            "p_value": 1.892093894600071e-06,
+            "df": 2,
+            "j_with_tested": 26.355652922797837,
+            "j_without_tested": 0.0
+          }
+        },
+        "cluster": {
+          "variables": {
+            "statistic": 14.363838862977309,
+            "p_value": 0.0001506681798810979,
+            "df": 1,
+            "j_with_tested": 14.4627250535723,
+            "j_without_tested": 0.09888619059499043
+          },
+          "instruments": {
+            "statistic": 0.08005090901081957,
+            "p_value": 0.7772284323525956,
+            "df": 1,
+            "j_with_tested": 0.08005090901081957,
+            "j_without_tested": 0.0
+          },
+          "both": {
+            "statistic": 14.4627250535723,
+            "p_value": 0.0007235343562903148,
+            "df": 2,
+            "j_with_tested": 14.4627250535723,
+            "j_without_tested": 0.0
+          }
+        }
+      }
+    },
+    "three_way": {
+      "classical": {
+        "variables": {
+          "statistic": 45.21047927203177,
+          "p_value": 1.7695567550338045e-11,
+          "df": 1,
+          "j_with_tested": 45.561306534997854,
+          "j_without_tested": 0.3508272629660838
+        },
+        "instruments": {
+          "statistic": 0.30878782001796,
+          "p_value": 0.578424981652288,
+          "df": 1,
+          "j_with_tested": 0.30878782001796,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 45.561306534997854,
+          "p_value": 1.277873875913262e-10,
+          "df": 2,
+          "j_with_tested": 45.561306534997854,
+          "j_without_tested": 0.0
+        }
+      },
+      "robust": {
+        "variables": {
+          "statistic": 38.33579024689112,
+          "p_value": 5.956020603843545e-10,
+          "df": 1,
+          "j_with_tested": 38.78132249621645,
+          "j_without_tested": 0.44553224932532187
+        },
+        "instruments": {
+          "statistic": 0.39391555579441373,
+          "p_value": 0.5302483667653899,
+          "df": 1,
+          "j_with_tested": 0.39391555579441373,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 38.78132249621645,
+          "p_value": 3.790904287192698e-09,
+          "df": 2,
+          "j_with_tested": 38.78132249621645,
+          "j_without_tested": 0.0
+        }
+      },
+      "cluster": {
+        "variables": {
+          "statistic": 19.426514951641348,
+          "p_value": 1.0454548881046664e-05,
+          "df": 1,
+          "j_with_tested": 19.77326035282102,
+          "j_without_tested": 0.34674540117967123
+        },
+        "instruments": {
+          "statistic": 0.2703830020063368,
+          "p_value": 0.6030749670012281,
+          "df": 1,
+          "j_with_tested": 0.2703830020063368,
+          "j_without_tested": 0.0
+        },
+        "both": {
+          "statistic": 19.77326035282102,
+          "p_value": 5.085001317316178e-05,
+          "df": 2,
+          "j_with_tested": 19.77326035282102,
+          "j_without_tested": 0.0
+        }
+      }
+    }
+  },
+  "wooldridge": {},
+  "_meta": {
+    "method": "fe_iv_gmm_c_statistic",
+    "generated_at": "2026-11-14T21:49:35.561400+00:00",
+    "reference": "numpy c_statistic oracle (within-transformed data)",
+    "numpy_version": "2.5.4",
+    "pandas_version": "3.0.3",
+    "note": "固定効果を除いた列に定数項なしのC統計量（Hayashi 2000、Baum-Schaffer-Stillman 2003）をnumpyで当てる。Sは生の和。classical重みはstatistic・j_*に(n-n_absorbed)/nを掛けた本実装の尺度。pはchi2。"
+  }
+}

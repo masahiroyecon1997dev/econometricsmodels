@@ -2,7 +2,7 @@
 
 **FE**: [Usage](../usage/fe.md) · **Options and results** · [Definitions](../methods/fe.md)
 
-`FE` estimates a one-way (entity) or two-way (entity and time) fixed effects ("within") panel regression, with the same constructor and `.fit()` as [OLS](ols.md). `effects` is a required argument: a list of one column (one-way, the entity) or two columns (two-way, the entity then the time period; the panel must be balanced). The number of groups of each column is in `FEResults.n_groups`, keyed by column name, and `fixed_effects()` returns the effects of each column in the same order. There is no intercept, since the effects absorb it. The estimator, covariance estimators, R² statistics and the recovery of the fixed effects are defined in [Definitions: FE](../methods/fe.md).
+`FE` estimates a one-way (entity), two-way (entity and time) or higher-dimensional fixed effects ("within") panel regression, with the same constructor and `.fit()` as [OLS](ols.md). `effects` is a required argument: a list of one column (one-way, the entity), two columns (two-way, the entity then the time period) or three to five columns (further sets of effects); the panel may be unbalanced and a combination of the columns may repeat. The number of groups of each column is in `FEResults.n_groups`, keyed by column name, and `fixed_effects()` returns the effects of each column in the same order. There is no intercept, since the effects absorb it. The estimator, covariance estimators, R² statistics and the recovery of the fixed effects are defined in [Definitions: FE](../methods/fe.md).
 
 ## Options at a glance
 
@@ -15,6 +15,8 @@ Pass an `FEOptions` as `options=`. `effects` is an argument of `FE`, not an opti
 | `dk_time` | Column that defines the time periods of the Driscoll-Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `effects` |
 | `dk_bandwidth` | Kernel bandwidth | `None` (automatic) | Only with `cov_type="dk"` |
 | `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |
+| `tol` | Convergence tolerance of the alternating projections that remove the effects of a two-way model on an unbalanced panel, or of a model with three or more effects | `None` (1e-12) | Ignored on a balanced two-way panel and in a one-way model; a loose value also coarsens the detection of regressors collinear with the effects |
+| `max_iter` | Maximum number of passes of those projections, from 1 to 10000 | `10000` | A thinly connected panel needs many passes; reaching the limit raises `ComputationError` |
 
 Which options go with which `cov_type` (an option set where it is not used raises a `ValidationError`):
 

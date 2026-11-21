@@ -43,7 +43,11 @@ from _assertions import assert_close, assert_option_case_insensitive
 from _constants import DATA_DIR
 from _errors import raises_error
 from _fixture_cov import load_fixtures_with_cov
-from _helpers import CASE_SPELLINGS, load_wooldridge_dataset
+from _helpers import (
+    CASE_SPELLINGS,
+    assert_unit_change_invariant,
+    load_wooldridge_dataset,
+)
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
     _Panel,
@@ -735,26 +739,24 @@ def test_perfect_collinearity_is_a_computation_error_for_every_method(method):
     "method", ["swamy_arora", "wallace_hussain", "amemiya"]
 )
 @pytest.mark.parametrize("cov_type", ["classical", "cluster"])
-def test_extreme_scale_difference_is_a_computation_error_for_every_method(
+def test_extreme_scale_difference_is_invariant_to_the_units_for_every_method(
     method, cov_type
 ):
-    """変数間のスケールが極端に異なる設計行列（`x1`を1e6倍、`x2`を1e-3倍）。"""
+    """変数間のスケールが極端に異なる設計行列（`x1`を1e6倍、`x2`を1e-3倍）でも、どの分散成分
+    推定でも失敗せず、単位を揃えたデータと同じ全体F統計量・p値になる。"""
     case = _case("ow_baseline")
     df = _frame(case).with_columns(
         x1=pl.col("x1") * 1e6, x2=pl.col("x2") * 1e-3
     )
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
-    ):
-        RE(
-            df,
-            y="y",
-            x=["x1", "x2"],
-            effects=["entity"],
-            options=REOptions(cov_type=cov_type, variance_method=method),
-        ).fit()
+    options = REOptions(cov_type=cov_type, variance_method=method)
+    assert_unit_change_invariant(
+        lambda d: RE(
+            d, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
 def test_entity_count_equal_to_slope_count_plus_one_blocks_only_swamy_arora():

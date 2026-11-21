@@ -333,6 +333,11 @@ pub(crate) struct GroupIndices {
 }
 
 impl GroupIndices {
+    /// グループ`g`の行インデックス（観測順）。
+    pub(crate) fn rows(&self, g: usize) -> &[usize] {
+        &self.indices[self.offsets[g]..self.offsets[g + 1]]
+    }
+
     /// グループごとの行インデックスをコード順に返す。
     pub(crate) fn iter(&self) -> impl Iterator<Item = &[usize]> {
         self.offsets.windows(2).map(|w| &self.indices[w[0]..w[1]])

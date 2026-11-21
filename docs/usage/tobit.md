@@ -99,7 +99,7 @@ for row in result.censoring_fit_check():
     print(row["category"], row["observed_rate"], row["model_implied_rate"])
 ```
 
-See [Options and results](../api/tobit.md) for the full list of options. Standard errors (`cov_type`: `"classical"`, `"opg"`, `"hc0"`, `"hc1"`, `"cluster"`) are chosen as for [Logit](logit.md#standard-errors-and-solvers); the tests use the normal distribution.
+See [Options and results](../api/tobit.md) for the full list of options. Standard errors (`cov_type`: `"classical"`, `"opg"`, `"hc0"`, `"hc1"`, `"cluster"`) are chosen as for [Logit](logit.md#standard-errors-and-solvers); the tests use the normal distribution. All three solvers target the same estimate; `"bfgs"` and `"lbfgs"` stop at a convergence criterion and agree with `"newton"` to about `2e-7` in relative terms (see [Solvers and convergence](../methods/logit.md#solvers-and-convergence)); use `"newton"` when the closest agreement is needed.
 
 ## Covariance matrix of the coefficients
 

@@ -52,3 +52,34 @@ CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
 # SEのグループ列として使う（フィクスチャ生成とテストが同じ定義を参照する）。
 CARD_REGION_DUMMIES = [f"reg66{i}" for i in range(1, 10)]
 CARD_REGION_COLUMN = "region"
+
+# C統計量のRクロスチェック（momentfit）の検定の定義。フィクスチャ生成とテストが同じ定義を
+# 参照する。各エントリは`(検定する内生変数, 検定する除外操作変数)`で、`IVResults.c_stat()`の
+# `variables`・`instruments`に当たる。検定する操作変数を外しても過剰識別でなくてよい
+# （外した後が丁度識別なら`J_c = 0`）が、操作変数が足りなくなる検定は含めない。
+C_STAT_SINGLE_ENDOG_TESTS = {
+    "endogeneity": (["endog1"], []),
+    "orthogonality": ([], ["z2"]),
+}
+# 操作変数が1本のシナリオ（`just_identified`）は、外生性だけ検定できる。
+C_STAT_SINGLE_ENDOG_TESTS_JUST_IDENTIFIED = {
+    "endogeneity": (["endog1"], []),
+}
+C_STAT_MULTI_ENDOG_TESTS = {
+    "endog1": (["endog1"], []),
+    "endog_both": (["endog1", "endog2"], []),
+    "orthogonality": ([], ["z3"]),
+    "endog1_and_orthogonality": (["endog1"], ["z3"]),
+}
+# `just_identified`の複数内生変数のシナリオは操作変数が`z1`・`z2`の2本。
+C_STAT_MULTI_ENDOG_TESTS_JUST_IDENTIFIED = {
+    "endog1": (["endog1"], []),
+    "endog_both": (["endog1", "endog2"], []),
+}
+C_STAT_CARD_TESTS = {
+    "endogeneity": (["educ"], []),
+    "orthogonality": ([], ["nearc4"]),
+}
+# 重み（`gmm_weight_type`）。`cluster`はクラスター列が要るので別に扱う。HACのラグ数は固定。
+C_STAT_WEIGHTS = ["classical", "robust", "hac"]
+C_STAT_HAC_LAGS = 2

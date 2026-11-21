@@ -1,0 +1,111 @@
+# FEIV: パフォーマンス計測
+
+`FEIV(...).fit()`（2SLS・GMM。Rust engine + PyO3）の実行時間・ピークメモリの記録。CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量的に裏付けることが目的。
+
+他手法ページ（`ols.md` 等）と違い **engine 単独の計測**で、リファレンス実装との相対比較は行わない（`tobit.md` と同じ）。engine の FEIV が軸ごとに「時間がかかりすぎていないか」（絶対値・スケーリングの推移）を観察する。正確性の数値照合は `tests/panel/test_fe_iv_*.py`（fixest・linearmodels・plm・ivDiag）が担う。
+
+再実行可能なスクリプトは `performance/compare_fe_iv.py`（手法非依存の計測ハーネス `performance/_perf_harness.py` ＋ FEIV 固有アダプタ、コミット対象）。生の計測結果 JSON はコミットしない（`.gitignore` の `docs/performance/results/*.json` 参照）。
+
+> **役割分担**: 計測結果の表と性能特性の解釈は、公開ページ（英語。CIの計測値から生成）の[Performance](../guide/performance.md)・[Performance results](../guide/performance-results.md)に置く。このノートは計測方法論・設計判断・既知の限界・今後の検討を記録する。
+
+## 計測方法
+
+`docs/performance/ols.md`「最重要の教訓」「計測方法」・`fe.md` と共通（release ビルド必須・`tracemalloc` 不採用・サブプロセス隔離・スレッド数を1に固定・ウォームアップ1回＋`repeats` 回の中央値）。FEIV 固有の点は以下。
+
+### 比較対象を置かない理由（engine 単独）
+
+`PerfAdapter.libraries=("engine",)`。理由:
+
+- **linearmodels に固定効果つきのIVが無い**。`PanelOLS`・`AbsorbingLS` は内生変数を取れない。
+- **`IV2SLS` にダミー変数を入れる形（LSDV）**は、固定効果を除く反復の代わりに個体数分のダミーの行列を作る別のアルゴリズムで、n が大きいと計測できない。
+- **pandas の groupby で個体内平均を引いてから `IV2SLS` に渡す合成**は、計測の大部分が pandas の変換になり、不均衡な2-wayや3次元では参照側に交互射影を手書きする必要も出て、比較が恣意的になる。
+- **pyfixest** は性能比較からも外した（`ols.md`）。**fixest（R）**は共通ハーネスのインプロセス計測に乗らない。
+
+### 計測範囲（診断を含む）
+
+`FEIV.fit()` は係数・標準誤差に加えて、Sargan（過剰識別のとき）・Wu-Hausman・弱操作変数の部分F・パネルR²・全体のF検定を**常に一括計算する**。計測した時間はこれらを含む。Cragg-Donald・Kleibergen-Paap・有効F は事後診断のメソッド（`fit()` では計算しない）なので含まない。`estimator="gmm"` の計測範囲は下の「GMM」を参照。
+
+### N×T 分解と `k` の定義
+
+`fe.md` と同じく T=6 に固定し N をスイープする（`n_entities = n // 6`。実際の観測数は要求した `n` と若干ずれる）。
+
+**`k` は傾き係数の総数**（`x_exog` + `x_endog`、`x_exog = k − 内生変数の数`）で、IV 本体（`compare_iv.py`、`k = x_exog` の数）とは定義が違う。FE の `k` と同じ規模で比べられ、DK が要求する「時点数 T > 傾き係数の数」が cov 軸（k=5）で成り立つため（`k = x_exog の数` だと傾き係数が6個になり T=6 では `ValidationError`）。k 軸の k=20 は classical だけなので DK の制約に触れない。`compare_fe_iv.py` は、設定変更でこの前提が崩れたら import 時にエラーにする。
+
+### データ
+
+`benchmark/panel/fe_iv_datasets.py` の `generate_fe_iv_perf_dataset`（凍結しない、numpy の一括生成）。外生変数・操作変数・内生変数が個体効果と相関し、構造誤差と第一段階誤差が相関する（`generate_fe_iv_dataset` と同じ構造）。既定は内生変数1個・操作変数2個（過剰識別。Sargan が計測に入る）。操作変数 `l` は内生変数 `l % k_endog` に強く効き、複数の内生変数でも全て識別される。
+
+### スイープ軸
+
+- **n 軸**（k=5 固定、classical）: n=10,000 / 100,000 / 1,000,000。
+- **k 軸**（n=10,000 固定、classical）: k=5・20。
+- **cov 軸**（n=100,000・k=5、1-way）: `classical`・`hc1`・`hc2`・`hc3`・`cluster`（個体）・`dk`（バンド幅は engine の既定式）。全て engine のみ。3次元の `hc2`・`hc3` は `hc2_three_way`・`hc3_three_way` として足す。
+- **method 軸**（n=1,000,000・k=5・classical の代表点1つずつ。`fe.md` と同じく `extra_methods` の仕組みを流用）:
+
+| method | `effects` | 内生変数 / 操作変数 | データ |
+|---|---|---|---|
+| `one_way`（既定） | entity | 1 / 2 | 均衡（T=6） |
+| `two_way` | entity, time | 1 / 2 | 均衡 |
+| `two_way_unbalanced` | entity, time | 1 / 2 | 均衡の各行を確率0.7で残す（個体は最低2行） |
+| `three_way` | entity, time, c | 1 / 2 | 均衡の各行に3つ目の効果 `c`（50水準）を割り振る |
+| `endog3` | entity | 3 / 5 | 均衡 |
+| `inst6` | entity | 1 / 6 | 均衡 |
+
+### GMM
+
+`estimator="gmm"` の変種を method 軸（n=1,000,000・k=5・classical の代表点）に足す。名前は `gmm_<方式>[_<構造>|_<重み>]` で、効果の構造・内生変数と操作変数の数は 2SLS の同名の method と同じ。重みの既定は engine の既定と同じ `cluster`。
+
+| method | 方式 | 重み | 構造 |
+|---|---|---|---|
+| `gmm_two_step` | 2段階 | cluster | `one_way` |
+| `gmm_two_step_robust` | 2段階 | robust | `one_way` |
+| `gmm_iterated` | 反復 | cluster | `one_way` |
+| `gmm_iterated_robust` | 反復 | robust | `one_way` |
+| `gmm_two_way_unbalanced` | 2段階 | cluster | `two_way_unbalanced` |
+| `gmm_endog3` | 2段階 | cluster | `endog3`（内生3・操作変数5） |
+
+cov 軸（n=100,000・k=5、1-way）には、2段階・cluster 重みの GMM の標準誤差を `gmm_hc1`・`gmm_hc2`・`gmm_hc3`・`gmm_cluster`・`gmm_dk` として足す（`hc0` は FEIV に無い）。3次元の効果での GMM（HC2・HC3 を含む）は測らない。
+
+- **計測範囲**: GMM の `fit()` は within 変換（全列に1回）・重み行列の推定（2段階は1回、反復は収束まで）・係数・標準誤差・Hansen J（過剰識別のとき）・R²・全体の Wald 検定を一括で計算する。さらに、点推定・共分散・Wald の後に、内生変数ごとの第一段階・弱操作変数の部分F・Wu-Hausman の補助回帰を 2SLS と同じ共有の経路（`common/first_stage.rs`）で回す。そのため GMM の `fit()` は、同じ構造の 2SLS の `fit()` に重み行列の推定の分が加わった費用になる（以前は第一段階を持たず、2SLS より軽くなりうると書いていた記述は古い）。ピークメモリは、点推定に使った行列を第一段階の前に手放して抑える。数値は CI の計測値を正とし、GMM の計測の追加（#663）で測る。C 統計量・`fixed_effects()` は事後診断のメソッドなので含まない。
+- **重みの反復**: 反復 GMM は `gmm_max_iter=100`・`gmm_tol=1e-6` を明示して固定する（engine の既定値と同じ数値だが、既定が変わっても計測条件が動かないようにする）。
+- **反復回数は結果 JSON の `n_iter` で読む**: n=10,000〜100,000 の試し測りでは、反復 GMM は重みが cluster でも robust でも 3 回（2段階は 2 回）で収束し、`gmm_tol` を 1e-6 から 1e-14 まで締めても 3〜4 回で時間もほぼ変わらない。method 軸の代表点（n=1,000,000）では反復 GMM も 2 回で収束し、2段階と費用が区別できない。反復回数を動かす変種（`gmm_tol` 違い）は情報が増えないので置かない。
+- **`robust` 重みは費用の比較のためだけに測る**: within 変換した誤差は個体内で相関するため、`robust` 重みは小さい T では統計的に妥当でない（engine の既定が `cluster` の理由。`fe-iv-spec.md`）。重み行列の種類による計算費用の違いを見る目的に限る。
+- **比較対象は置かない**: 2SLS と同じ理由に加え、`linearmodels.iv.IVGMM` を within 変換後のデータに当てる形は、変換を pandas で手書きする合成になり恣意的（上の「比較対象を置かない理由」）。
+
+### 繰り返しの within 変換の見方
+
+FEIV は `y`・`x_exog`・`x_endog`・操作変数の全列に同じ within 変換をかける。不均衡な2-way・3次元では交互射影の反復が支配的な費用になりうる。**変換だけを取り出して測る公開 API は無い**ので、単独の計測は置かない（Rust 側にタイミング用の経路を足すと API 面が増える）。代わりに、変換する列の数を変える軸（k 軸・`endog3`・`inst6`）と、交互射影が必要な構造（`two_way_unbalanced`・`three_way`。均衡な `two_way` は閉形式）の `one_way` に対する比から、変換の費用を読む。
+
+## 結果
+
+計測値は公開ページの[Performance results](../guide/performance-results.md)を参照（`benchmark_performance.yml` のCI計測値から生成。リリース準備時に `/release` で更新する）。
+
+- **ピークRSS**: 構造式と第一段階が、変換済みの列・残差・吸収した効果を保持するため、n が大きいときのピークRSSは FE より大きい。CI の計測（`benchmark_performance.yml` を `workflow_dispatch` で実行）では、n=1,000,000 の `one_way` で FE の約1.4倍、`two_way`・`three_way` で約1.5倍（`fit()` 中の複製を減らす前は、どれも約1.7倍）。複製を減らした前後の同じ点で、FEIV のピークRSSは約20〜25%下がった。n が小さい点は、FE の計測側にリファレンスの読み込み分が含まれるため、FEIV と比べられない（比較は n=1,000,000 の点に限る）。生データ（約8列×8バイト×n）に対する倍率の内訳は測っていない。
+
+## 再現方法
+
+```bash
+uv run maturin develop --release
+uv run python -m performance.compare_fe_iv --repeats 3 \
+    --output docs/performance/results/fe_iv.json
+uv run python -m performance.render_performance_summary \
+    docs/performance/results/fe_iv.json
+```
+
+## 既知の限界
+
+- **1スレッド固定**: 本計測は1スレッドに固定しており、数値は「シングルスレッドでの計算コア効率」。多コアでの実利用の性能特性とは別軸（`ols.md`「既知の限界」と共通）。
+- **診断を含む計測範囲**: `fit()` が常に計算する診断（Sargan・Wu-Hausman・部分F・R²・全体F）を含む。診断を除いた係数・標準誤差だけの時間は測っていない。
+- **不均衡・3次元は実行行数がずれる**: `two_way_unbalanced` は均衡の各行を確率0.7で残すため、行数は要求した `n` の約70%。`three_way` の3つ目の効果は無作為に割り振るので連結度が高い好条件で、入れ子や水準の多い効果は測っていない。どちらも同じ表の均衡の行と時間を比べられない。
+- **DK は T > k が前提**: 時点数 T=6 に対し傾き係数が `k=5` までしか DK を測れない。k 軸（k=20）は classical だけ。
+- **GMM の反復は収束が速いデータだけ**: 反復 GMM の `n_iter` は 2〜3 回（代表点の n=1,000,000 では 2 回で、2段階と区別できない）。反復が増える条件（弱い操作変数・強い不均一分散等）での費用は測っていない。
+- **GMM は代表点だけ**: n 軸・k 軸は 2SLS のみで、GMM は method 軸（n=1,000,000・k=5）と cov 軸（n=100,000）の点だけを測る。n・k に対するスケーリング（k=20 のときの重み行列の費用、操作変数の多い構造）は見えない。
+- **GMM の `robust` 重みは統計的に妥当でない設定**: 費用の比較のためだけに測る。cov 軸の GMM は cluster 重みのみ。
+- **リファレンスが無い**: engine 単独で、他実装との相対値は出さない。正確性は別のテストが担う（上記「比較対象を置かない理由」）。
+- **within 変換だけの計測は無い**: 公開 API が無いため、列数を変える軸と交互射影が要る構造の比から間接的に読む（「繰り返しの within 変換の見方」）。
+
+## 今後の検討事項
+
+- **メモリ**: `FeTwoSlsEstimator`は第一段階の`FeEstimator`を保持しない（`fit_with_first_stages`が各第一段階を、部分F統計量と、第二段階・Wu-Hausmanに要る量（当てはめ値・残差・係数）だけ残して手放し、診断が後で使うwithin変換後の行列は`first_stage_within`として別に持つ）。`fit()`の途中の一時的な複製も減らした（第一段階・構造式・Wu-Hausmanの補助回帰への列の受け渡しを複製せず移動し、点推定の行列・共分散の行列・within変換した列を使い終わった時点で解放した）。Pythonから測ったピークRSSは、内生変数3個・操作変数5個（n=1,000,000・T=6）で約3割下がった。ライブヒープの見積りだけでは効果を主張せず、必ずPythonの`resource.getrusage`で変更前後を比べること（glibcの既定では、8MB級の列を早くdropしてもRSSが下がらない）。残りは、`fit()`の途中の一時的な複製（Wu-Hausmanの補助回帰への列の受け渡し、第一段階の残差の複製）と、構造式用の`FeInput`・推定量の入力が生の列を持つこと、HC2/HC3の吸収した効果のレバレッジを診断の呼び出しごとに再計算する点。いずれも効果と公開面への影響を測って別に判断する。
+- **ライブの相対比較**: 保守された固定効果つきIVのPython実装が現れ、インプロセスで計測できるようになれば再検討する。
+- **releaseビルドでの再計測が前提**: 改善見込みの見積もりは、debugビルドの数値（誤り）ではなくCIのreleaseビルドの数値を基準にすること。

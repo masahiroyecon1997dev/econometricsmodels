@@ -37,7 +37,7 @@ This assumes homoskedastic, uncorrelated errors.
 | `"hc2"` | \(1 / (1 - h_{ii})\) |
 | `"hc3"` | \(1 / (1 - h_{ii})^2\) |
 
-\(h_{ii} = x_i'(X'X)^{-1}x_i\) is the leverage of observation \(i\). HC2 and HC3 grow without bound as a leverage approaches 1, so a single extreme observation can dominate them.
+\(h_{ii} = x_i'(X'X)^{-1}x_i\) is the leverage of observation \(i\). HC2 and HC3 grow without bound as a leverage approaches 1, so a single extreme observation can dominate them. An observation with \(h_{ii} = 1\) (for example a dummy that is nonzero in one row) is fitted exactly and its weight is not defined; the fit raises `ComputationError` (`UNIT_LEVERAGE_OBSERVATION`) instead of returning a number that depends on rounding (see [Validation](../guide/validation.md#observation-with-leverage-1)).
 
 ### `"hac"`: Newey-West
 

@@ -3,7 +3,7 @@
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::SelectedData;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
-use engine::iv::common::{IvEstimate, compute_first_stage, validate_iv_fit_inputs};
+use engine::iv::common::{IvEstimate, compute_first_stage_with, validate_iv_fit_inputs};
 use engine::iv::gmm::GmmEstimator;
 use engine::iv::two_sls::TwoSlsEstimator;
 use polars::prelude::DataFrame;
@@ -53,10 +53,13 @@ pub(crate) fn fit(
     options: &IVOptions,
 ) -> PyResult<IVResult> {
     // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
-    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は使わず、
-    // 関数の末尾（`detach`から戻ってGILを持った状態）で`data`ごとdropされる。
-    let SelectedData { frame, .. } = data;
-    py.detach(|| fit_frame(&frame, y, x_exog, x_endog, instruments, options))
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は結果に持たせる。
+    let SelectedData { source, frame } = data;
+    let mut result = py.detach(|| fit_frame(&frame, y, x_exog, x_endog, instruments, options))?;
+    // 診断のメソッドが`IvInput`を作り直すための元のデータとオプション（GILを持って付ける）。
+    result.source_data = Some(source);
+    result.options = Some(options.clone());
+    Ok(result)
 }
 
 /// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
@@ -69,6 +72,11 @@ fn fit_frame(
     instruments: Vec<String>,
     options: &IVOptions,
 ) -> PyResult<IVResult> {
+    let names = RetainedNames {
+        x_exog: x_exog.clone(),
+        x_endog: x_endog.clone(),
+        instruments: instruments.clone(),
+    };
     let BuiltIvInput {
         input,
         cov_type,
@@ -89,20 +97,29 @@ fn fit_frame(
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
     // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。
-    let (first_stage, weak_instrument_f_statistics) =
-        compute_first_stage(&input, &cov_type, options.confidence_level)
-            .map_err(iv_error_to_pyerr)?;
-    let weak_instrument_f_df = first_stage.first().map(|(_, first_stage_estimator)| {
-        (input.k_instruments(), first_stage_estimator.df_resid())
-    });
-    // 第一段階の推定量（設計行列を持つ）は結果に変えて手放す。`IVResult`が持つのは結果だけで、
-    // `first_stage()`の戻り値にも、pickleの状態にもそのまま使える。
-    let first_stage: Vec<(String, OLSResult)> = first_stage
+    //
+    // 第一段階の推定量（設計行列を持つ）は、内生変数ごとに結果へ変えてすぐ手放す（内生変数の数だけ
+    // 設計行列を同時に持たない）。`IVResult`が持つのは結果だけで、`first_stage()`の戻り値にも、
+    // pickleの状態にもそのまま使える。
+    let (first_stage_with_df, weak_instrument_f_statistics) = compute_first_stage_with(
+        &input,
+        &cov_type,
+        options.confidence_level,
+        |_, estimator| {
+            let df_resid = estimator.df_resid();
+            (
+                ols_estimator_to_result(&estimator, cov_type_name.clone()),
+                df_resid,
+            )
+        },
+    )
+    .map_err(iv_error_to_pyerr)?;
+    let weak_instrument_f_df = first_stage_with_df
+        .first()
+        .map(|(_, (_, df_resid))| (input.k_instruments(), *df_resid));
+    let first_stage: Vec<(String, OLSResult)> = first_stage_with_df
         .into_iter()
-        .map(|(name, estimator)| {
-            let result = ols_estimator_to_result(&estimator, cov_type_name.clone());
-            (name, result)
-        })
+        .map(|(name, (result, _))| (name, result))
         .collect();
 
     let shared = SharedFit {
@@ -111,6 +128,7 @@ fn fit_frame(
         weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
         weak_instrument_f_df,
         first_stage,
+        names,
     };
 
     if let Some(gmm) = plan.gmm {
@@ -176,6 +194,14 @@ struct SharedFit {
     weak_instrument_f_statistics: HashMap<String, f64>,
     weak_instrument_f_df: Option<(usize, usize)>,
     first_stage: Vec<(String, OLSResult)>,
+    names: RetainedNames,
+}
+
+/// 診断のメソッドが`IvInput`を作り直すために結果が保持する列名（`y`は`dep_var_name`）。
+struct RetainedNames {
+    x_exog: Vec<String>,
+    x_endog: Vec<String>,
+    instruments: Vec<String>,
 }
 
 /// `IVResult`のフィールドのうち、`estimator`によって値の出どころや意味が変わるもの
@@ -248,5 +274,10 @@ fn build_result<E: IvEstimate>(
         weak_instrument_f_df_num: shared.weak_instrument_f_df.map(|(num, _)| num),
         weak_instrument_f_df_denom: shared.weak_instrument_f_df.map(|(_, denom)| denom),
         first_stage: shared.first_stage,
+        source_data: None,
+        options: None,
+        x_exog: shared.names.x_exog,
+        x_endog: shared.names.x_endog,
+        instruments: shared.names.instruments,
     }
 }

@@ -7,8 +7,8 @@ module only provides the Python-facing API shape for polars DataFrames:
 the estimation settings.
 
 `FEOptions` is re-exported as-is from `_lib`. The fixed effects
-themselves (`α_i`, `γ_t`) come from the separate method
-`FEResults.fixed_effects()`. There is no `summary()`: results are
+themselves (`α_i`, `γ_t` and the effects of further columns) come from
+the separate method `FEResults.fixed_effects()`. There is no `summary()`: results are
 returned as structured data.
 """
 
@@ -34,10 +34,12 @@ __all__ = ["FE", "FEOptions", "FEResults"]
 class FE:
     """Fixed effects (within) panel regression estimator.
 
-    Supports one-way and two-way fixed effects, selected by the number
-    of columns in `effects`: one column (the entity identifier) for
-    one-way effects, two columns (the entity identifier, then the time
-    identifier) for two-way effects.
+    Supports one-way, two-way and higher-dimensional fixed effects,
+    selected by the number of columns in `effects`: one column (the
+    entity identifier) for one-way effects, two columns (the entity
+    identifier, then the time identifier) for two-way effects, and three
+    to five columns for higher-dimensional effects (for example firm,
+    year and industry).
 
     Args:
         data: A polars DataFrame containing the dependent variable,
@@ -47,17 +49,21 @@ class FE:
         y: Column name of the dependent variable.
         x: List of column names of the independent variables. Must
             contain at least one column name.
-        effects: List of one or two column names that define the fixed
+        effects: List of one to five column names that define the fixed
             effects. The first is the entity (individual/panel unit)
-            identifier; the optional second is the time period,
-            which makes the model two-way (balanced panels only). The
-            order matters: the first column is the default cluster key,
-            and the first period of the second column (in time order)
-            is the reference period of `fixed_effects()`. Swapping the
+            identifier; the optional second is the time period, which
+            makes the model two-way; the optional third to fifth are
+            further grouping columns of the same kind as the first. The
+            same combination of values may repeat in several rows.
+            Two-way effects on an unbalanced panel, and three or more
+            columns, are estimated by alternating projections. The order
+            matters: the first column is the default cluster key, and
+            the first period of the second column (in time order) is
+            the reference period of `fixed_effects()`. Swapping the
             columns leaves the coefficients unchanged.
         options: Estimation options. Defaults to `FEOptions()`
             (`cov_type="cluster"` on the first column of `effects`,
-            confidence_level=0.95) when omitted.
+            `confidence_level=0.95`) when omitted.
 
     Examples:
         >>> import polars as pl
@@ -92,6 +98,16 @@ class FE:
         {'id': 4, 't': 3}
         >>> list(two_way.fixed_effects())
         ['id', 't']
+
+        Three to five columns add further sets of effects, here an
+        industry:
+
+        >>> panel = panel.with_columns(industry=pl.Series(["p", "q"] * 6))
+        >>> three_way = FE(
+        ...     panel, y="y", x=["x1"], effects=["id", "t", "industry"]
+        ... ).fit()
+        >>> three_way.n_groups
+        {'id': 4, 't': 3, 'industry': 2}
     """
 
     def __init__(
@@ -125,7 +141,7 @@ class FE:
 
                 - `x` is empty, a column is missing, or a column
                   contains missing values, NaN or infinity.
-                - `effects` is empty or has more than two columns, or
+                - `effects` is empty or has more than five columns, or
                   `y`, `x` and `effects` overlap, or `dk_time` equals
                   `y` or the first column of `effects`.
                 - There are insufficient observations, or
@@ -134,31 +150,33 @@ class FE:
                   FE).
                 - `cluster`, `dk_time` or `dk_bandwidth` is given with
                   a `cov_type` that does not use it, or
-                  `cov_type="dk"` is requested without `dk_time`.
-                - A two-way model (two columns in `effects`) is fitted
-                  on an unbalanced panel.
+                  `cov_type="dk"` is requested without `dk_time` (the
+                  time periods are never taken from `effects`).
                 - A group of a column in `effects` has a single
                   observation.
                 - An explanatory variable has zero variance after the
                   within transformation, or the outcome has no variation
                   left after the fixed effects are removed.
-                - `cov_type="dk"` without `dk_time` (the time periods
-                  are never taken from `effects`).
                 - `cov_type="dk"` with no more unique `dk_time` periods
                   than regressors: the Driscoll-Kraay covariance has
                   rank at most `T - 1` (`T` periods), so the F-test of
                   the slopes cannot be computed.
                 - `cov_type="dk"` with 2 `dk_time` periods, or
                   `cov_type="cluster"` with 2 clusters, where every
-                  entity (with two-way effects, every time period) is
+                  group of at least one column in `effects` is
                   observed exactly once in each: the covariance is then
                   identically zero.
+                - `cov_type="hc2"` or `"hc3"` when the groups of all the
+                  columns in `effects` except the one with the most
+                  groups total more than 3000 (unless the effects form
+                  a balanced two-way grid).
 
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
-                matrix, or a perfect fit of the within regression:
-                residuals zero up to rounding). A subclass of
-                `RuntimeError`.
+                matrix, a perfect fit of the within regression:
+                residuals zero up to rounding, or alternating
+                projections that did not converge within `max_iter`).
+                A subclass of `RuntimeError`.
         """
         raw = _lib.fit_fe(
             self._data, self._y, self._x, self._effects, self._options
@@ -289,18 +307,19 @@ class FEResults:
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - G1 - k` for one-way,
-        `n - G1 - G2 + 1 - k` for two-way, where `G1` and `G2` are the
-        group counts of the first and second column of `effects`, as in
-        `n_groups`)."""
+        """Residual degrees of freedom: `n - df_model`, where `df_model`
+        is the model degrees of freedom below (`n - G1 - k` for
+        one-way, `n - G1 - G2 + 1 - k` for two-way, and in general
+        `n - k - sum(G) + (number of columns - 1)`, where the `G` are
+        the group counts in `n_groups`)."""
         return self._raw.df_resid
 
     @property
     def df_model(self) -> int:
         """Model degrees of freedom: the `k` slope coefficients plus the
         absorbed fixed effects (`k + G1` for one-way, `k + G1 + G2 - 1`
-        for two-way, where `G1` and `G2` are the group counts of the
-        first and second column of `effects`, as in `n_groups`). It is
+        for two-way, and in general `k + sum(G) - (number of columns -
+        1)`, where the `G` are the group counts in `n_groups`). It is
         used for the degrees of freedom of the inference (`df_resid = n
         - df_model`) and for the information criteria; the number of
         slope coefficients is `len(param_names)`."""
@@ -310,10 +329,8 @@ class FEResults:
     def n_groups(self) -> dict[str, int]:
         """Number of groups (unique values) of each column in
         `effects`, keyed by column name in the order given: one entry
-        for a one-way model, two for a two-way model. Two-way requires
-        a balanced panel, so the count of the second column equals the
-        number of observations per group of the first. For example
-        `{"id": 3, "t": 2}`."""
+        for a one-way model, two for a two-way model, and so on. For
+        example `{"id": 3, "t": 2}`."""
         return self._raw.n_groups
 
     @property
@@ -408,20 +425,32 @@ class FEResults:
 
     def fixed_effects(self) -> dict[str, dict[str, float]]:
         """The fixed effects themselves (`α_i` for the first column of
-        `effects`, `γ_t` for the second), recovered post-hoc from the
-        fitted coefficients.
+        `effects`, `γ_t` for the second, and one effect per group of
+        each further column), recovered post-hoc from the fitted
+        coefficients.
 
         Always a `dict[str, dict[str, float]]` keyed by the column
         names in `effects`, then by group (the value of the column as a
-        string): one entry for a one-way model, two for a two-way
-        model. `α_i`/`γ_t` are not individually identified in the
-        two-way case, so `γ_t` of the first period in time order (the
-        order of the values of the second column) is fixed to 0 and
-        `α_i` absorbs the overall level. The dictionary of the second
-        column lists the periods in time order.
+        string): one entry per column of `effects`.
+
+        The effects of the different columns are not individually
+        identified, so the first column absorbs the overall level and
+        one reference group of every other column is fixed to 0:
+
+        - the second column: its first period in time order (the order
+          of its values);
+        - any further column: its first group in the order of the
+          values written as text (so `"10"` comes before `"2"`, even
+          for an integer column).
+
+        On an unbalanced panel whose groups form several disconnected
+        sets, the reference is chosen in each connected set. If the
+        groups of one column lie inside those of another, only the sum
+        of the effects of a row is identified. The dictionary of the
+        second column lists the periods in time order.
         `fixest::fixef()` chooses its own reference levels, so its
-        values for the time effects can differ from these by a
-        constant.
+        values can differ from these by a constant in each column after
+        the first.
 
         Returns:
             The fixed effects, shaped as described above. The group key

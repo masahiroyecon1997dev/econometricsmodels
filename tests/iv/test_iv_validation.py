@@ -26,6 +26,7 @@ from _errors import raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
+    assert_unit_change_invariant,
     hac_time_for,
     with_cluster_groups,
     with_row_time,
@@ -1463,68 +1464,53 @@ def test_endogenous_regressor_that_is_a_function_of_exogenous_has_a_perfect_firs
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    第一段階回帰の傾き係数の同時共分散部分行列がスケール比の2乗相当の
-    条件数を持ち倍精度浮動小数点の限界を超えて数値的に特異になり、
-    第一段階の`ComputationError`（`MATRIX_NEAR_SINGULAR`、
-    `matrix="COEFFICIENT_COVARIANCE"`、`stage="FIRST_STAGE"`）になる
-    （実測確認済み、OLSの同名テストと同じ原理）。
-    `test_perfect_multicollinearity_raises_computation_error`と同様、数値比較は
-    せずエラーパスのみ確認する。`cov_type`は`LINEARMODELS_COV_TYPES`（hc2/hc3は
-    エラーパスの網羅としては不要）で、cov_typeによらず第一段階回帰が特異になる。
+def test_scale_variance_is_invariant_to_the_units(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体F統計量・p値になり、係数と標準誤差は列の倍率に従う。
+    第一段階回帰（傾き係数の分散の比は1e18を超える）も全体F検定が相関スケール化した
+    部分行列で判定するため、単位に依らない（OLSの同名テストと同じ原理）。`cov_type`は
+    `LINEARMODELS_COV_TYPES`（hc2/hc3はここでは不要）。
     """
-    df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
+    df = with_row_time(pl.read_csv(DATA_DIR / "iv_scale_variance.csv"))
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="FIRST_STAGE",
-        endog_name="endog1",
-    ):
-        IV(
-            with_row_time(df),
+    assert_unit_change_invariant(
+        lambda d: IV(
+            d,
             y="y",
             x_exog=["x1", "x2"],
             x_endog=["endog1"],
             instruments=["z1", "z2"],
             options=options,
-        ).fit()
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("wald_statistic", "wald_p_value"),
+    )
 
 
-def test_scale_variance_cluster_raises_computation_error():
-    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
-    `LINEARMODELS_COV_TYPES`のパラメトライズには含められず、専用テストとして確認する
-    （OLS`test_ols_validation.py::test_scale_variance_cluster_raises_
-    computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由）。
-    均等な疑似グループ（行番号%10、
-    `G=10`、各グループ50件）を使う——第一段階回帰の`q`（`x_exog`2列+
-    `instruments`2列=4）より十分大きく、
-    `test_cluster_count_at_most_slopes_raises_validation_error`が
-    確認するクラスター数不足の`ValidationError`（第一段階の`q=3`〔`x_exog`
-    〔x1〕+`instruments`〔z1,z2〕〕相当）ではなく、傾き係数の共分散部分行列の
-    条件数超過による`ComputationError`（`MATRIX_NEAR_SINGULAR`、
-    `matrix="COEFFICIENT_COVARIANCE"`、`stage="FIRST_STAGE"`）が発生することを
-    確認する。
+def test_scale_variance_cluster_is_invariant_to_the_units():
+    """`cluster`も上記と同じ。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
+    専用テストとして確認する（OLS`test_ols_validation.py`の同名テストと同じ理由）。
+    均等な疑似グループ（行番号%10、`G=10`、各グループ50件）を使う。第一段階回帰の`q`
+    （`x_exog`2列+`instruments`2列=4）より十分大きい。
     """
-    df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
-    df = with_cluster_groups(df, 10)
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "iv_scale_variance.csv"), 10
+    )
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="FIRST_STAGE",
-        endog_name="endog1",
-    ):
-        IV(
-            df,
+    assert_unit_change_invariant(
+        lambda d: IV(
+            d,
             y="y",
             x_exog=["x1", "x2"],
             x_endog=["endog1"],
             instruments=["z1", "z2"],
             options=options,
-        ).fit()
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("wald_statistic", "wald_p_value"),
+    )
 
 
 def test_gmm_raise_on_non_convergence_true_raises_computation_error(

@@ -21,10 +21,12 @@ from _assertions import assert_close
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -105,6 +107,18 @@ def _fe(df, **options):
     ).fit()
 
 
+def _fe_iv(df, **options):
+    return FEIV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+        options=FEIVOptions(**options),
+    ).fit()
+
+
 def _re(df, **options):
     return RE(
         df, y="y", x=X, effects=["entity"], options=REOptions(**options)
@@ -120,6 +134,7 @@ FITS = {
     "TobitResults": _tobit,
     "IVResults": _iv,
     "FEResults": _fe,
+    "FEIVResults": _fe_iv,
     "REResults": _re,
 }
 

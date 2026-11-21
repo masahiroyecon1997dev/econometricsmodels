@@ -11,6 +11,9 @@ import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import (
+    EXTENSION_DTYPES,
+    NESTED_LOOKALIKE_DTYPES,
+    NESTED_UINT128_DTYPES,
     UNUSED_COLUMN_DTYPES,
     N,
     dtype_id,
@@ -21,11 +24,13 @@ from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     Logit,
     LogitOptions,
@@ -52,6 +57,18 @@ FITS = {
     "Tobit": lambda d: Tobit(d, "yc", ["x1"]).fit(),
     "IV": lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "z2"]).fit(),
     "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
+    "FEIV": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    ).fit(),
+    "FEIV_GMM": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(estimator="gmm"),
+    ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
 
@@ -332,27 +349,23 @@ def test_new_data_accepts_boolean_and_dummy_columns(
 @pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("method", list(NEW_DATA_METHODS))
 @pytest.mark.parametrize(
-    "dtype",
+    ("dtype", "label"),
     [
-        pl.Date,
-        pl.Datetime,
-        pl.Struct({"a": pl.Int64}),
-        pl.Categorical,
-        pl.UInt128,
-        pl.List(pl.UInt128),
+        (pl.Date, "Date"),
+        (pl.Datetime, "Datetime"),
+        (pl.Struct({"a": pl.Int64}), "Struct"),
+        (pl.Categorical, "Categorical"),
+        (pl.Enum(["UInt128", "b"]), "Enum"),
+        (pl.UInt128, "UInt128"),
+        *NESTED_UINT128_DTYPES,
+        *NESTED_LOOKALIKE_DTYPES,
+        *EXTENSION_DTYPES,
     ],
-    ids=str,
+    ids=lambda v: str(v) if not isinstance(v, str) else None,
 )
-def test_new_data_rejects_non_numeric_dtype(frame, method, path, dtype):
+def test_new_data_rejects_non_numeric_dtype(frame, method, path, dtype, label):
     result = NEW_DATA_METHODS[method](frame)
     new = _new_data().with_columns(unused_column(dtype).head(3).alias("x1"))
-    label = {
-        "Date": "Date",
-        "Datetime": "Datetime",
-        "Categorical": "Categorical",
-        "UInt128": "UInt128",
-        "List(UInt128)": "List",
-    }.get(str(dtype), "Struct")
 
     with raises_error(
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,

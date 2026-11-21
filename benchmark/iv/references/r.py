@@ -92,6 +92,7 @@ def run_momentfit_r(
     *,
     cluster: str | None = None,
     hac_lag: int | None = None,
+    gmm_type: str | None = None,
 ) -> dict:
     """`run_momentfit.R` を呼び、GMMの係数・標準誤差・Hansen Jを得る。
 
@@ -106,6 +107,8 @@ def run_momentfit_r(
             （重みと共分散で共用）。未指定なら本実装の自動選択式
             （`hac_auto_lag(n)`、`n`はCSVの行数）。使ったラグは結果の`hac_lag`に
             残る。どちらもhacでないときは無視され、結果に`hac_lag`は入らない。
+        gmm_type: 推定方式。`None`（2段階）・`"onestep"`・`"iterated:<回数>"`
+            （初期推定を数えた推定の回数）。
     """
     lag = (
         resolve_hac_lag(csv_path, hac_lag)
@@ -116,6 +119,8 @@ def run_momentfit_r(
         cluster if cluster is not None else "NA",
         str(lag) if lag is not None else "NA",
     ]
+    if gmm_type is not None:
+        extra.append(gmm_type)
     raw = run_r(
         _GMM_R_SCRIPT,
         csv_path,
@@ -130,3 +135,43 @@ def run_momentfit_r(
     if lag is not None:
         result["hac_lag"] = lag
     return result
+
+
+_C_STAT_R_SCRIPT = Path(__file__).resolve().parent / "run_momentfit_c_stat.R"
+
+
+def run_momentfit_c_stat_r(
+    csv_path: Path,
+    formula: str,
+    weight_type: str,
+    tested: list[str],
+    *,
+    cluster: str | None = None,
+    hac_lag: int | None = None,
+) -> dict:
+    """`run_momentfit_c_stat.R` を呼び、C統計量（difference-in-Hansen）を得る。
+
+    Args:
+        csv_path: データ CSV。
+        formula: `y ~ x_exog + x_endog | x_exog + 検定する内生変数 + instruments`
+            （`|`の右が検定前の全モーメント条件）。
+        weight_type: classical / robust / cluster / hac。
+        tested: 外すモーメント条件の列名（`|`の右の列名。検定する内生変数と
+            除外操作変数）。
+        cluster: `weight_type="cluster"` のときのグループ列名。
+        hac_lag: `weight_type="hac"` のときのラグ数。
+
+    Returns:
+        `statistic`・`p_value`・`df`・`j_with_tested`・`j_without_tested`。
+    """
+    return run_r(
+        _C_STAT_R_SCRIPT,
+        csv_path,
+        formula,
+        weight_type,
+        extra_args=[
+            ",".join(tested),
+            cluster if cluster is not None else "NA",
+            str(hac_lag) if hac_lag is not None else "NA",
+        ],
+    )

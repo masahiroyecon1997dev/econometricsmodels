@@ -19,6 +19,7 @@ from _errors import raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
+    assert_unit_change_invariant,
     name_collision_frame,
     with_cluster_groups,
     with_row_time,
@@ -478,10 +479,11 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     構造的に特異になる。GもqもデータからR行列計算なしで即座に判定できるため、
     `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
     G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
-    G>qでも悪条件で数値的にほぼ特異なケースは`ComputationError`が
-    backstop（`cov_type="cluster"`は`cluster`列の指定が別途必要なため専用の
-    `test_scale_variance_cluster_raises_computation_error`で確認、
-    他のcov_typeは`test_scale_variance_raises_computation_error`）。
+    G>qでも準多重共線性で数値的にほぼ特異なケースは`ComputationError`が
+    backstop（`tests/cross_method/test_unit_invariance.py`で固定）。列の単位が極端に
+    違うだけでは失敗しない（`cov_type="cluster"`は`cluster`列の指定が別途必要なため専用の
+    `test_scale_variance_cluster_is_invariant_to_the_units`、他のcov_typeは
+    `test_scale_variance_is_invariant_to_the_units`）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
@@ -607,44 +609,39 @@ def test_perfect_multicollinearity_raises_computation_error():
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（発見・原因調査済み）。`wald_f_test`が固有値分解による相対閾値判定で検出し、
-    全cov_typeで`ComputationError`（`MATRIX_NEAR_SINGULAR`、
-    `matrix="COEFFICIENT_COVARIANCE"`）になる（classicalも含む。傾き係数の
-    共分散部分行列自体は`cov_type`によらず同じ条件数を持つため）。
-    perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。
+def test_scale_variance_is_invariant_to_the_units(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体F統計量・p値になり、係数と標準誤差は列の倍率に従う。
+    傾き係数の分散の比は1e18を超えるが、全体Wald/F検定は相関スケール化した部分行列で
+    判定するため、単位に依らない（classicalを含む全cov_type）。真の準共線で失敗する
+    経路は`tests/cross_method/test_unit_invariance.py`が固定する。
     """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    df = with_row_time(pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv"))
     kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
-    ):
-        OLS(
-            with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
-        ).fit()
+    assert_unit_change_invariant(
+        lambda d: OLS(d, y="y", x=["x1", "x2", "x3"], options=options).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
-def test_scale_variance_cluster_raises_computation_error():
-    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
-    のdocstring参照）。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
-    `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
-    均等な疑似グループ（行番号%10、
-    `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
-    ではなく、傾き係数の共分散部分行列の条件数超過による
-    `ComputationError`（`MATRIX_NEAR_SINGULAR`、
-    `matrix="COEFFICIENT_COVARIANCE"`）が発生することを確認する。
+def test_scale_variance_cluster_is_invariant_to_the_units():
+    """`cluster`も上記`test_scale_variance_is_invariant_to_the_units`と同じ。
+    `cov_type="cluster"`は`cluster`列の指定が別途必要なため`COV_TYPES`パラメトライズには
+    含められず、専用テストとして確認する。均等な疑似グループ（行番号%10、`G=10>q=3`）を使う。
     """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    df = with_cluster_groups(df, 10)
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv"), 10
+    )
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
-    ):
-        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    assert_unit_change_invariant(
+        lambda d: OLS(d, y="y", x=["x1", "x2", "x3"], options=options).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
 # ── 例外クラスの継承 ──────────────────────────────────────────────────

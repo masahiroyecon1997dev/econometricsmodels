@@ -1,0 +1,504 @@
+//! 固定効果つきGMM（FE-GMM）の推定量`FeGmmEstimator`の点推定。
+//!
+//! 固定効果を除いた（within変換した）データへのGMMで、構造式
+//! `y = X_exog β_exog + X_endog β_endog + 固定効果 + ε`を推定する。モーメント条件は
+//! `E[z̃_it ε̃_it] = 0`（`Z̃ = [x̃_exog, z̃]`、`z̃`は変換後の操作変数）。入力（`FeIvInput`）・固定効果の方向
+//! （`FeEffects`）・within変換は`FeTwoSlsEstimator`と共有する（`prepare.rs`）。定数項は持たない。
+//!
+//! # 範囲
+//!
+//! 点推定（係数・構造残差・点推定に使った重み行列`S`・反復回数・収束）、`cov_type`別の標準誤差・
+//! z統計量・p値・信頼区間・傾き係数の同時Wald χ²検定、R²（within・between・overall）、Hansen J過剰識別検定、
+//! 第一段階・弱操作変数診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）・Wu-Hausman内生性検定、
+//! 固定効果自体の復元（`fixed_effects()`）。第一段階・弱操作変数診断・Wu-Hausmanは第一段階（と最小二乗の補助回帰）
+//! だけに依存し、GMMの点推定にも重みにも依らない（`cov_type`は`fit`のもの）。同じデータ・`cov_type`なら
+//! `FeTwoSlsEstimator`と同じ値になる（`common/`の共有実装）。
+//! 内生性・操作変数の直交性の検定（C統計量）は、推定量のメソッドではなく独立した事後診断の関数
+//! `fe_gmm_c_statistic`（`gmm/c_statistic.rs`）で、`fit()`では計算しない。
+//!
+//! # `fit`のパイプライン
+//!
+//! 1. `gmm_type`を共有の`GmmType`に直し、`max_iter`・`tol`の範囲を検証する（`GmmType::validate`）。
+//! 2. `FeTwoSlsEstimator`と同じ前段（`prepare_within`）: 操作変数の数・singleton・定数列の検査、全列の
+//!    within変換（1回だけ）、自由度の検証（`n > k + neffects`、`n > l + neffects`）、変換後に分散が
+//!    残らない列の検査。
+//! 3. 重み行列の検証（`weight_type`が`Cluster`のとき、クラスター数`G`と操作変数の数`l`の関係。
+//!    `iv::gmm`と同じ`shared::gmm_weight::validate_weight_type`）。重みは`FeWeightType`（`Classical`・`Robust`・`Cluster`）で、
+//!    行単位のNewey-Westの重み（`Hac`）は型に無い。
+//! 4. 初期推定`W₀ = (Z̃'Z̃)⁻¹`（2SLSと同じ点推定）。構造残差が丸め誤差の範囲で0なら完全適合。
+//! 5. 方式（`OneStep`・`TwoStep`・`Iterated`）に応じて「直前の残差から`S`を作り直して再推定」を繰り返す
+//!    （`shared::gmm_iteration::gmm_iterate`。`iv::gmm`と同じコア）。
+//! 6. 標準誤差: `cov_type`に応じたモーメント条件の分散`Ω̂`（`panel_moment_covariance`）を作り、サンドイッチ
+//!    `B⁻¹(X̃'Z̃WΩ̂WZ̃'X̃)B⁻¹`（`B = X̃'Z̃WZ̃'X̃`、`W = S_used⁻¹`は点推定に使った重み。
+//!    `shared::gmm::GmmSolution::covariance`。白色化した`Z̃`から作った`Ω̃`を渡す）を求める。`cov_type`と重みは独立の選択で、一般形を常に使う。
+//!    正規分布の推論表と、傾き係数の同時Wald χ²検定（自由度`k`）を計算する。
+//! 7. R²: 構造残差ベース。within = `1 − e'e/ỹ'ỹ`、between・overallは`β̂`と実際の`X`で`FeEstimator`と同じ式。
+//! 8. Hansen J過剰識別検定（`len(instruments) > len(x_endog)`のとき。`gmm/hansen_j.rs`）。
+//! 9. 第一段階（内生変数ごと。`common/first_stage.rs`の`run_first_stages`。FE-2SLSと共有）・弱操作変数の部分F、
+//!    Wu-Hausman（`common/wu_hausman.rs`）。**点推定・共分散・Waldの後**に回す（GMMのエラーを先に返す）。点推定と
+//!    共分散に使った行列（`Z̃`・`X̃`・`ỹ`・`solution`・`Ω̃`）は、ピークメモリを増やさないよう第一段階の前に手放す。
+//!    第一段階が失敗する入力（内生変数を操作変数が完全に説明するなど）は、2SLSやIVのGMMと同じく
+//!    `stage=FIRST_STAGE`つきで`fit`全体を失敗させる。
+//!
+//! # `cov_type`と自由度
+//!
+//! `cov_type`は`FeTwoSlsEstimator`と同じ`FeCovType`（Classical・HC1〜HC3・Cluster・Dk）。`Ω̂`の小標本補正も
+//! FE-2SLSと同じ（`df_resid = n − k − neffects`、クラスターの`K`は`fe_cluster_k_correction`、
+//! DKは`T/(T−1)`と`K = df_model`）だが、`Ω̂`は変換後の操作変数`Z̃`のスコアに掛ける。HC2・HC3のレバレッジは
+//! `Z̃`の素のレバレッジに吸収した効果のレバレッジを足したもの（ダミーを操作変数に入れたときのハット行列の
+//! 対角と一致する）。推論は正規分布・χ²（`iv::gmm`と同じ。FE-2SLSのt・Fとは違う）で、クラスター数・時点数が
+//! `k`以下ならWald検定が定義できないので`FeTwoSlsEstimator`と同じ検証で弾く。
+//! `OneStep`と`Classical`重みの2段階・反復は2SLSと同じ係数で、`Classical`・`Hc1`・`Cluster`・`Dk`の共分散も
+//! `FeTwoSlsEstimator`と一致する（`Hc2`・`Hc3`は、`X̂`と`Z̃`でレバレッジが違うので一致しない）。
+//!
+//! # `Robust`重みの限界
+//!
+//! within変換した誤差`ε̃_it`は個体内で相関し、`E[ε̃_it²]`が`σ_it²`だけでなく同じ個体の他の時点の
+//! `σ_is²`にも依存する（等分散でも`σ²(1 − 1/T)`に縮む）。`Robust`の`S = Σ ẽ²z̃z̃'`はこれを無視するので、
+//! 小`T`で偏る: `S`が過小になり、係数の効率性とHansen Jが影響を受ける（Hansen Jは等分散・iidの下でも
+//! 過剰に棄却する）。`Classical`の`S`は`σ̂²`の分母を`n − neffects`にして直せるが（Hansen J）、`Robust`は
+//! 不均一分散・個体内相関の下では同じ補正でも直らないので補正しない。係数の一致性は保たれる。固定効果つきの
+//! 既定の重みが個体でのクラスターなのはこのため。`Robust`は小`T`では勧めない。
+//!
+//! # `s_used`の尺度とHansen J
+//!
+//! `S`は`n`で割らない生の和（`iv::gmm`と同じ）で、`Classical`・`OneStep`の`S`は`σ̂²・Z̃'Z̃`、`σ̂² = e'e/n`
+//! （`n`は観測数）。`s_used()`はこの点推定に使った`S`をそのまま返す。Hansen Jは`J = (Z̃'ẽ)'S⁻¹(Z̃'ẽ)`で、
+//! `Classical`・`OneStep`のときだけ`S`を`n/(n − neffects)`倍して`σ̂² = e'e/(n − neffects)`にする
+//! （within変換後の残差は`σ²(n − neffects)`程度しか持たず、`n`で割ると`J`が膨らんで小`T`で過剰に棄却する。
+//! FE-2SLSのSarganと同じ理由で、`Classical`重みの`J`はSarganに一致する）。`Robust`・`Cluster`の`S`は補正
+//! しない（`Cluster`は、クラスターが個体を含むとき（個体自身か、個体を入れ子に含むより粗い列）`Σ_t z̃ẽ = Σ_t z̃ε`
+//! （`z̃`は個体内で和0）で補正が要らない。個体と交差するクラスター（時点など）では成り立たない。`Robust`は上の
+//! とおり小`T`で偏り、`n/(n − neffects)`では直らない）。
+//!
+//! # ファイル構成
+//!
+//! - `gmm/fit.rs`: `fit_fe_gmm`（上のパイプライン）
+//! - `gmm/hansen_j.rs`: `fe_hansen_j`（Hansen J検定）
+//! - `gmm/c_statistic.rs`: `fe_gmm_c_statistic`（C統計量。事後診断。within変換し直して`shared::gmm_c_statistic`を呼ぶ。
+//!   2SLSの`c_stat()`も、`engine_pybind`が`cov_type`の系統から決めた`FeWeightType`で同じ関数を呼ぶ）
+//! - `gmm/gmm_type.rs`: `FeGmmType`・`FeWeightType`（推定方式と重みの種類。`Hac`を持たない）
+//!
+//! 入力型・前段（`prepare_within`）・第一段階・弱操作変数診断・Wu-Hausmanは`common/`にあり、FE-2SLS（`two_sls.rs`）と共有する。
+
+use faer::Mat;
+
+use super::common::{
+    FeIvInput, FeWuHausmanTest, FirstStageWithin, WeakInstrumentView, structural_fe_input,
+};
+use crate::panel::common::PanelError;
+use crate::panel::fe::{
+    AbsorbedEffects, FeAbsorption, FeCovType, FeEffects, FeEstimator, FixedEffects,
+};
+use crate::shared::effective_f::EffectiveF;
+use crate::shared::kleibergen_paap::KleibergenPaap;
+use crate::shared::weak_instruments::CraggDonald;
+
+mod c_statistic;
+mod fit;
+mod gmm_type;
+mod hansen_j;
+
+pub use crate::shared::gmm_c_statistic::{CStatistic, CStatisticTarget};
+pub use c_statistic::fe_gmm_c_statistic;
+pub use gmm_type::{FeGmmType, FeWeightType};
+
+/// 固定効果つきGMMの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
+#[derive(Debug)]
+pub struct FeGmmEstimator {
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: FeGmmType,
+    cov_type: FeCovType,
+    /// 係数名（`x_exog`、`x_endog`の順）。
+    param_names: Vec<String>,
+    /// 構造式の係数`β̂`（k, 1）。
+    params: Mat<f64>,
+    /// 構造残差`ỹ − X̃β̂`（n, 1。within変換した空間）。
+    residuals: Mat<f64>,
+    /// 最終の係数に実際に使った重み行列`S`（l×l、`n`で割らない和）。
+    s_used: Mat<f64>,
+    n_iter: i64,
+    converged: bool,
+    df_model: usize,
+    df_resid: usize,
+    /// 吸収した効果の次元ごとの水準数（`effects`の順）。
+    n_groups: Vec<usize>,
+    dk_bandwidth_used: Option<usize>,
+    std_errors: Mat<f64>,
+    cov_params: Mat<f64>,
+    test_stats: Mat<f64>,
+    p_values: Mat<f64>,
+    conf_lower: Mat<f64>,
+    conf_upper: Mat<f64>,
+    /// 傾き係数の同時Wald χ²検定の`(統計量, p値)`（自由度`k`）。`k = 0`なら`None`。
+    wald: Option<(f64, f64)>,
+    r_squared_within: f64,
+    r_squared_between: f64,
+    r_squared_overall: f64,
+    /// Hansen J過剰識別検定。丁度識別、または内生変数が無いときは`None`。
+    hansen_j: Option<hansen_j::FeHansenJ>,
+    /// 弱操作変数診断が使う、第一段階のwithin変換済みの行列。内生変数が無ければ`None`。第一段階の
+    /// 推定量そのものは持たない（`fit_with_first_stages`が呼び出し側へ渡して手放す）。
+    first_stage_within: Option<FirstStageWithin>,
+    /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順。名前つき）。内生変数が無ければ空。
+    weak_instrument_f: Vec<(String, f64)>,
+    /// Wu-Hausman内生性検定。内生変数が無い、または補助回帰が診断だけの理由で失敗したときは`None`。
+    wu_hausman: Option<FeWuHausmanTest>,
+    /// 交互射影が`y`・`x_exog`・`x_endog`の列から引いた各次元の効果（構造式の列の順）。閉形式の
+    /// 1-wayとバランスな2-wayは`None`。`fixed_effects()`が使う。
+    absorbed: Option<AbsorbedEffects>,
+}
+
+impl FeGmmEstimator {
+    /// 固定効果つきGMMの点推定。契約はモジュールdocのパイプラインのとおり。
+    ///
+    /// `raise_on_non_convergence`が`true`で`gmm_type`が`Iterated`のとき、`max_iter`回以内に係数が収束
+    /// しなければエラーにする（`false`なら`converged() == false`のまま返す）。`cov_type`は標準誤差の
+    /// 種類（重みとは独立）、`confidence_level`は信頼区間の水準。
+    ///
+    /// # Errors
+    /// - `Iterated`の`max_iter`・`tol`が範囲外なら`CommonError::InvalidGmmMaxIter`・`InvalidGmmTol`
+    ///   （`PanelError::Common`）
+    /// - 操作変数が内生変数より少なければ`PanelError::InsufficientInstruments`
+    /// - 2-wayで`effects`が1つなら`PanelError::TwoWayRequiresTime`
+    /// - singleton（`PanelError::SingletonGroup`）、生の値が全ての行で同じ列
+    ///   （`PanelError::RegressorConstant`は役割つき、被説明変数は`CommonError::OutcomeConstant`）、
+    ///   within変換後に分散がなくなる列（`PanelError::ZeroVarianceAfterDemeaning`は役割つき、被説明変数は
+    ///   `PanelError::OutcomeConstantWithinEntity`）
+    /// - 自由度が足りなければ`PanelError::InsufficientDegreesOfFreedom`（構造式を先に、次に操作変数）
+    /// - `Cluster`の重みで、クラスター列の長さが観測数と違う・クラスター数が足りないとき
+    ///   `CommonError::ClusterDimensionMismatch`・`InsufficientClusters`・
+    ///   `InsufficientClustersForWeightMatrix`（過剰識別は`G < l`、丁度識別は`G <= l`）
+    /// - 重み行列・`X̃'Z̃W Z̃'X̃`が数値的に特異なら`CommonError::NearSingularMatrix`
+    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（`FeTwoSlsEstimator`と同じ）
+    /// - `cov_type`の検証は`FeTwoSlsEstimator::fit`と同じ（クラスター数・時点数が`k`以下、2グループ退化、
+    ///   DKのバンド幅など）。Wald χ²検定が数値的に定義できなければ`PanelError::WaldTestFailed`（`stage=OVERALL_WALD_TEST`。DKの`T <= k`も同じ段階）
+    /// - Hansen Jの`S`が数値的に特異なら`CommonError::NearSingularMatrix`（点推定で反転成功済みなので到達しない）
+    /// - 第一段階の推定・部分F統計量の失敗（内生変数を操作変数が完全に説明して`PerfectFit`、設計行列の特異など）は、
+    ///   原因の`code`に`stage=FIRST_STAGE`を付けて返す。Wu-Hausmanの補助回帰が診断だけの理由（自由度不足・完全適合・
+    ///   特異など）で定義できないときは`None`にして`fit`は失敗させず、それ以外の失敗は`stage=WU_HAUSMAN_REGRESSION`つき
+    ///   （FE-2SLSと同じ）。第一段階とWu-Hausmanは点推定・共分散・Waldの後に回すので、GMMのエラーが先に返る
+    /// - 構造残差が丸め誤差の範囲で0なら`CommonError::PerfectFit`（完全適合。GMMに第二段階は無いので`stage`は付けない。`iv::gmm`と同じ）
+    /// - `Iterated`が収束せず`raise_on_non_convergence`なら`CommonError::GmmNonConvergence`
+    /// - 不均衡な2-wayと3次元以上で、交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
+    pub fn fit(
+        input: FeIvInput,
+        effects: FeEffects,
+        gmm_type: FeGmmType,
+        raise_on_non_convergence: bool,
+        cov_type: FeCovType,
+        confidence_level: f64,
+    ) -> Result<Self, PanelError> {
+        Self::fit_with_absorption(
+            input,
+            effects,
+            gmm_type,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+            &FeAbsorption::default(),
+        )
+    }
+
+    /// [`Self::fit`]に、交互射影の打ち切り設定を渡す。
+    ///
+    /// # Errors
+    /// [`Self::fit`]のエラーに加えて、`absorption`の値が範囲外なら`PanelError::InvalidTol`・
+    /// `PanelError::InvalidMaxIter`。第一段階の失敗は`fit`のエラーに含まれる。
+    pub fn fit_with_absorption(
+        input: FeIvInput,
+        effects: FeEffects,
+        gmm_type: FeGmmType,
+        raise_on_non_convergence: bool,
+        cov_type: FeCovType,
+        confidence_level: f64,
+        absorption: &FeAbsorption,
+    ) -> Result<Self, PanelError> {
+        fit::fit_fe_gmm(
+            input,
+            effects,
+            gmm_type,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+            absorption,
+            |_, _| (),
+        )
+        .map(|(estimator, _)| estimator)
+    }
+
+    /// [`Self::fit_with_absorption`]と同じ推定を、内生変数ごとの第一段階の`FeEstimator`
+    /// （`x̃_endog[j] ~ x̃_exog + 操作変数`のwithin回帰。`cov_type`は構造式と同じ。傾きのF検定は
+    /// しないので`f_statistic()`は`None`）を`consume`に渡して、その戻り値を（`x_endog`の順に）一緒に
+    /// 返す形で行う。`FeTwoSlsEstimator::fit_with_first_stages`と同じ契約。
+    ///
+    /// 第一段階の`FeEstimator`は、生の列・within行列・残差を持つので、内生変数の数だけ`fit`の終わりまで
+    /// 持つとピークメモリがその数に比例して増える。`consume`はそれを受け取って必要な量だけ残す
+    /// （`engine_pybind`は`FEResult`に変える）。
+    ///
+    /// # Errors
+    /// [`Self::fit_with_absorption`]と同じ。
+    #[allow(clippy::too_many_arguments)]
+    pub fn fit_with_first_stages<T>(
+        input: FeIvInput,
+        effects: FeEffects,
+        gmm_type: FeGmmType,
+        raise_on_non_convergence: bool,
+        cov_type: FeCovType,
+        confidence_level: f64,
+        absorption: &FeAbsorption,
+        consume: impl FnMut(&str, FeEstimator) -> T,
+    ) -> Result<(Self, Vec<T>), PanelError> {
+        fit::fit_fe_gmm(
+            input,
+            effects,
+            gmm_type,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+            absorption,
+            consume,
+        )
+    }
+
+    /// 弱操作変数診断が読む量の借用（診断の計算は`common/weak_instruments.rs`で、FE-2SLSと共有する）。
+    fn weak_view(&self) -> WeakInstrumentView<'_> {
+        WeakInstrumentView {
+            input: &self.input,
+            effects: self.effects,
+            cov_type: &self.cov_type,
+            n_groups: &self.n_groups,
+            dk_bandwidth_used: self.dk_bandwidth_used,
+            params: &self.params,
+            residuals: &self.residuals,
+            first_stage_within: self.first_stage_within.as_ref(),
+            weak_instrument_f: &self.weak_instrument_f,
+        }
+    }
+
+    /// 入力データ（within変換前）。
+    pub fn input(&self) -> &FeIvInput {
+        &self.input
+    }
+
+    /// 推定に使った固定効果の方向。
+    pub fn effects(&self) -> FeEffects {
+        self.effects
+    }
+
+    /// 推定方式。
+    pub fn gmm_type(&self) -> &FeGmmType {
+        &self.gmm_type
+    }
+
+    /// 係数名（`x_exog`、`x_endog`の順）。
+    pub fn param_names(&self) -> &[String] {
+        &self.param_names
+    }
+
+    /// 構造式の係数`β̂` (k, 1)。
+    pub fn params(&self) -> &Mat<f64> {
+        &self.params
+    }
+
+    /// 構造残差`ỹ − X̃β̂` (n, 1)。within変換した空間の値（`FeTwoSlsEstimator::residuals`と同じ）。
+    pub fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// 最終の係数に使った重み行列`S` (l×l)。`n`で割らない和で、尺度はモジュールdoc「`s_used`の尺度」のとおり。
+    pub fn s_used(&self) -> &Mat<f64> {
+        &self.s_used
+    }
+
+    /// 推定回数（`OneStep`は1、`TwoStep`は2、`Iterated`は実際の回数）。
+    pub fn n_iter(&self) -> i64 {
+        self.n_iter
+    }
+
+    /// 収束したか（`OneStep`・`TwoStep`は常に`true`）。
+    pub fn converged(&self) -> bool {
+        self.converged
+    }
+
+    /// モデル自由度`k + neffects`。
+    pub fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// 残差自由度`n − df_model`。
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// 吸収した効果の次元ごとの水準数（`effects`の順）。
+    pub fn n_groups(&self) -> &[usize] {
+        &self.n_groups
+    }
+
+    /// 観測数。
+    pub fn nobs(&self) -> usize {
+        self.input.nobs()
+    }
+
+    /// 推定に使った`cov_type`。
+    pub fn cov_type(&self) -> &FeCovType {
+        &self.cov_type
+    }
+
+    /// `Dk`のとき実際に使われたバンド幅。`Dk`以外では`None`。
+    pub fn dk_bandwidth_used(&self) -> Option<usize> {
+        self.dk_bandwidth_used
+    }
+
+    /// 標準誤差 (k, 1)。
+    pub fn std_errors(&self) -> &Mat<f64> {
+        &self.std_errors
+    }
+
+    /// 係数の分散共分散行列 (k, k)。
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
+    }
+
+    /// z統計量 (k, 1)。正規分布で検定する。
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// 両側p値 (k, 1)（正規分布）。
+    pub fn p_values(&self) -> &Mat<f64> {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限 (k, 1)。
+    pub fn conf_lower(&self) -> &Mat<f64> {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限 (k, 1)。
+    pub fn conf_upper(&self) -> &Mat<f64> {
+        &self.conf_upper
+    }
+
+    /// 傾き係数の同時Wald χ²検定の統計量（自由度`k`）。係数が無ければ`None`。
+    pub fn wald_statistic(&self) -> Option<f64> {
+        self.wald.map(|(statistic, _)| statistic)
+    }
+
+    /// 傾き係数の同時Wald χ²検定のp値。係数が無ければ`None`。
+    pub fn wald_p_value(&self) -> Option<f64> {
+        self.wald.map(|(_, p_value)| p_value)
+    }
+
+    /// within R²（構造残差ベース。`1 − e'e/ỹ'ỹ`。負や1を超える値もありうる）。
+    pub fn r_squared_within(&self) -> f64 {
+        self.r_squared_within
+    }
+
+    /// between R²（`β̂`と実際の`X`で`FeEstimator`と同じ式）。
+    pub fn r_squared_between(&self) -> f64 {
+        self.r_squared_between
+    }
+
+    /// overall R²（`β̂`と実際の`X`で`FeEstimator`と同じ式）。
+    pub fn r_squared_overall(&self) -> f64 {
+        self.r_squared_overall
+    }
+
+    /// Hansen J過剰識別検定の統計量（`J = (Z̃'ẽ)'S⁻¹(Z̃'ẽ)`）。丁度識別・内生変数なしは`None`。
+    pub fn hansen_j_statistic(&self) -> Option<f64> {
+        self.hansen_j.map(|test| test.statistic)
+    }
+
+    /// Hansen J検定のp値（`χ²(df)`の上側確率）。丁度識別・内生変数なしは`None`。
+    pub fn hansen_j_p_value(&self) -> Option<f64> {
+        self.hansen_j.map(|test| test.p_value)
+    }
+
+    /// Hansen J検定の自由度（`len(instruments) − len(x_endog)`）。丁度識別・内生変数なしは`None`。
+    pub fn hansen_j_df(&self) -> Option<usize> {
+        self.hansen_j.map(|test| test.df)
+    }
+
+    /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順）。除外操作変数`q`個の係数がゼロという制限の、
+    /// 等分散前提のネストF検定で、第一段階だけに依存する（GMMの重み・`cov_type`に依らない）。分母の自由度は
+    /// `n − l − neffects`（[`Self::weak_instrument_f_df`]）。内生変数が1個ならCragg-Donaldと一致する。
+    pub fn weak_instrument_f_statistics(&self) -> &[(String, f64)] {
+        &self.weak_instrument_f
+    }
+
+    /// 部分F統計量のF分布の自由度`(除外操作変数の数, n − l − neffects)`（`l = k_exog + k_instruments`）。
+    /// 内生変数が無ければ`None`。
+    pub fn weak_instrument_f_df(&self) -> Option<(usize, usize)> {
+        self.weak_view().weak_instrument_f_df()
+    }
+
+    /// Cragg-Donald Wald F統計量とStock-Yogoの臨界値（吸収した効果の分を自由度から引く。等分散前提で
+    /// `cov_type`に依らない）。第一段階だけに依存するので、`FeTwoSlsEstimator::cragg_donald`と同じ値になる。
+    ///
+    /// # Errors
+    /// 統計量が定義できないとき（内生変数が無い、内生変数が共線、第一段階が完全フィット、外生変数と
+    /// 除外操作変数の共線など）`PanelError::WeakInstrumentStatisticUndefined`。
+    pub fn cragg_donald(&self) -> Result<CraggDonald, PanelError> {
+        self.weak_view().cragg_donald()
+    }
+
+    /// `fit`に渡した`cov_type`に頑健なKleibergen-Paap統計量（rk LMとrk Wald F）。GMMの重みには依らない
+    /// （`cov_type`と重みは独立の選択）。
+    ///
+    /// # Errors
+    /// 両方とも定義できないとき（`Dk`で時点数が除外操作変数の数`− 内生変数の数 + 1`以下の場合を含む）
+    /// `PanelError::WeakInstrumentStatisticUndefined`。
+    pub fn kleibergen_paap(&self) -> Result<KleibergenPaap, PanelError> {
+        self.weak_view().kleibergen_paap()
+    }
+
+    /// `fit`に渡した`cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、Patnaik臨界値。内生変数が1個の
+    /// ときだけ定義される。`alpha`は臨界値の水準（0〜1）。
+    ///
+    /// # Errors
+    /// - 内生変数が1個でないとき`PanelError::EffectiveFEndogenousCount`、`alpha`が(0, 1)の外のとき
+    ///   `PanelError::AlphaOutOfRange`
+    /// - 統計量が定義できないとき`PanelError::WeakInstrumentStatisticUndefined`
+    pub fn effective_f(&self, alpha: f64) -> Result<EffectiveF, PanelError> {
+        self.weak_view().effective_f(alpha)
+    }
+
+    /// Wu-Hausman内生性検定の統計量（F）。内生変数が無いとき、または補助回帰が自由度不足・`v̂`の分散ゼロ・
+    /// 完全適合・特異などで検定できないときは`None`（構造式の推定結果とは無関係なので、`fit`は失敗しない）。
+    ///
+    /// 補助回帰は最小二乗なので、GMMの点推定・重みに依らず、`fit`に渡した`cov_type`の共分散でのWald検定。
+    /// 同じデータ・`cov_type`なら`FeTwoSlsEstimator::wu_hausman_statistic`と同じ値になる。
+    pub fn wu_hausman_statistic(&self) -> Option<f64> {
+        self.wu_hausman.map(|test| test.statistic)
+    }
+
+    /// Wu-Hausman内生性検定のp値。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_p_value(&self) -> Option<f64> {
+        self.wu_hausman.map(|test| test.p_value)
+    }
+
+    /// Wu-Hausman内生性検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_df(&self) -> Option<(usize, usize)> {
+        self.wu_hausman.map(|test| test.df)
+    }
+
+    /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する。構造式の`y`・実際の`X`・GMMの係数`β̂`から
+    /// `FeEstimator::fixed_effects`と同じ規約で計算する（`α_i = ȳ_i − x̄_i'β̂`、`X`は実際の内生変数。
+    /// `FeTwoSlsEstimator::fixed_effects`と同じ復元で、係数だけが違う）。構造式の`y`・`X`は、推定量が
+    /// 複製を持たないので、呼び出し時に`input`から組み立てる。
+    ///
+    /// # Errors
+    /// `input`が構築時に検証済みなので、通常は到達しない（`FeInput`の構築の失敗）。
+    pub fn fixed_effects(&self) -> Result<FixedEffects, PanelError> {
+        let structural = structural_fe_input(&self.input, &self.param_names)?;
+        Ok(crate::panel::fe::fixed_effects_of(
+            &structural,
+            self.effects,
+            &self.params,
+            self.absorbed.as_ref(),
+        ))
+    }
+}

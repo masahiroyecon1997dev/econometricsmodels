@@ -24,7 +24,7 @@ Note:
       実機確認済みで、`test_iv_crosscheck.py`が独立にクロスチェックする
       （`iv-spec.md`3.1節）。`engine`側の
       Rust単体テスト
-      （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
+      （`two_sls/cov/tests/reference.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
       して引き続き有効。
     - `wu_hausman_statistic`は`hac`を含む全cov_typeで`res.wooldridge_regression`
@@ -122,21 +122,16 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 _assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
-def _check_result(
-    res, ref: dict, label: str, *, rtol_wald: float = RTOL
-) -> None:
+def _check_result(res, ref: dict, label: str) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
 
-    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
-    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
-    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
     _assert_fields_close(res, ref, ("r_squared", "adj_r_squared"), label)
     assert_fields_close(
         res,
         ref,
         (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
         label,
-        rtol=rtol_wald,
+        rtol=RTOL,
         atol=ATOL,
     )
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
@@ -466,8 +461,8 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
     )
 
 
-# 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
-# `test_iv_validation.py`で確認する。
+# 完全な多重共線性（`ComputationError` パス）と、極端なスケール差でも失敗しないこと
+# （単位を揃えたデータと一致）は`test_iv_validation.py`で確認する。
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -552,8 +547,8 @@ def test_card_cluster_matches_linearmodels(fixtures):
     """実データのグループ列でのクラスターロバストSE。居住地域ダミー
     （`reg661`〜`reg669`）から作った9グループ（群の大きさ85〜627の不均衡）。
     均等な疑似グループ（行番号%10）だけでは見逃す、実データのグループ構造での確認。
-    Wald/F統計量だけ、クラスター共分散の条件数による丸め誤差のぶん緩い許容誤差を使う
-    （`_tolerances_iv.py`の`RTOL_WALD_CARD_CLUSTER`参照）。
+    直交座標の経路（`V = R⁻¹M̃R⁻ᵀ`）で共分散を求めるため、Wald/F統計量も他の統計量と同じ
+    許容誤差で比べる。
     """
     df = with_card_region(load_wooldridge_dataset("card"))
     options = IVOptions(cov_type="cluster", cluster=CARD_REGION_COLUMN)
@@ -570,5 +565,4 @@ def test_card_cluster_matches_linearmodels(fixtures):
         res,
         fixtures["wooldridge"]["card"]["cluster"],
         "card/cluster",
-        rtol_wald=TOLERANCES["iv_reference"]["rtol_wald_card_cluster"],
     )

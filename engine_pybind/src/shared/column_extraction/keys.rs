@@ -27,6 +27,9 @@ use crate::shared::errors::common_error_to_pyerr;
 /// - キーとして使えないdtype（`List`・`Struct`・`Time`・`Duration`・`Decimal`等）
 /// - 欠損値を含む
 /// - 浮動小数の列にNaN・無限大を含む（数値列と同じく自動では扱わない）
+///
+/// 本番の抽出関数は、これに加えて文字列・`Categorical`・`Enum`の空・空白だけのラベルも
+/// 拒否する（[`factorize_checked_key`]）。この参照実装はその検査を持たない。
 #[cfg(test)]
 pub fn extract_group_key_column(
     df: &DataFrame,
@@ -46,20 +49,75 @@ pub(crate) struct FactorizedKey {
 
 /// 検査済みのキー列`column`を、値そのもの（文字列・整数の内部表現・浮動小数のビット列）で
 /// ハッシュして仮コードに分解する。行ごとの`String`は作らない。
+///
+/// 文字列・`Categorical`・`Enum`のラベルが空文字列・空白だけ（`str::trim`で空になるもの）の
+/// ときは、[`reject_blank_labels`]で`ValidationError`にする。仮グループごとの代表値だけを
+/// 調べるので、列の全行を走査するのは該当があったときの件数の集計だけ。
+///
+/// # Errors
+/// 値の変換に失敗したとき（許可したdtypeでは起こらない想定）と、空・空白だけのラベルがあるとき。
 pub(crate) fn factorize_checked_key(
     name: &str,
     column: &Column,
+    source: ColumnSource<'_>,
 ) -> Result<FactorizedKey, ColumnExtractionError> {
     let (codes, first_rows) = factorize_key_column(name, column)?;
-    let first_rows: Vec<IdxSize> = first_rows.iter().map(|&row| row as IdxSize).collect();
+    let first_row_indices: Vec<IdxSize> = first_rows.iter().map(|&row| row as IdxSize).collect();
     let representatives = column
         .as_materialized_series()
-        .take(&IdxCa::from_vec("first_rows".into(), first_rows))
+        .take(&IdxCa::from_vec("first_rows".into(), first_row_indices))
         .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
+    reject_blank_labels(name, &codes, &first_rows, &representatives, source)?;
     Ok(FactorizedKey {
         codes,
         representatives,
     })
+}
+
+/// ラベルが空文字列・空白だけ（`str::trim`で空になるもの。Unicodeの空白文字を含む）の仮グループが
+/// あれば、`ValidationError`にする。文字列・`Categorical`・`Enum`だけが対象（数値・日時・真偽値の
+/// ラベルは空にならない）。
+///
+/// 空文字列は欠損値が書き換わって入ることが多く（nullを`""`に直す変換など）、1つのグループとして
+/// 扱うと、欠損したエンティティ・時点・クラスターが黙って1グループにまとまる。`"NA"`・`"null"`は
+/// 正当なラベル（`"NA"`はナミビアのISOコード）でありうるので拒否しない。前後に空白のあるラベル
+/// （`"A "`）も、空白だけでなければ別のラベルとしてそのまま使う。
+///
+/// `codes`は行ごとの仮コード、`first_rows`は仮コードごとの最初の行（`representatives`と同じ並び）。
+/// データに現れない`Categorical`・`Enum`のカテゴリは代表値に含まれないので、検査の対象外。
+fn reject_blank_labels(
+    name: &str,
+    codes: &[usize],
+    first_rows: &[usize],
+    representatives: &Series,
+    source: ColumnSource<'_>,
+) -> Result<(), ColumnExtractionError> {
+    if !matches!(
+        representatives.dtype(),
+        DataType::String | DataType::Categorical(..) | DataType::Enum(..)
+    ) {
+        return Ok(());
+    }
+    let strings = cast_series_to_string(name, representatives)?;
+    let ca = strings
+        .str()
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
+    let is_blank: Vec<bool> = ca
+        .iter()
+        .map(|label| present_value(name, label).map(|label| label.trim().is_empty()))
+        .collect::<Result<_, _>>()?;
+    // 仮コードは最初に現れた順に振られるので、最初の空白ラベルの仮コードの`first_rows`が
+    // 空白ラベルを持つ最初の行になる。
+    let Some(first_blank_group) = is_blank.iter().position(|&blank| blank) else {
+        return Ok(());
+    };
+    let count = codes.iter().filter(|&&code| is_blank[code]).count();
+    Err(ColumnExtractionError::blank_label(
+        name,
+        count,
+        first_rows[first_blank_group],
+        source,
+    ))
 }
 
 /// 仮グループごとの代表値を文字列にして`build`に渡す。辞書順・同じ文字列のまとめ方は
@@ -98,7 +156,7 @@ pub(crate) fn with_group_labels<T>(
 /// 同じコードになる。クラスターのラベル自体は結果に出ないため、キーの`String`も作らない。
 ///
 /// # Errors
-/// [`extract_group_key_column`]と同じ。
+/// [`extract_group_key_column`]と同じ。加えて、空・空白だけのラベルを含む（[`factorize_checked_key`]）。
 fn extract_cluster_groups(
     df: &DataFrame,
     name: &str,
@@ -108,7 +166,7 @@ fn extract_cluster_groups(
     let FactorizedKey {
         codes,
         representatives,
-    } = factorize_checked_key(name, column)?;
+    } = factorize_checked_key(name, column, source)?;
     with_group_labels(name, &representatives, |labels| {
         GroupCodes::from_factorized_without_keys(codes, labels).map_err(common_error_to_pyerr)
     })
@@ -135,7 +193,7 @@ pub fn extract_optional_cluster_groups(
 /// （`fixed_effects()`のキーに使う）。
 ///
 /// # Errors
-/// [`extract_group_key_column`]と同じ。
+/// [`extract_cluster_groups`]と同じ。
 pub fn extract_entity_groups(
     df: &DataFrame,
     name: &str,
@@ -145,7 +203,7 @@ pub fn extract_entity_groups(
     let FactorizedKey {
         codes,
         representatives,
-    } = factorize_checked_key(name, column)?;
+    } = factorize_checked_key(name, column, source)?;
     with_group_labels(name, &representatives, |labels| {
         GroupCodes::from_factorized(codes, labels).map_err(common_error_to_pyerr)
     })
@@ -356,7 +414,7 @@ mod tests {
     /// キーに使える全てのdtypeで同じコードになる。
     #[test]
     fn extract_cluster_groups_agrees_with_the_string_label_path_for_every_key_dtype() {
-        let strings = ["b", "10", "a", "9", "b", "", "10", "é", "a"];
+        let strings = ["b", "10", "a", "9", "b", "-", "10", "é", "a"];
         let ints: [i64; 9] = [3, -1, 3, 10, 9, 0, -1, 100, 9];
         // 0.0と-0.0は文字列表現が異なる別グループ。0.1+0.2と0.3も別の値。
         let floats: [f64; 9] = [0.0, -0.0, 1.5, 0.1 + 0.2, 0.3, 1.5, 0.0, 1e30, -2.0];
@@ -568,6 +626,129 @@ mod tests {
             ("Float64", Series::new("k".into(), Vec::<f64>::new())),
         ] {
             assert_cluster_groups_agree_with_string_labels(label, series);
+        }
+    }
+
+    /// 文字列・`Categorical`・`Enum`の列（ラベルは`labels`、`categories`が`Enum`のカテゴリ）。
+    fn label_columns(labels: &[&str], categories: &[&str]) -> Vec<(&'static str, Series)> {
+        let strings = Series::new("k".into(), labels);
+        let enum_dtype = {
+            let frozen = FrozenCategories::new(categories.iter().copied()).unwrap();
+            DataType::Enum(frozen.clone(), frozen.mapping().clone())
+        };
+        vec![
+            ("String", strings.clone()),
+            (
+                "Categorical",
+                strings
+                    .cast(&DataType::from_categories(Categories::global()))
+                    .unwrap(),
+            ),
+            ("Enum", strings.cast(&enum_dtype).unwrap()),
+        ]
+    }
+
+    /// `factorize_checked_key`の結果が`BlankLabel`なら`(count, row)`を返す。それ以外は`None`。
+    /// `PyErr`を経由しないので、`Debug`を使ってよい。
+    fn blank_label_of(series: &Series) -> Option<(usize, usize)> {
+        let column: Column = series.clone().into();
+        match factorize_checked_key("k", &column, SRC) {
+            Err(ColumnExtractionError::BlankLabel { count, row, .. }) => Some((count, row)),
+            Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => None,
+        }
+    }
+
+    #[test]
+    fn blank_labels_are_rejected_with_the_count_and_the_first_row_for_every_label_dtype() {
+        // 空文字列・半角/全角/NBSPの空白・タブ・改行（`str::trim`が空にするもの）。
+        for blank in [
+            "",
+            " ",
+            "   ",
+            "\t",
+            "\n",
+            "\u{3000}",
+            "\u{a0}",
+            " \t\u{3000}",
+        ] {
+            let labels = ["a", blank, "b", blank, "a"];
+            for (label, series) in label_columns(
+                &labels,
+                &[
+                    "a",
+                    "b",
+                    "",
+                    " ",
+                    "   ",
+                    "\t",
+                    "\n",
+                    "\u{3000}",
+                    "\u{a0}",
+                    " \t\u{3000}",
+                ],
+            ) {
+                assert_eq!(blank_label_of(&series), Some((2, 1)), "{label} {blank:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn different_blank_labels_are_counted_together_and_the_earliest_row_is_reported() {
+        let labels = ["a", "b", " ", "", "  ", "c", " "];
+        for (label, series) in label_columns(&labels, &["a", "b", "c", "", " ", "  "]) {
+            assert_eq!(blank_label_of(&series), Some((4, 2)), "{label}");
+        }
+    }
+
+    #[test]
+    fn labels_with_surrounding_whitespace_and_missing_value_tokens_are_valid_labels() {
+        let labels = ["A ", "A", " A", "NA", "null", "None", "NaN", "0", "A "];
+        let categories = ["A ", "A", " A", "NA", "null", "None", "NaN", "0"];
+        for (label, series) in label_columns(&labels, &categories) {
+            assert_eq!(blank_label_of(&series), None, "{label}");
+            let df = frame_of(series);
+            let Ok(groups) = extract_entity_groups(&df, "k", SRC) else {
+                panic!("{label}: extract_entity_groups failed");
+            };
+            // `"A "`だけが2行。8種類のラベルが別々のグループになる。
+            assert_eq!(
+                groups,
+                GroupCodes::from_labels(&labels.map(String::from)),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_blank_category_that_does_not_appear_in_the_data_is_not_rejected() {
+        let labels = ["a", "b", "a"];
+        for (label, series) in label_columns(&labels, &["a", "", " ", "b"]) {
+            assert_eq!(blank_label_of(&series), None, "{label}");
+        }
+    }
+
+    #[test]
+    fn blank_labels_are_rejected_by_every_extraction_function() {
+        for (label, series) in label_columns(&["a", "", "b"], &["a", "b", ""]) {
+            let df = frame_of(series);
+            assert!(extract_cluster_groups(&df, "k", SRC).is_err(), "{label}");
+            assert!(extract_entity_groups(&df, "k", SRC).is_err(), "{label}");
+            assert!(
+                extract_optional_cluster_groups(&df, Some("k"), SRC).is_err(),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_label_dtypes_are_not_checked_for_blank_labels() {
+        for series in [
+            Series::new("k".into(), [1_i64, 0, 2]),
+            Series::new("k".into(), [true, false, true]),
+            Series::new("k".into(), [0.0_f64, 1.5, 0.0]),
+        ] {
+            assert_eq!(blank_label_of(&series), None, "{:?}", series.dtype());
         }
     }
 

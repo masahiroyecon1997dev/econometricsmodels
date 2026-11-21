@@ -182,8 +182,25 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   達成可能な減少量を過小評価して早く止まり、Tobitの`bfgs`参照比較テストが精度不足で
   失敗したため不採用とした。
 
+- **`bfgs`/`lbfgs`の返却点**: 既定の`tol`では上の停滞検出は発火せず、勾配基準`‖g‖<tol·n`で止まる。
+  `newton`・参照実装との差は、停止点の`|H⁻¹g|`そのものである（Tobitの`moderate_censoring`・`mroz`で、
+  `|H⁻¹g|`と`newton`解との差が3桁一致。係数の最大相対差は`1.4e-8`〜`2.3e-8`）。`tol`を締めると
+  `|Δcost|<ε`の副次判定（コストが丸めで厳密に同値）で止まる。勾配の床ではなく、この判定を外すと
+  勾配は`4e-12`まで下がる。argminの`best_param`はコストが厳密に下がったときだけ更新されるため、
+  勾配が下がっても返却点が動かなかった。`extract_outcome`は`bfgs`/`lbfgs`のとき、最終反復点の
+  コストが最良点と`10·ε·|cost|`以内なら最終反復点を返す（`newton`は対象外）。既定`tol`の出力は
+  変わらず、`tol`を締めたときだけ縮む（`moderate_censoring`の係数で`1.44e-8→2.7e-9`・
+  `2.32e-8→6.1e-10`）。`|Δcost|<ε`の判定そのものを外す案は、反復が2〜3倍に増えるため見送った。収束後の最終Newtonステップ、既定`tol`の引き下げ（`1e-10`）も、効果が部分的、または参照実装にない処理で`tol`の意味が曖昧になるため見送った（比較の実測は`engine/src/nonlinear/CLAUDE.md`）。参照実装の準ニュートン法もnewtonとの差は同程度以上（下の実測）。
+
+- **参照実装の準ニュートン法と、そのnewtonの差（実測。公開ドキュメントには載せない）**: 利用者にとって重要なのは本実装の`bfgs`/`lbfgs`が`newton`と一致する度合い（公開ページに記載）と、他パッケージの同名solverとの一致（`docs/guide/verification.md`のstatsmodels`bfgs`/`lbfgs`との比較）で、他パッケージの準ニュートン法と`newton`の差は判断に影響しないため載せない。ただし最終Newtonステップや既定`tol`の引き下げを検討するときの根拠になるので、ここに残す。同じデータ（合成データ`baseline`・`moderate_censoring`と`mroz`）で測った、各実装の自身のNewton（Tobitは`survreg`）に対するパラメータの最大相対差:
+  - 本実装`bfgs`/`lbfgs`（既定`tol`）: `2e-7`以下。
+  - statsmodels 0.15.0（Logit/Probit）: `bfgs`の既定（`gtol=1e-5`、観測あたり勾配の最大ノルム）で`2e-5`〜`4e-4`、`lbfgs`の既定で`1e-6`〜`3e-4`。`bfgs`を`gtol=1e-10`に締めても`1e-9`〜`5e-8`で止まり、`lbfgs`を最大限に締めると`5e-11`〜`2e-9`。`mroz`（Logit）の`lbfgs`は既定・締めた設定とも収束しない。
+  - R `censReg` 0.5.40（Tobit）: `BFGS`の既定で`1e-5`〜`2e-5`（締めて`4e-9`〜`3e-8`）、`BHHH`の既定で`1e-7`〜`8e-4`、`NR`は`1e-14`前後。`mroz`（生スケール`hours`）の`BFGS`は既定・締めた設定とも収束しない。
+  - 最終Newtonステップは行っていない: statsmodelsは`base/model.py`でscipyの`xopt`をそのまま推定値にし、正確なHessianは共分散にだけ使う。R `maxLik`は`optim`の結果をそのまま推定値にし、収束点の勾配とHessianは報告用に計算するだけ。
+  - 測定の限界: 単一seed（42）、Tobitは左打ち切りのみ、他パッケージの設定は文書化された既定と締めた設定の2通りで調整していない。
+
 **スケール依存への対処（標準化）**: 説明変数のスケールが異なると勾配の絶対閾値の妥当性が
-崩れるため、`nonlinear/common.rs`の`standardize_columns`/`destandardize_params`で
+崩れるため、`nonlinear/common/standardize.rs`の`standardize_columns`/`destandardize_params`で
 標準化空間で最適化する。**切片ありのときは「平均0・分散1」（`x_std = (x-x̄)/std`）、
 切片なしのときは「分散1のみ」（`x_std = x/std`）**。切片列と標準偏差が0の列（定数列）は
 無変換。
@@ -200,7 +217,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   `Σ_orig = J Σ_std Jᵀ`（`J`は`θ_orig=Jθ_std`の線形変換の行列。`diag(1/std)`に、切片の行の
   傾き成分`-x̄ₘ/stdₘ`が加わる）。OPG・サンドイッチ・クラスターでも、`H⁻¹`と
   スコア`s_std=Jᵀs_orig`が同じ連鎖律に従うため同じ式で戻せる。
-- 分離検出（1.4節・`separation.rs`）は標準偏差で割るだけの行を使い続ける（切片込みの
+- 分離検出（1.4節・`separation/`）は標準偏差で割るだけの行を使い続ける（切片込みの
   再パラメータ化は分離の有無を変えず、LPの閾値の較正もその行に対するもの）。
 - Tobitは`x`側をこの`ColumnScale`に委ね、`TobitScaling`が`y`のスケーリングと`logσ`の扱いを
   加える（`tobit-spec.md`3.2節）。
@@ -208,19 +225,19 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 ### 1.4 設計行列のランクチェック・初期値
 
 **多重共線性の検出は`fit()`冒頭の列ピボットQRランクチェックに一本化**: `solver`に関わらず、
-`run_solver`を呼ぶ前に`nonlinear::common::checked_design_matrix_qr(x_std)`を必ず通し、
+`run_solver`を呼ぶ前に`nonlinear::common::ols_based_initial_params(x_std)`を必ず通し、
 ランク落ちを`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。旧来のゼロベクトル
 初期値では検出経路が`solver`ごとに分かれ（newtonは`newton_step`内QR、bfgs/lbfgsは収束後の
 `observed_information_cov_params`）、bfgs/lbfgsのみ検出漏れする構造的リスクがあった。
 
 Logit/Probitはこの列ピボットQR解（標準化空間のLPM最小二乗解）を、nullモデル
 `p≡p̄`起点のIRLS 1反復目に相当するスケール補正を施した値で初期値（warm start）にも使う
-（`ols_based_initial_params`）。Tobitは`ols_initial_params`がQR解を`β`初期値に、残差を
-`σ`初期値にする。`start_params`（ユーザー指定初期値）は現状未対応。
+（`ols_based_initial_params`）。Tobitは標準化した設計行列の直交座標でOLSを解き（`DesignCoordinates`）、その解を
+`β`初期値に、残差を`σ`初期値にする。`start_params`（ユーザー指定初期値）は現状未対応。
 
 ## 2. エラー型（`MleError`、共有）
 
-Logit/Probit/Tobit共有の1つのエラー型を`engine/src/nonlinear/common.rs`に定義する
+Logit/Probit/Tobit共有の1つのエラー型を`engine/src/nonlinear/common/error.rs`に定義する
 （OLSの「1手法1エラー型」パターンを横展開せず共有型にする。`raise_on_non_convergence`
 未収束・観測数不足・`confidence_level`範囲外等、3手法でほぼ共通のバリアントが多いため）。
 Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleError`にバリアントとして追加する
@@ -235,7 +252,7 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 | `SingularDesignMatrix` | `DESIGN_MATRIX_SINGULAR`（`ComputationError`） | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
 | `SingularHessian` | `MATRIX_NEAR_SINGULAR`（`matrix=HESSIAN`、`ComputationError`） | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
 | `SingularOpgMatrix` | `MATRIX_NEAR_SINGULAR`（`matrix=OPG`、`ComputationError`） | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
-| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
+| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`・`separation/lp.rs`、`logit-spec.md`3.2節） |
 | `SeparationCheckFailed { detail }` | `SEPARATION_CHECK_FAILED`（`ComputationError`） | 分離が無いことを線形計画が数値的に完了せず確認できなかった（`raise_on_non_convergence=true`のとき） |
 | `EvaluationBudgetExceeded { budget }`・`LineSearchFailed { max_iters }` | `LINE_SEARCH_FAILED`（`ComputationError`） | line searchの評価回数バジェット超過（1.2節）・line searchの反復上限到達（`lbfgs`） |
 | `UncensoredIntervalTooNarrow { lower, upper, sigma }`（Tobit専用） | `UNCENSORED_INTERVAL_TOO_NARROW`（`ComputationError`） | `expected_uncensored`の非打ち切り区間が`σ̂`の1%未満（`tobit-spec.md`3.5節） |
@@ -342,7 +359,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 評価。式自体はリンク関数依存でモデルごとに異なる）。この性質を使い、`w`とその勾配
 `s_m=∂w/∂θ_m`の計算（`at`ごとに異なる、モデルファイル側に実装）と、そこから`dydx`・
 ヤコビアン`∂g_j/∂θ_m=θⱼ*s_m+[j==m]*w`を計算する部分（`at`に依らず共通、
-`dydx_and_jacobian`/`marginal_effects_from_w_s`として`nonlinear/common.rs`に実装）を
+`dydx_and_jacobian`/`marginal_effects_from_w_s`として`nonlinear/common/marginal_effects.rs`に実装）を
 分離する。分散は`Var(g_j) = jac_jの行ベクトル・cov_params・jac_jの行ベクトル'`（二次形式）。
 
 - **離散変数（0/1のダミー変数）の自動判定は行わない**: データ入力がlist渡し（列の型情報を

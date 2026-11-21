@@ -1,0 +1,93 @@
+{
+  "baseline": [
+    1.2,
+    0.8
+  ],
+  "just_identified": [
+    1.2,
+    0.8
+  ],
+  "multi_endog": [
+    1.2,
+    0.8,
+    -0.5
+  ],
+  "weak_instruments": [
+    1.2,
+    0.8
+  ],
+  "invalid_instrument": [
+    1.2,
+    0.8
+  ],
+  "exogenous_endog": [
+    1.2,
+    0.8
+  ],
+  "heteroskedastic": [
+    1.2,
+    0.8
+  ],
+  "autocorrelated": [
+    1.2,
+    0.8
+  ],
+  "short_panel": [
+    1.2,
+    0.8
+  ],
+  "long_panel": [
+    1.2,
+    0.8
+  ],
+  "unbalanced": [
+    1.2,
+    0.8
+  ],
+  "three_way": [
+    1.2,
+    0.8
+  ],
+  "small_n": [
+    1.2,
+    0.8
+  ],
+  "df1_boundary": [
+    1.2,
+    0.8
+  ],
+  "high_variance": [
+    1.2,
+    0.8
+  ],
+  "moderate_multicollinearity": [
+    1.2,
+    -0.7,
+    0.8
+  ],
+  "high_condition_number": [
+    1.2,
+    -0.7,
+    0.8
+  ],
+  "scale_variance_mild": [
+    0.012,
+    -6.999999999999999,
+    0.8
+  ],
+  "many_regressors": [
+    11.999999999999998,
+    5.59139058047241,
+    2.7789909887462754,
+    1.2948686698078031,
+    -0.5792093186649752,
+    0.25188998555040326,
+    -0.10730783181118908,
+    -0.045,
+    0.8
+  ],
+  "outlier_regressor": [
+    1.2,
+    0.8
+  ]
+}

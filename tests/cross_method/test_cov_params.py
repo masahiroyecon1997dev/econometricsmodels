@@ -13,10 +13,12 @@ import math
 import pytest
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -72,6 +74,26 @@ def _fe(df, *, two_way=False, **options):
     ).fit()
 
 
+def _fe_iv(df, *, two_way=False, **options):
+    effects = ["entity", "time"] if two_way else ["entity"]
+    return FEIV(
+        df,
+        effects=effects,
+        options=FEIVOptions(**options),
+        **IV_ARGS,
+    ).fit()
+
+
+def _fe_iv_gmm(df, *, two_way=False, **options):
+    effects = ["entity", "time"] if two_way else ["entity"]
+    return FEIV(
+        df,
+        effects=effects,
+        options=FEIVOptions(estimator="gmm", **options),
+        **IV_ARGS,
+    ).fit()
+
+
 def _re(df, *, two_way=False, **options):
     effects = ["entity", "time"] if two_way else ["entity"]
     return RE(
@@ -101,6 +123,10 @@ COV_TYPES_BY_METHOD = {
     "gmm": ("classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"),
     "fe": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
     "fe-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "fe-iv": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "fe-iv-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "fe-gmm": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "fe-gmm-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
     "re": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
     "re-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
 }
@@ -117,6 +143,10 @@ METHOD_OPTIONS = {
     "gmm": (_iv, {"estimator": "gmm"}),
     "fe": (_fe, {}),
     "fe-two-way": (_fe, {"two_way": True}),
+    "fe-iv": (_fe_iv, {}),
+    "fe-iv-two-way": (_fe_iv, {"two_way": True}),
+    "fe-gmm": (_fe_iv_gmm, {}),
+    "fe-gmm-two-way": (_fe_iv_gmm, {"two_way": True}),
     "re": (_re, {}),
     "re-two-way": (_re, {"two_way": True}),
 }

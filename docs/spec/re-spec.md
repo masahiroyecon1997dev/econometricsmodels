@@ -1,6 +1,6 @@
 # RE 仕様書
 
-RE（Swamy-Arora GLSによる変量効果パネル回帰）の確定済み仕様。`engine/src/panel/re.rs`（共通基盤
+RE（Swamy-Arora GLSによる変量効果パネル回帰）の確定済み仕様。`engine/src/panel/re.rs`（ファサード）・`engine/src/panel/re/`（共通基盤
 は`engine/src/panel/common.rs`）・`engine_pybind/src/panel/re.rs`・
 `python_package/econometricsmodels/panel/re.py`として実装済み。FE/RE共通の設計判断（`effects`の
 引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の
@@ -123,11 +123,12 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
     `VARIANCE_COMPONENT_WITHIN_REGRESSION`）。以前は最終回帰の特異性（`DESIGN_MATRIX_SINGULAR`）に
     落ちていた。
     **閾値のすぐ上の狭い帯**（σ_ε²を求めるwithin回帰の相対ノイズが約`3e-8`付近。下は`PERFECT_FIT`、約`1e-7`以上は通常どおり推定できる）は完全フィットではないが、
-    σ_ε²が極小で`θ ≈ 1`となり、最終回帰の準偏差変換した定数列`1 - θ_i`がほぼ0になる。この
-    最終回帰の設計行列は実際に悪条件なので、`MATRIX_NEAR_SINGULAR`（`stage=QUASI_DEMEANED_REGRESSION`、
-    `cov_type="hc1"`ではハウスマンの補助回帰で`HAUSMAN_REGRESSION`）のままにする。最終回帰は
-    被説明変数が準偏差変換後の値で元のモデルの総平方和が当てはまらないため、完全フィットの
-    判定は足さない（`test_re_variance_components.py`の`test_noise_just_above_the_perfect_fit_threshold_is_a_near_singular_final_regression`で固定）。
+    σ_ε²が極小で`θ ≈ 1`となり、最終回帰の準偏差変換した定数列`1 - θ_i`がほぼ0になる。これは
+    定数列が他の列より桁違いに小さい（単位の違いにすぎない）だけで共線ではなく、全体のWald/F検定は
+    相関スケール化した部分行列で判定するため、推定できる（`θ → 1`のRE推定は個体内推定に収束し、
+    傾きはFEと一致する）。最終回帰は被説明変数が準偏差変換後の値で元のモデルの総平方和が当てはまらない
+    ため、完全フィットの判定は足さない（`test_re_variance_components.py`の
+    `test_noise_just_above_the_perfect_fit_threshold_estimates_the_within_slope`で固定）。
 - **σ_u²（individual variance）**: between回帰（エンティティ平均`[1, x̄ᵢ.]`への最小二乗）のSSR、
   調和平均`t_bar = N / Σ(1/T_i)`を使う標準式`max(0, ssr/df_resid - σ_ε²/t_bar)`。
   `df_resid = N - K_b - 1`。平均が個体間で一定の列（バランスパネルで時点間でのみ変わる
@@ -244,7 +245,7 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 `1 - θ₁ - θ₂ + θ₃`倍）に適用してから`OlsEstimator::fit(include_intercept=false)`に渡す。
 `quasi_demean_column`は1つのグルーピングしか扱えず、FEの2-wayのように「entityでquasi-demean→
 その結果をtimeでquasi-demean」の2段階適用（θ₁・θ₂のみ使う）では`θ₃ ≠ θ₁θ₂`のためGLS変換に
-ならない。そこで3つの平均を同時に引く`quasi_demean_two_way`（`panel/common.rs`、バランスパネル前提）を
+ならない。そこで3つの平均を同時に引く`quasi_demean_two_way`（`panel/common/transform.rs`、バランスパネル前提）を
 用意した。θ=(1,1,1)で2-way within変換、θ=(θ₁,0,0)・(0,θ₂,0)で1-wayのRE（entity方向・time方向）、
 θ=(0,0,0)で変換なし（pooled OLS）になる。
 
@@ -276,7 +277,7 @@ wx.shape[1]`）と自動的に一致する。この副産物として`estimator(
 だけ）で足りる。
 
 FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_columns`・`xtx_inverse`・
-分類/HC/cluster/DriscollKraay計算）は`common.rs`にFE/RE共有で移設済み（素のレバレッジは
+分類/HC/cluster/DriscollKraay計算）は`panel/common/cov_params.rs`にFE/RE共有で移設済み（素のレバレッジは
 `shared::covariance::leverages`）——
 数式自体はFE実装時から変更しておらず、`k_correction`・レバレッジ配列を引数で受け取る汎用実装の
 ため呼び出し側（REは常に`k_correction=df_model`・素のレバレッジ）を差し替えるだけで
@@ -440,7 +441,7 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   別名の列のとき。説明変数がすべて時間不変の場合や、全ての時間変化列の個体平均を加えた場合に
   発生する。`x=[]`は拒否される）。補助回帰のランク落ち・Wald検定の特異性など、計算自体が成立しない場合は
   `hausman_*`を`None`にせず`RE.fit()`が失敗する（設計行列の多重共線性でエラーにするのと
-  同じ方針）。ロバスト共分散が構造的に特異になる場合が典型で、`cluster`ではクラスター数`G`が
+  同じ方針。HC2・HC3の補助回帰にレバレッジが1の行があるときの`UNIT_LEVERAGE_OBSERVATION`も同じ）。ロバスト共分散が構造的に特異になる場合が典型で、`cluster`ではクラスター数`G`が
   補助回帰の傾き係数の数（`X*`の全傾きと、別名を除いた`X̃`の和。時間不変の列も別名も無ければ`2k`）以下
   （`ValidationError`、OLSの`InsufficientClustersForInference`と
   同じ事前検証）、`dk`では時点数`T`がRE本体の傾き係数の数`q`（時間不変の列も数える。ハウスマン検定の対象より
@@ -564,7 +565,7 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
       具体的な要望が出た時点で検討する。一方、`walhus`・`amemiya`は参照実装が`plm`のみなので、
       不均衡パネルを含めて`plm`の式に従う。
     - **実装**（3.1.2節）: 「1段目の回帰」と「行列`M`の組み立て」だけを推定法ごとに分け、バランス用の閉形式と
-      不均衡の1-way用のトレース形の2系統を持つ（`engine/src/panel/re_variance_method.rs`）。`plm`は2-wayの
+      不均衡の1-way用のトレース形の2系統を持つ（`engine/src/panel/re/variance_method.rs`）。`plm`は2-wayの
       不均衡パネルにも3法のモーメント行列を持つが、数値検証はしておらず、対象外のまま。
   - **θは3つの重みが要る**。2-wayのGLS変換は`y - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`の形で、`plm`の
     `ercomp`が返す`theta$total`は`theta$id × theta$time`と一致しない（3法とも別の値、確認済み）。

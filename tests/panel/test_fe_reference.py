@@ -58,8 +58,7 @@ from benchmark.common import (
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     COV_TYPES,
-    ONE_WAY_ONLY_SCENARIOS,
-    TWO_WAY_SCENARIOS,
+    FE_SCENARIOS,
     WAGEPAN_COV_TYPES,
 )
 
@@ -70,17 +69,11 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["fe_reference"]["rtol"]
 ATOL = TOLERANCES["fe_reference"]["atol"]
 
-ALL_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
-
 ONE_WAY_CASES = [
-    (scenario, cov_type)
-    for scenario in ALL_SCENARIOS
-    for cov_type in COV_TYPES
+    (scenario, cov_type) for scenario in FE_SCENARIOS for cov_type in COV_TYPES
 ]
 TWO_WAY_CASES = [
-    (scenario, cov_type)
-    for scenario in TWO_WAY_SCENARIOS
-    for cov_type in COV_TYPES
+    (scenario, cov_type) for scenario in FE_SCENARIOS for cov_type in COV_TYPES
 ]
 
 

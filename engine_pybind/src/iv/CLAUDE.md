@@ -25,13 +25,19 @@
 - `overid_statistic`/`overid_p_value`/`overid_df`: `estimator="2sls"`は`TwoSlsEstimator::sargan_*`（Sargan）、`estimator="gmm"`は`GmmEstimator::hansen_j_*`（Hansen J）から代入する。丁度識別では`None`。
 - `converged: bool`/`n_iter: i64`: `raise_on_non_convergence=False`でもGMMが収束したかをPython側で確認できるようにするための`IVResult`のフィールド（`LogitResult`/`ProbitResult`と同じ位置づけ）。`estimator="2sls"`は閉形式・非反復なので常に`converged=true`・`n_iter=1`。
 
+## 弱操作変数診断のメソッド（`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）
+
+`fit()`では計算しない事後診断。`IVResult`が非公開フィールドで`source_data`（`fit()`に渡した`DataFrame`への参照）・`options`（`IVOptions`の複製）・`x_exog`・`x_endog`・`instruments`の列名（`y`は`dep_var_name`）を持ち、`diagnostics.rs`の`Rebuilt`が`select_columns`で列を取り込み直して（GILが要る）、`py.detach`の中で`build_iv_input`→`engine`の`compute_*`を呼ぶ。`fit()`と同じ`build_iv_input`なので列の検査と並びが一致する。`source_data`と`options`は`fit`が結果を組み立てた後でGILを持って付ける（`OLSResult`と同じ）。`options`の`PickleField`は`result.rs`にある（`IVOptions`自身の`__reduce__`に任せる）。出力は`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`（臨界値は`(水準, 値)`のタプルの列で、Python側が`dict`にする）。
+
+**`c_stat()`（C統計量）も同じ仕組み**（`run_c_stat`、出力は`CStatisticOutput`）。名前（`variables`は`x_endog`、`instruments`は除外操作変数）は、GILを持つ側で一覧の検査（空は`ROLE_EMPTY`、重複は`ROLE_DUPLICATE_COLUMN`）と位置への変換（モデルに無い名前は`C_STATISTIC_UNKNOWN_VARIABLE`。`COLUMN_NOT_FOUND`は`hint`が`data`の列を指すので使わない）を済ませ、昇順の位置をengineへ渡す。両方未指定はengineの`C_STATISTIC_NOTHING_TO_TEST`に任せる。重みは`gmm_type`が`two_step`・`iterated`なら`BuiltIvInput.plan.gmm`の`weight`、それ以外（2SLS・1段階GMM）は`weight_type_for_cov_type(&built.cov_type)`（`c_statistic_weight`）。`tests/cross_method/test_pickle.py`の`TRANSIENT`・`test_gil_release.py`・`test_keyword_only_arguments.py`に登録済み。
+
 ## `first_stage()`
 
 `IVResult`の非公開フィールド`first_stage: Vec<(String, OLSResult)>`から返す。`estimator`（2sls/gmm）に依存しない表現にするため、`LogitResult`/`ProbitResult`のように推定量そのものは保持しない。`fit`が第一段階の`OlsEstimator`（設計行列を持つ）を`linear::ols::ols_estimator_to_result`で`OLSResult`へ変換して保持し（設計行列を手放せる）、`first_stage()`は`OLSResult::clone_ref`で複製して返す。pickleでは各`OLSResult`がそのまま状態に入る。第一段階回帰はそれ自体が正しい（ナイーブな）通常のOLSであり（`engine::iv::two_sls`のモジュールdocコメント参照）、OLSとの共有を避ける理由が無いため`ols_estimator_to_result`を再利用する。返る各`OLSResults.f_statistic`/`f_p_value`は通常のOLS F検定（`x_exog`の寄与を含む）であり、弱操作変数診断の部分F統計量（`weak_instrument_f_statistics`）とは別物（`IVResult`のdocコメント参照）。
 
 `IVResult`の組み立ては`fit.rs`の`build_result`が一度だけ行う。2SLSとGMMで同じ値の読み出しは`engine::iv::common::IvEstimate`（両推定量が実装するtrait）から、推定量ごとに違うフィールド（収束・反復、GMM専用の設定、Wald検定の分布、過剰識別検定、Wu-Hausman検定）は`EstimatorSpecific`（`Default`なしで全フィールド必須）から詰める。`IVResult`にフィールドを足すときは、`IvEstimate`にメソッドを足す（共通）か`EstimatorSpecific`に足す（推定量ごと）かを選ぶ。どちらもコンパイラが両分岐の書き漏れを検出する。
 
-`first_stage`/`weak_instrument_f_statistics`は`estimator`によらず`engine::iv::common::compute_first_stage`（2SLS/GMM間で共有）から構築する。**`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため`TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、OLS自体が軽量という前提で許容した設計判断。恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある（着手前にユーザー確認すること）。
+`first_stage`/`weak_instrument_f_statistics`は`estimator`によらず`engine::iv::common::compute_first_stage`（2SLS/GMM間で共有）から構築する。**`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）。`TwoSlsEstimator`は第一段階の推定量を保持せず（当てはめ値と残差の列だけを取り出して手放す）、`IVResult`へ移せる推定量が無いため、OLS自体が軽量という前提で許容した設計判断。`fit`は`compute_first_stage_with`で各第一段階の`OlsEstimator`をすぐ`OLSResult`へ変えて手放す（設計行列を内生変数の数だけ同時に持たない）。恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある（着手前にユーザー確認すること）。
 
 ## `fit`の事前チェックの順序
 
@@ -48,7 +54,7 @@
 
 ## オプションの検査（値・組合せ・列）と報告順
 
-`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造 → `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値`BuiltIvInput`の`plan`（`IvPlan`: `IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`が負値のときの変換エラーは`resolve_gmm_setup`で起きるが、範囲（3以上・上限）と`gmm_tol`の検証はengineが行う。
+`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造（`x_endog`・`instruments`が空でない → ロール間の重複 → ロール内の重複 → `"const"`の衝突。FEIVの`validate_fe_iv_roles`・OLS等の`validate_roles`と同じく空の検査が先）→ `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値`BuiltIvInput`の`plan`（`IvPlan`: `IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`が負値のときの変換エラーは`resolve_gmm_setup`で起きるが、範囲（3以上・上限）と`gmm_tol`の検証はengineが行う。
 
 ## `IVResult.test_stats`と`stat_dist`/`stat_df`
 

@@ -53,10 +53,10 @@ pub(crate) struct BuiltIvInput {
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
-/// - `y`/`x_exog`/`x_endog`/`instruments`間の重複、各ロール内部の重複、
+/// - `x_endog`/`instruments`が空リストの場合（`x_exog`は対象外）、
+///   `y`/`x_exog`/`x_endog`/`instruments`間の重複、各ロール内部の重複、
 ///   `include_intercept=true`のときの`x_exog`/`x_endog`/`instruments`いずれかと
-///   `"const"`列との衝突（`x_exog`だけでなく全ロールが対象）、
-///   `x_endog`/`instruments`が空リストの場合（`x_exog`は対象外）は
+///   `"const"`列との衝突（`x_exog`だけでなく全ロールが対象）は、この順に
 ///   ここ（受け口）の責務で`ValidationError`
 /// - `estimator`/`cov_type`/`gmm_type`/`gmm_weight_type`の文字列が不正な場合は
 ///   `ValidationError`（使われないオプションでも。`parse_iv_option_values`参照）
@@ -81,6 +81,18 @@ pub(crate) fn build_iv_input(
     // オプション列 → エンジン。
     let values = parse_iv_option_values(options)?;
     check_iv_options(options, &values)?;
+
+    // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
+    // `docs/spec/iv-spec.md`1.1節）が、`x_endog`/`instruments`は最低1要素を要求する
+    // （`x_endog=[]`は実質OLSで、IVを使うこと自体が誤用のため）。独立に検証するので、
+    // 「操作変数はあるが対応する内生変数が無い」誤用も検出できる。`IvInput`自体はこの
+    // 規則を持たず空リストを許容する（検証はPython API境界である本層の責務、`IvInput`の
+    // 構造体docコメント参照）。空の検査はロール間の重複・ロール内の重複・`"const"`の衝突より
+    // 先に行う（FEIVの`validate_fe_iv_roles`、OLS等の`validate_roles`の空の`x`と同じ位置。
+    // `docs/guide/validation.md`「Order in which errors are reported」の順序を全手法で
+    // 揃えるため）。
+    validate_role_non_empty("x_endog", &x_endog)?;
+    validate_role_non_empty("instruments", &instruments)?;
 
     // 完全な多重共線性・意図しない列の重複を早期に、分かりやすいエラーで防ぐ
     // （`validation.rs`に集約、OLS/WLS/Logit/Probitと共通の方針）。`instruments`を
@@ -107,15 +119,6 @@ pub(crate) fn build_iv_input(
     validate_no_const_collision("x_exog", &x_exog, options.include_intercept)?;
     validate_no_const_collision("x_endog", &x_endog, options.include_intercept)?;
     validate_no_const_collision("instruments", &instruments, options.include_intercept)?;
-
-    // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
-    // `docs/spec/iv-spec.md`1.1節）が、`x_endog`/`instruments`は最低1要素を要求する
-    // （`x_endog=[]`は実質OLSで、IVを使うこと自体が誤用のため）。独立に検証するので、
-    // 「操作変数はあるが対応する内生変数が無い」誤用も検出できる。`IvInput`自体はこの
-    // 規則を持たず空リストを許容する（検証はPython API境界である本層の責務、`IvInput`の
-    // 構造体docコメント参照）。
-    validate_role_non_empty("x_endog", &x_endog)?;
-    validate_role_non_empty("instruments", &instruments)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;

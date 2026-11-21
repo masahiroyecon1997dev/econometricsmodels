@@ -9,7 +9,7 @@
    `solver` → `variance_method`。使われないオプションの未知の値も報告する
 3. オプションの組合せ: 使われないオプション → 必須オプションの欠落
    （`cov_type`の`hac`/`dk`が先、`gmm_weight_type`の`hac`が後）
-4. ロールの構造: `x`が空 → ロール間の重複（`y`・`effects`・`x`） → `x`内の重複 →
+4. ロールの構造: `x`が空 → ロール間の重複（`y`・`weight`・`effects`・`x`） → `x`内の重複 →
    `dk_time`のロール → `"const"`などの名前の衝突
    （FE/REの`effects`の列数の検査は、これより前に行われる）
 5. `y`・`x`などモデルの列（存在・dtype・欠損値）。順序は`y` → `x` → `effects`
@@ -36,11 +36,13 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -177,6 +179,17 @@ _IV_ARGS = {
     "instruments": ["z", "z2"],
 }
 _PANEL_ARGS = {"y": "y", "x": _X, "effects": ["entity"]}
+_FE_IV_ARGS = {**_IV_ARGS, "effects": ["entity"]}
+# FEIVの`x_endog`・`instruments`の空の検査は`effects`の列数の次。FEIVは固定効果が切片を
+# 吸収して切片を足さないので、`const_in_x`は当てはめない。
+_FE_IV_FAULTS = (*_PANEL_FAULTS, "missing_instrument")
+_FE_GMM_FAULTS = (
+    *_FE_IV_FAULTS,
+    "unknown_gmm_type",
+    "unknown_gmm_weight_type",
+    "unused_gmm_max_iter",
+    "unused_gmm_tol",
+)
 
 METHODS = [
     Method(
@@ -246,6 +259,25 @@ METHODS = [
         time_option="dk_time",
     ),
     Method(
+        "feiv",
+        _simple(FEIV, FEIVOptions),
+        _FE_IV_ARGS,
+        _FE_IV_FAULTS,
+        time_cov_type="dk",
+        time_option="dk_time",
+        x_role="x_exog",
+    ),
+    Method(
+        "feiv_gmm",
+        _simple(FEIV, FEIVOptions),
+        _FE_IV_ARGS,
+        _FE_GMM_FAULTS,
+        base_opts={"estimator": "gmm"},
+        time_cov_type="dk",
+        time_option="dk_time",
+        x_role="x_exog",
+    ),
+    Method(
         "re",
         _simple(RE, REOptions),
         _PANEL_ARGS,
@@ -260,7 +292,7 @@ METHODS = [
 
 def _arg_role(method: Method) -> str:
     """`empty_x`が指摘する、空のリストを渡した引数（IVは`x_endog`）。"""
-    return "x_endog" if method.name.startswith("iv") else "x"
+    return "x_endog" if "x_endog" in method.base_args else "x"
 
 
 def _dup_x(method: Method) -> dict[str, Any]:
@@ -454,7 +486,7 @@ FAULTS = {
         ),
         Fault(
             "weight_is_y",
-            (4, 6),
+            (4, 2),
             code=ErrorCode.ROLE_COLUMN_OVERLAP,
             params={
                 "column": "y",
@@ -475,9 +507,9 @@ FAULTS = {
             (4, 0),
             code=ErrorCode.EFFECTS_TOO_MANY,
             params=lambda m: {
-                "model": m.name.upper(),
-                "n_columns": 3,
-                "max_columns": 2,
+                "model": m.name.removesuffix("_gmm").upper(),
+                "n_columns": 6,
+                "max_columns": 2 if m.name == "re" else 5,
             },
         ),
         Fault(
@@ -602,13 +634,6 @@ _UNUSED_WITHOUT_TIME_COV = frozenset(
 )
 
 
-def rank(method: Method, fault_id: str) -> tuple[int, int]:
-    """`method`での故障の順位。IVの空の`x_endog`は、`"const"`の検査と同じ順位。"""
-    if fault_id == "empty_x" and method.name.startswith("iv"):
-        return FAULTS[fault_id].rank[0], 6
-    return FAULTS[fault_id].rank
-
-
 def changes(method: Method, fault_id: str) -> Changes:
     """故障を入力に混ぜるための、`(引数の差分, オプションの差分)`。"""
     x_role = method.x_role
@@ -629,6 +654,13 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "unused_cluster":
             # FE/REの既定の`cov_type`は`cluster`なので、`cluster`が使われなくなるよう
             # `classical`にする。
+            if method.name == "feiv_gmm":
+                # FEIVの既定の重み`cluster`も`cluster`を使うので、重みも使わない種類にする。
+                return {}, {
+                    "cov_type": "classical",
+                    "cluster": "cluster",
+                    "gmm_weight_type": "robust",
+                }
             if method.time_cov_type == "dk":
                 return {}, {"cov_type": "classical", "cluster": "cluster"}
             return {}, {"cluster": "cluster"}
@@ -655,7 +687,7 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "const_in_x":
             return {x_role: ["const", *base_x]}, {}
         case "empty_x":
-            if method.name.startswith("iv"):
+            if "x_endog" in method.base_args:
                 return {"x_endog": []}, {}
             return {x_role: []}, {}
         case "weight_is_y":
@@ -665,7 +697,9 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "effects_empty":
             return {"effects": []}, {}
         case "effects_too_many":
-            return {"effects": ["entity", "time", "cluster"]}, {}
+            return {
+                "effects": ["entity", "time", "cluster", "a", "b", "c"]
+            }, {}
         case "effects_second_is_y":
             return {"effects": ["entity", method.base_args["y"]]}, {}
         case "dk_time_is_y":
@@ -738,6 +772,11 @@ def compose(
             **method.base_opts,
             **l_opts,
             "cluster": "cluster",
+            **(
+                {"gmm_weight_type": "robust"}
+                if method.name == "feiv_gmm"
+                else {}
+            ),
         }
     conflicts = {k for k in e_args if k in l_args and e_args[k] != l_args[k]}
     conflicts |= {k for k in e_opts if k in l_opts and e_opts[k] != l_opts[k]}
@@ -770,7 +809,7 @@ def _pairs(method: Method) -> list[tuple[str, str]]:
     return [
         (a, b)
         for a, b in itertools.permutations(method.faults, 2)
-        if rank(method, a) < rank(method, b) and compose(method, a, b)
+        if FAULTS[a].rank < FAULTS[b].rank and compose(method, a, b)
     ]
 
 
@@ -868,7 +907,7 @@ def test_every_method_covers_every_stage_boundary(method):
     故障の定義を変えて、ある手法の境界の組がすべて消えたときに気づくための検査。
     """
     covered = {
-        (rank(method, a)[0], rank(method, b)[0]) for a, b in _pairs(method)
+        (FAULTS[a].rank[0], FAULTS[b].rank[0]) for a, b in _pairs(method)
     }
     for boundary in BOUNDARIES:
         assert boundary in covered, boundary

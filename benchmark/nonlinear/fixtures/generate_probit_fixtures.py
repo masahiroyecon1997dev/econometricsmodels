@@ -230,7 +230,7 @@ def build_fixtures() -> dict:
             "（較正値はlogitと異なりbeta1=10、"
             "benchmark/nonlinear/datasets.py参照）。"
             "complete_separationシナリオ（真の完全分離、n=500、logitと同じ"
-            "nonlinear/common.rsのrun_solverを共有）も同様にここに含まない"
+            "nonlinear/common/solver.rsのrun_solverを共有）も同様にここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみを"
             "スケーリングする設計のため成功パス。"

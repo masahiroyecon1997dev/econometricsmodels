@@ -13,7 +13,7 @@ import numpy as np
 import polars as pl
 import pytest
 from _errors import raises_error
-from econometricsmodels import RE, ErrorCode, REOptions
+from econometricsmodels import FE, RE, ErrorCode, REOptions
 
 
 def _panel(
@@ -257,22 +257,22 @@ def test_tiny_error_variance_gives_theta_close_to_one_or_a_perfect_fit():
         )
 
 
-def test_noise_just_above_the_perfect_fit_threshold_is_a_near_singular_final_regression():
+def test_noise_just_above_the_perfect_fit_threshold_estimates_the_within_slope():
     """完全フィットの閾値（残差の標準偏差が個体内のyの約`3e-8`倍）のすぐ上では、`σ_ε²`が
-    極小で`θ ≈ 1`となり、最終回帰の準偏差変換した定数列`1 - θ`がほぼ0になる。この設計行列は
-    実際に悪条件なので`MATRIX_NEAR_SINGULAR`のままにする（最終回帰は被説明変数が準偏差変換後の
-    値で、元のモデルの総平方和が当てはまらないため完全フィットの判定を足さない）。この帯は
-    狭く、下は`PERFECT_FIT`、上（`1e-7`以上）は通常どおり推定できる。"""
+    極小で`θ ≈ 1`となり、最終回帰の準偏差変換した定数列`1 - θ`は他の列より桁違いに小さい。
+    これは単位の違いにすぎず（列を共線にはしない）、全体のWald/F検定は相関スケール化した部分
+    行列で判定するので失敗しない。`θ → 1`のRE推定は個体内（FE）推定に収束するため、傾きは
+    FEと一致する。この帯の下は`PERFECT_FIT`、上（`1e-7`以上）も通常どおり推定できる。"""
     for seed in (1, 2, 3, 4):
-        with raises_error(
-            ErrorCode.MATRIX_NEAR_SINGULAR,
-            matrix="COEFFICIENT_COVARIANCE",
-            stage="QUASI_DEMEANED_REGRESSION",
-        ):
-            _fit(
-                _panel(seed, entity_sd=1.0, time_sd=0.0, noise_sd=3e-8),
-                cov_type="classical",
-            )
+        df = _panel(seed, entity_sd=1.0, time_sd=0.0, noise_sd=3e-8)
+        res = _fit(df, cov_type="classical")
+        fe = FE(df, y="y", x=["x"], effects=["entity"]).fit()
+        assert min(res.theta.values()) > 1 - 1e-6
+        assert res.params["x"] == pytest.approx(fe.params["x"], rel=1e-10)
+        # 標準誤差・F統計量はREとFEで自由度と定数列の扱いが違い、一致を期待できない
+        # （標準誤差で約10〜40%）ため、有限であることだけを確かめる。
+        assert np.isfinite(res.f_statistic)
+        assert np.isfinite(res.std_errors["x"])
     with raises_error(
         ErrorCode.PERFECT_FIT, stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"
     ):

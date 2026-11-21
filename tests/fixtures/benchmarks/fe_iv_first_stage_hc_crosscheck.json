@@ -1,0 +1,199 @@
+{
+  "synthetic": {
+    "baseline": {
+      "hc2": {
+        "rk_wald_f": 175.22058050539
+      },
+      "hc3": {
+        "rk_wald_f": 142.874504599006
+      }
+    },
+    "just_identified": {
+      "hc2": {
+        "rk_wald_f": 154.371340568887
+      },
+      "hc3": {
+        "rk_wald_f": 125.477982962416
+      }
+    },
+    "weak_instruments": {
+      "hc2": {
+        "rk_wald_f": 3.00406721742631
+      },
+      "hc3": {
+        "rk_wald_f": 2.44535564405215
+      }
+    },
+    "invalid_instrument": {
+      "hc2": {
+        "rk_wald_f": 231.769884259446
+      },
+      "hc3": {
+        "rk_wald_f": 188.739682010791
+      }
+    },
+    "exogenous_endog": {
+      "hc2": {
+        "rk_wald_f": 115.700979898133
+      },
+      "hc3": {
+        "rk_wald_f": 93.9613957542324
+      }
+    },
+    "heteroskedastic": {
+      "hc2": {
+        "rk_wald_f": 175.22058050539
+      },
+      "hc3": {
+        "rk_wald_f": 142.874504599006
+      }
+    },
+    "autocorrelated": {
+      "hc2": {
+        "rk_wald_f": 175.22058050539
+      },
+      "hc3": {
+        "rk_wald_f": 142.874504599006
+      }
+    },
+    "short_panel": {
+      "hc2": {
+        "rk_wald_f": 81.8384584057707
+      },
+      "hc3": {
+        "rk_wald_f": 52.4576325188602
+      }
+    },
+    "long_panel": {
+      "hc2": {
+        "rk_wald_f": 202.265583758224
+      },
+      "hc3": {
+        "rk_wald_f": 187.832361376704
+      }
+    },
+    "unbalanced": {
+      "hc2": {
+        "rk_wald_f": 116.112991080946
+      },
+      "hc3": {
+        "rk_wald_f": 87.0243731616564
+      }
+    },
+    "small_n": {
+      "hc2": {
+        "rk_wald_f": 15.5223062613114
+      },
+      "hc3": {
+        "rk_wald_f": 9.97772476719357
+      }
+    },
+    "df1_boundary": {
+      "hc2": {
+        "rk_wald_f": 2.15977459604936
+      },
+      "hc3": {
+        "rk_wald_f": 0.222413221140422
+      }
+    },
+    "high_variance": {
+      "hc2": {
+        "rk_wald_f": 175.22058050539
+      },
+      "hc3": {
+        "rk_wald_f": 142.874504599006
+      }
+    },
+    "moderate_multicollinearity": {
+      "hc2": {
+        "rk_wald_f": 278.248746439138
+      },
+      "hc3": {
+        "rk_wald_f": 225.522587933454
+      }
+    },
+    "high_condition_number": {
+      "hc2": {
+        "rk_wald_f": 175.570846548121
+      },
+      "hc3": {
+        "rk_wald_f": 142.482254106994
+      }
+    },
+    "scale_variance_mild": {
+      "hc2": {
+        "rk_wald_f": 175.570846548121
+      },
+      "hc3": {
+        "rk_wald_f": 142.482254106994
+      }
+    },
+    "many_regressors": {
+      "hc2": {
+        "rk_wald_f": 161.369117977633
+      },
+      "hc3": {
+        "rk_wald_f": 126.181940098448
+      }
+    },
+    "outlier_regressor": {
+      "hc2": {
+        "rk_wald_f": 171.310891238269
+      },
+      "hc3": {
+        "rk_wald_f": 138.252046862584
+      }
+    },
+    "two_way": {
+      "baseline": {
+        "hc2": {
+          "rk_wald_f": 169.666267048621
+        },
+        "hc3": {
+          "rk_wald_f": 134.834718366688
+        }
+      },
+      "unbalanced": {
+        "hc2": {
+          "rk_wald_f": 115.454888793572
+        },
+        "hc3": {
+          "rk_wald_f": 82.0919462196523
+        }
+      },
+      "long_panel": {
+        "hc2": {
+          "rk_wald_f": 196.829099177376
+        },
+        "hc3": {
+          "rk_wald_f": 167.511812680623
+        }
+      }
+    },
+    "three_way": {
+      "hc2": {
+        "rk_wald_f": 164.861842755481
+      },
+      "hc3": {
+        "rk_wald_f": 128.959012903973
+      }
+    },
+    "x_exog_empty": {
+      "hc2": {
+        "rk_wald_f": 173.633715179917
+      },
+      "hc3": {
+        "rk_wald_f": 142.198126047575
+      }
+    }
+  },
+  "wooldridge": {},
+  "_meta": {
+    "method": "fe_iv",
+    "generated_at": "2026-11-21T05:21:45.144067+00:00",
+    "reference": "fixest (R)",
+    "r_version": "4.5.3",
+    "fixest_version": "0.14.2",
+    "note": "内生変数が1個のときのrk Wald Fは、同じ共分散での第一段階の頑健Wald F（除外操作変数の係数が同時にゼロ）に等しい。fixestはIVのHC2・HC3を提供せず、iv_first_stageもIV推定として拒否するため、第一段階（内生変数 ~ 外生変数 + 除外操作変数 | 固定効果）を通常のfeolsとして回し、wald(vcov = 'hc2'|'hc3')の統計量を取る。fixef.tol=1e-11。"
+  }
+}

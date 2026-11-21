@@ -59,8 +59,12 @@
 #    （momentfitがネイティブに出す統計量ではない）。
 #
 # 7. 比較しない統計量: 弱操作変数F・R²（2SLSのivregクロスチェックと重複するため）、
-#    hc2/hc3（linearmodels・momentfitとも対応なし）、反復GMM（フィクスチャは
-#    classical重みのみで反復しても2SLSと同じ結果になる。収束判定も実装ごとに異なる）。
+#    hc2/hc3（linearmodels・momentfitとも対応なし）。反復GMMは、IV本体のフィクスチャでは
+#    classical重みのみで反復しても2SLSと同じ結果になるため使わない（収束判定も実装ごとに異なる）。
+#    固定効果つきGMMのクロスチェックは、7番目の引数で1段階・反復（回数を固定）も測る。
+#    その経路のうち、1段階の重み`(Z'Z/n)^-1`・classical重みの`mean(e^2) * Z'Z/n`・反復のループは
+#    このスクリプトの手書きで、momentfitの`vcov(model, theta)`でモーメント共分散を作るのは
+#    robust・cluster重みだけ。
 #
 # 8. 切片なし（`0 +`）の扱い: momentfitの`tsls()`と`initW = "tsls"`は切片なしだと
 #    本来の2SLS（重み(Z'Z/n)^-1）と一致しない（実測: 過剰識別で係数が約7%ずれる。
@@ -80,6 +84,9 @@ weight_type <- tolower(args[3])
 cov_type <- tolower(args[4])
 cluster_col <- if (args[5] == "NA") NA_character_ else args[5]
 hac_lag <- if (args[6] == "NA") NA_integer_ else as.integer(args[6])
+# 7番目の引数（省略可）: 推定方式。`twostep`（既定。省略時と同じ）・`onestep`・`iterated:<回数>`
+# （初期推定を数えた推定の回数）。1段階・反復は固定効果つきGMM（`FEIV`）のクロスチェックで使う。
+gmm_type <- if (length(args) >= 7) tolower(args[7]) else "twostep"
 
 # check.names=FALSE: Python側で書き出した列名をそのまま使う（run_ivreg.Rと同じ理由）。
 df <- read.csv(data_path, check.names = FALSE)
@@ -136,7 +143,37 @@ if (has_intercept) {
 }
 
 # 推定とHansen J用の重み（ヘッダコメント1.・2.・4.・8.参照）。
-if (weight_kind == "iid" && !has_intercept) {
+if (gmm_type != "twostep") {
+  # 1段階・反復。重みの作り方は2段階目と同じで、その重みを作る残差だけ、直前の推定のものにする。
+  # 反復は、初期推定（重み`(Z'Z/n)^-1`）から`回数 - 1`回、重みを作り直して再推定する。
+  # Hansen Jは、最終推定に使った重みで作る。`onestep`は重み`(Z'Z/n)^-1`で推定するが、Jは
+  # classicalの`S = mean(e^2) * Z'Z/n`（Sargan）で作る。
+  y_vec <- model.response(model.frame(g_formula, df))
+  x_mat <- model.matrix(g_formula, df)
+  z_all <- model.matrix(x_formula, df)
+  weight_from <- function(theta) {
+    if (weight_kind == "iid") {
+      e <- as.numeric(y_vec - x_mat %*% theta)
+      solve(mean(e^2) * crossprod(z_all) / n)
+    } else {
+      solve(vcov(model, theta)[, , drop = FALSE])
+    }
+  }
+  w_mat <- solve(crossprod(z_all) / n)
+  fit <- gmmFit(model, weights = w_mat, type = "onestep")
+  n_estimations <- if (gmm_type == "onestep") 1 else as.integer(sub("^iterated:", "", gmm_type))
+  if (is.na(n_estimations) || n_estimations < 1) stop(paste("unknown gmm_type:", gmm_type))
+  if (gmm_type == "onestep") {
+    e <- as.numeric(y_vec - x_mat %*% coef(fit))
+    w_obj <- evalWeights(model, w = solve(mean(e^2) * crossprod(z_all) / n))
+  } else {
+    for (i in seq_len(n_estimations - 1)) {
+      w_mat <- weight_from(coef(fit))
+      fit <- gmmFit(model, weights = w_mat, type = "onestep")
+    }
+    w_obj <- evalWeights(model, w = w_mat)
+  }
+} else if (weight_kind == "iid" && !has_intercept) {
   # S = sigma2_0 * Z'Z/n（sigma2_0 = mean(e0^2)、定数項ありのとき`evalWeights(..., "optimal")`が
   # 実際に使うのと同じ非中心化の分散。momentfitのiid共分散`vcov()`は中心化・n-1の分散
   # を使うため、ここでは使わない）。

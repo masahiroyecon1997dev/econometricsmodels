@@ -31,10 +31,19 @@ pub(super) struct WuHausmanContext<'a> {
     pub(super) effect_names: &'a [String],
     /// within変換した列（順は`y`、`x_exog`、`x_endog`、`instruments`）。
     pub(super) tilde: &'a [Vec<f64>],
-    /// 内生変数ごとの第一段階（`x_endog`の順）。
-    pub(super) first_stages: &'a [FeEstimator],
+    /// 内生変数ごとの第一段階から取り出した係数・残差（`x_endog`の順）。
+    pub(super) first_stages: &'a [FirstStageSummary],
     /// 変換が残す誤差（完全適合の判定に使う）。
     pub(super) noise: f64,
+}
+
+/// 第一段階の推定量から、Wu-Hausmanが読む量だけを取り出したもの（推定量は設計行列を持つので、
+/// `fit`の終わりまで持たない）。
+pub(super) struct FirstStageSummary {
+    /// 第一段階の係数（`[x_exog, instruments]`の順）。
+    pub(super) params: Vec<f64>,
+    /// 第一段階の残差`v̂`（within空間）。
+    pub(super) residuals: Vec<f64>,
 }
 
 /// 補助回帰の失敗のうち、この検定だけの問題として`None`にするもの（構造式・第一段階の推定とは無関係）。
@@ -124,7 +133,7 @@ pub(super) fn fe_wu_hausman_test(
 
     let residuals: Vec<Vec<f64>> = first_stages
         .iter()
-        .map(|stage| (0..n).map(|i| *stage.residuals().get(i, 0)).collect())
+        .map(|stage| stage.residuals.clone())
         .collect();
     let (raw_columns, names) = wu_hausman_columns(
         input.x_exog(),
@@ -181,7 +190,7 @@ pub(super) fn fe_wu_hausman_test(
                     + first_stage_columns
                         .iter()
                         .enumerate()
-                        .map(|(l, s)| stage.params().get(l, 0).abs() * s)
+                        .map(|(l, s)| stage.params[l].abs() * s)
                         .sum::<f64>(),
             );
         }

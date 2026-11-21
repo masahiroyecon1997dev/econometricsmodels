@@ -77,18 +77,14 @@ struct Matrices {
 impl FeTwoSlsEstimator {
     fn matrices(&self, statistic: &'static str) -> Result<Matrices, PanelError> {
         // 第一段階が無い（内生変数が無い）と、診断は定義できない。
-        let Some(first) = self.first_stages.first() else {
+        let Some(within) = &self.first_stage_within else {
             return Err(undefined(statistic));
         };
         let (k_exog, k_instruments) = (self.input.k_exog(), self.input.k_instruments());
-        let x = first.within_input().x();
-        let n = x.nrows();
         Ok(Matrices {
-            y_endog: Mat::from_fn(n, self.first_stages.len(), |i, j| {
-                *self.first_stages[j].within_input().y().get(i, 0)
-            }),
-            x_exog: x.subcols(0, k_exog).to_owned(),
-            z: x.subcols(k_exog, k_instruments).to_owned(),
+            y_endog: within.y_endog.clone(),
+            x_exog: within.x.subcols(0, k_exog).to_owned(),
+            z: within.x.subcols(k_exog, k_instruments).to_owned(),
         })
     }
 

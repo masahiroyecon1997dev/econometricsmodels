@@ -30,7 +30,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use super::super::common::{groups_dict, panel_error_to_pyerr};
-use super::super::fe::{FEResult, LazyFixedEffects, fe_result_fields, fixed_effects_dict};
+use super::super::fe::{FEResult, fixed_effects_dict};
 use super::fit::{compute_c_statistic, estimate_two_sls};
 use super::input::FeIvColumns;
 use super::option_values::EstimatorKind;
@@ -291,6 +291,7 @@ impl FEIVResult {
     /// `FeTwoSlsEstimator`の結果。
     pub(super) fn from_two_sls(
         estimator: &FeTwoSlsEstimator,
+        first_stage: Vec<(String, FEResult)>,
         columns: FeIvColumns,
         cov_type_name: String,
     ) -> PyResult<Self> {
@@ -302,19 +303,6 @@ impl FEIVResult {
             ..
         } = columns;
         let input = estimator.input();
-        // 第一段階は固定効果をその場で計算して持つ（`FeEstimator`を結果に持たせない）。
-        let first_stage: Vec<(String, FEResult)> = input
-            .x_endog_names()
-            .iter()
-            .zip(estimator.first_stages())
-            .map(|(name, stage)| {
-                let fixed = LazyFixedEffects::Computed(stage.fixed_effects());
-                (
-                    name.clone(),
-                    fe_result_fields(stage, effects.clone(), cov_type_name.clone(), fixed),
-                )
-            })
-            .collect();
         let (f_statistic, f_p_value) = estimator
             .f_statistic()
             .zip(estimator.f_p_value())

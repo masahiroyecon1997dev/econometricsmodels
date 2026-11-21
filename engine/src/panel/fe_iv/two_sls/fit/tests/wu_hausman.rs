@@ -7,8 +7,8 @@ use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 
 use super::lsdv::lsdv;
 use super::{
-    all_rows, entity_labels, fit, input_spec, one_way_input, third_labels, time_labels,
-    two_way_input,
+    all_rows, entity_labels, fit, fit_with_stages, input_spec, one_way_input, third_labels,
+    time_labels, two_way_input,
 };
 use crate::panel::common::TimeKeys;
 use crate::panel::fe::{FeCovType, FeEffects};
@@ -311,10 +311,9 @@ fn is_none_without_endogenous_variables() {
 /// 構造式の推定は成功して`None`になる。
 #[test]
 fn degrades_to_none_when_the_auxiliary_regression_fits_exactly() {
-    let base = fit(one_way_input(), FeEffects::OneWay, FeCovType::Classical).unwrap();
-    let v: Vec<f64> = (0..40)
-        .map(|i| *base.first_stages()[0].residuals().get(i, 0))
-        .collect();
+    let (base, stages) =
+        fit_with_stages(one_way_input(), FeEffects::OneWay, FeCovType::Classical).unwrap();
+    let v: Vec<f64> = (0..40).map(|i| *stages[0].residuals().get(i, 0)).collect();
     let input = base.input();
     // `y = 2 x_endog + 3 v̂`（固定効果なし）は、補助回帰`y ~ x_exog + x_endog + v̂ | FE`に厳密に載る。
     let y: Vec<f64> = (0..40)
@@ -383,16 +382,14 @@ fn degrades_to_none_when_the_auxiliary_regression_fits_up_to_the_transform_noise
         .filter(|r| ![3, 17, 22, 30].contains(r))
         .collect();
     let dims = [entity_labels(), time_labels()];
-    let base = fit(
+    let (base, stages) = fit_with_stages(
         input_spec(&rows, &dims, 1, 1, 2),
         FeEffects::TwoWay,
         FeCovType::Classical,
     )
     .unwrap();
     let n = base.input().nobs();
-    let v: Vec<f64> = (0..n)
-        .map(|i| *base.first_stages()[0].residuals().get(i, 0))
-        .collect();
+    let v: Vec<f64> = (0..n).map(|i| *stages[0].residuals().get(i, 0)).collect();
     let input = base.input();
     let y: Vec<f64> = (0..n)
         .map(|i| 2.0 * input.x_endog()[0][i] + 3.0 * v[i])

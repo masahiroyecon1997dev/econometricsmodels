@@ -11,7 +11,7 @@
 //! - `validation.rs`: 入力検証・エラー返却・検証順序
 
 use crate::panel::common::PanelError;
-use crate::panel::fe::{FeCovType, FeEffects};
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator};
 use crate::panel::fe_iv::common::FeIvInput;
 use crate::panel::fe_iv::two_sls::FeTwoSlsEstimator;
 
@@ -37,6 +37,24 @@ pub(super) fn fit(
     cov_type: FeCovType,
 ) -> Result<FeTwoSlsEstimator, PanelError> {
     FeTwoSlsEstimator::fit(input, effects, cov_type, 0.95)
+}
+
+/// [`fit`]と同じ推定を、内生変数ごとの第一段階の`FeEstimator`も一緒に返す形で行う。
+/// `FeTwoSlsEstimator`は第一段階の推定量を保持しない（`fit_with_first_stages`が呼び出し側へ渡して
+/// 手放す）ので、第一段階を確かめるテストはここから受け取る。
+pub(super) fn fit_with_stages(
+    input: FeIvInput,
+    effects: FeEffects,
+    cov_type: FeCovType,
+) -> Result<(FeTwoSlsEstimator, Vec<FeEstimator>), PanelError> {
+    FeTwoSlsEstimator::fit_with_first_stages(
+        input,
+        effects,
+        cov_type,
+        0.95,
+        &Default::default(),
+        |_, stage| stage,
+    )
 }
 
 pub(super) fn entity_cluster() -> FeCovType {

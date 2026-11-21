@@ -6,7 +6,10 @@
 //! 回帰子に入れたときのレバレッジ）。
 
 use super::lsdv::dummies;
-use super::{all_rows, entity_labels, fit, input_spec, one_way_input, third_labels, time_labels};
+use super::{
+    all_rows, entity_labels, fit, fit_with_stages, input_spec, one_way_input, third_labels,
+    time_labels,
+};
 use crate::iv::common::{
     IvInput, compute_cragg_donald, compute_effective_f, compute_first_stage,
     compute_kleibergen_paap,
@@ -235,13 +238,13 @@ fn cluster_uses_the_nonnested_count_of_absorbed_parameters() {
         }
 
         // 個体クラスター（個体FEが入れ子）: 個体内で平均を引いた列に切片を足す（`n_absorbed = 1`）。
-        let fitted = fit(
+        let (fitted, stages) = fit_with_stages(
             make(),
             FeEffects::OneWay,
             FeCovType::Cluster { groups: None },
         )
         .unwrap();
-        let within = within_iv(&fitted);
+        let within = within_iv(&fitted, &stages);
         let iv_cov = CovType::Cluster {
             groups: Some(entity_groups.clone()),
         };
@@ -275,11 +278,14 @@ fn cluster_uses_the_nonnested_count_of_absorbed_parameters() {
 
 /// within変換した列に切片を足したIV本体の入力（吸収したパラメータ数1に相当）。第一段階の設計行列と
 /// 各第一段階の`x̃_endog`から組む。
-fn within_iv(fitted: &crate::panel::fe_iv::two_sls::FeTwoSlsEstimator) -> IvInput {
+fn within_iv(
+    fitted: &crate::panel::fe_iv::two_sls::FeTwoSlsEstimator,
+    stages: &[crate::panel::fe::FeEstimator],
+) -> IvInput {
     let input = fitted.input();
     let n = input.nobs();
     let columns = |stage: usize, from: usize, count: usize| -> Vec<Vec<f64>> {
-        let x = fitted.first_stages()[stage].within_input().x();
+        let x = stages[stage].within_input().x();
         (from..from + count)
             .map(|j| (0..n).map(|i| *x.get(i, j)).collect())
             .collect()
@@ -287,7 +293,7 @@ fn within_iv(fitted: &crate::panel::fe_iv::two_sls::FeTwoSlsEstimator) -> IvInpu
     let (ke, kz) = (input.k_exog(), input.k_instruments());
     let endog: Vec<Vec<f64>> = (0..input.k_endog())
         .map(|j| {
-            let y = fitted.first_stages()[j].within_input().y();
+            let y = stages[j].within_input().y();
             (0..n).map(|i| *y.get(i, 0)).collect()
         })
         .collect();

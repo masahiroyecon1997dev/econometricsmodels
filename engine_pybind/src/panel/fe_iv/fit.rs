@@ -11,6 +11,7 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::super::common::panel_error_to_pyerr;
+use super::super::fe::{FEResult, LazyFixedEffects, fe_result_fields};
 use super::gmm_setup::c_statistic_weight;
 use super::input::{BuiltFeIvInput, BuiltGmm, FeIvColumns, build_fe_iv_input};
 use super::options::FEIVOptions;
@@ -28,7 +29,12 @@ fn absorption(options: &FEIVOptions) -> FeAbsorption {
 
 /// 推定した推定量。GMMは、結果に載せる`gmm_type`と重みの正規形の名前を一緒に持つ（別に持ち回さない）。
 enum Estimated {
-    TwoSls(FeTwoSlsEstimator),
+    /// `first_stage`は内生変数ごとの第一段階の結果（`x_endog`の順。固定効果は計算済み）。第一段階の
+    /// 推定量（設計行列を持つ）は結果に変えてすぐ手放す。結果が要らない再推定では空。
+    TwoSls {
+        estimator: FeTwoSlsEstimator,
+        first_stage: Vec<(String, FEResult)>,
+    },
     Gmm {
         estimator: FeGmmEstimator,
         gmm_type_name: String,
@@ -36,26 +42,52 @@ enum Estimated {
     },
 }
 
-fn estimate_built(built: BuiltFeIvInput, options: &FEIVOptions) -> PyResult<Estimated> {
+/// `first_stage_effects`が`Some`（効果の列名）のとき、2SLSの第一段階を`FEResult`にして返す。
+fn estimate_built(
+    built: BuiltFeIvInput,
+    options: &FEIVOptions,
+    first_stage_effects: Option<&[String]>,
+) -> PyResult<Estimated> {
     let BuiltFeIvInput {
         input,
         effects,
         cov_type,
+        cov_type_name,
         gmm,
         ..
     } = built;
     let absorption = absorption(options);
     Ok(match gmm {
-        None => Estimated::TwoSls(
-            FeTwoSlsEstimator::fit_with_absorption(
+        None => {
+            let mut first_stage: Vec<(String, FEResult)> = Vec::new();
+            let (estimator, _) = FeTwoSlsEstimator::fit_with_first_stages(
                 input,
                 effects,
                 cov_type,
                 options.confidence_level,
                 &absorption,
+                |name, stage| {
+                    if let Some(effect_columns) = first_stage_effects {
+                        // 第一段階は固定効果をその場で計算して持つ（`FeEstimator`を結果に持たせない）。
+                        let fixed = LazyFixedEffects::Computed(stage.fixed_effects());
+                        first_stage.push((
+                            name.to_string(),
+                            fe_result_fields(
+                                &stage,
+                                effect_columns.to_vec(),
+                                cov_type_name.clone(),
+                                fixed,
+                            ),
+                        ));
+                    }
+                },
             )
-            .map_err(panel_error_to_pyerr)?,
-        ),
+            .map_err(panel_error_to_pyerr)?;
+            Estimated::TwoSls {
+                estimator,
+                first_stage,
+            }
+        }
         Some(BuiltGmm {
             gmm_type,
             gmm_type_name,
@@ -85,8 +117,8 @@ pub(super) fn estimate_two_sls(
     columns: FeIvColumns,
     options: &FEIVOptions,
 ) -> PyResult<FeTwoSlsEstimator> {
-    match estimate_built(build_fe_iv_input(df, columns, options)?, options)? {
-        Estimated::TwoSls(estimator) => Ok(estimator),
+    match estimate_built(build_fe_iv_input(df, columns, options)?, options, None)? {
+        Estimated::TwoSls { estimator, .. } => Ok(estimator),
         Estimated::Gmm { .. } => Err(internal_error(
             "a two-stage least squares re-estimation returned a GMM estimator",
         )),
@@ -142,10 +174,12 @@ pub(crate) fn fit(
 fn fit_frame(df: &DataFrame, columns: FeIvColumns, options: &FEIVOptions) -> PyResult<FEIVResult> {
     let built = build_fe_iv_input(df, columns.clone(), options)?;
     let cov_type_name = built.cov_type_name.clone();
-    match estimate_built(built, options)? {
-        Estimated::TwoSls(estimator) => {
-            FEIVResult::from_two_sls(&estimator, columns, cov_type_name)
-        }
+    let effect_columns = columns.effects.clone();
+    match estimate_built(built, options, Some(&effect_columns))? {
+        Estimated::TwoSls {
+            estimator,
+            first_stage,
+        } => FEIVResult::from_two_sls(&estimator, first_stage, columns, cov_type_name),
         Estimated::Gmm {
             estimator,
             gmm_type_name,

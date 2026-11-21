@@ -4,7 +4,8 @@ use faer::Mat;
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::{
-    N_ENTITIES, all_rows, entity_labels, fit, input_spec, one_way_input, third_labels, time_labels,
+    N_ENTITIES, all_rows, entity_labels, fit, fit_with_stages, input_spec, one_way_input,
+    third_labels, time_labels,
 };
 use crate::panel::common::TimeKeys;
 use crate::panel::fe::{FeCovType, FeEffects};
@@ -148,13 +149,14 @@ fn does_not_depend_on_the_covariance_type() {
 /// `n / (n − neffects)`倍だけ小さくなる。
 #[test]
 fn denominator_is_the_residual_degrees_of_freedom_of_the_absorbed_effects() {
-    let fitted = fit(one_way_input(), FeEffects::OneWay, FeCovType::Classical).unwrap();
+    let (fitted, stages) =
+        fit_with_stages(one_way_input(), FeEffects::OneWay, FeCovType::Classical).unwrap();
     let input = fitted.input();
     let (n, neffects) = (input.nobs() as f64, N_ENTITIES as f64);
     let e = fitted.residuals();
     let ssr: f64 = (0..input.nobs()).map(|i| e.get(i, 0).powi(2)).sum();
     // 構造残差`e`と`Z̃`の射影: 第一段階の設計行列（`within_input().x()`、`[x̃_exog, z̃]`）を使う。
-    let z = fitted.first_stages()[0].within_input().x();
+    let z = stages[0].within_input().x();
     let projected = z * least_squares(z, e).unwrap().params;
     let quad: f64 = (0..input.nobs())
         .map(|i| e.get(i, 0) * projected.get(i, 0))

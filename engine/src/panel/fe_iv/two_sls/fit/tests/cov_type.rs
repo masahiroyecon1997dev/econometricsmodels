@@ -1,6 +1,6 @@
 //! Driscoll-Kraay（DK）。
 
-use super::{entity_labels, fit, input_spec, one_way_input, time_labels};
+use super::{entity_labels, fit, fit_with_stages, input_spec, one_way_input, time_labels};
 use crate::panel::common::TimeKeys;
 use crate::panel::fe::{FeCovType, FeEffects};
 use crate::shared::error::ErrorInfo;
@@ -68,13 +68,13 @@ fn dk_with_as_many_slopes_as_periods_is_rejected() {
 fn dk_with_as_many_first_stage_slopes_as_periods_still_gives_the_standard_errors() {
     // 外生1個 + 操作変数3個で`l = 4 = T`、構造式は`k = 2`。
     let rows: Vec<usize> = (0..40).collect();
-    let estimator = fit(
+    let (estimator, stages) = fit_with_stages(
         input_spec(&rows, &[entity_labels()], 1, 1, 3),
         FeEffects::OneWay,
         dk(Some(0)),
     )
     .unwrap();
     assert!(estimator.f_statistic().is_some());
-    assert_eq!(estimator.first_stages()[0].f_statistic(), None);
-    assert!(estimator.first_stages()[0].std_errors().nrows() == 4);
+    assert_eq!(stages[0].f_statistic(), None);
+    assert!(stages[0].std_errors().nrows() == 4);
 }

@@ -69,6 +69,14 @@ mod sargan;
 mod weak_instruments;
 mod wu_hausman;
 
+/// 第一段階のwithin変換済みの行列。`x`は`[x̃_exog, z̃]`（全ての第一段階で同じ）、`y_endog`は
+/// `x̃_endog`の各列（`x_endog`の順）。
+#[derive(Debug)]
+struct FirstStageWithin {
+    x: Mat<f64>,
+    y_endog: Mat<f64>,
+}
+
 /// FEIVの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
 #[derive(Debug)]
 pub struct FeTwoSlsEstimator {
@@ -99,8 +107,9 @@ pub struct FeTwoSlsEstimator {
     r_squared_overall: f64,
     /// 傾き係数の同時Wald F検定の`(F統計量, p値)`。
     f_test: Option<(f64, f64)>,
-    /// 内生変数ごとの第一段階（`x_endog`の順）。変換済みの列・残差（`residuals()`）を持つ。
-    first_stages: Vec<FeEstimator>,
+    /// 弱操作変数診断が使う、第一段階のwithin変換済みの行列。内生変数が無ければ`None`。第一段階の
+    /// 推定量そのものは持たない（`fit_with_first_stages`が呼び出し側へ渡して手放す）。
+    first_stage_within: Option<FirstStageWithin>,
     /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順。名前つき）。内生変数が無ければ空。
     weak_instrument_f: Vec<(String, f64)>,
     /// Sargan過剰識別検定。丁度識別、または内生変数が無いときは`None`。
@@ -161,7 +170,45 @@ impl FeTwoSlsEstimator {
         confidence_level: f64,
         absorption: &FeAbsorption,
     ) -> Result<Self, PanelError> {
-        fit::fit_fe_two_sls(input, effects, cov_type, confidence_level, absorption)
+        fit::fit_fe_two_sls(
+            input,
+            effects,
+            cov_type,
+            confidence_level,
+            absorption,
+            |_, _| (),
+        )
+        .map(|(estimator, _)| estimator)
+    }
+
+    /// [`Self::fit_with_absorption`]と同じ推定を、内生変数ごとの第一段階の`FeEstimator`
+    /// （`x̃_endog[j] ~ x̃_exog + 操作変数`のwithin回帰。`cov_type`は構造式と同じ。傾きのF検定は
+    /// しないので`f_statistic()`は`None`）を`consume`に渡して、その戻り値を（`x_endog`の順に）一緒に
+    /// 返す形で行う。
+    ///
+    /// 第一段階の`FeEstimator`は、生の列・within行列・残差を持つので、内生変数の数だけ`fit`の終わりまで
+    /// 持つとピークメモリがその数に比例して増える。`consume`はそれを受け取って必要な量だけ残す
+    /// （`engine_pybind`は`FEResult`に変える）。`FeTwoSlsEstimator`自身は第一段階の推定量を保持せず、
+    /// 弱操作変数診断が使うwithin変換済みの行列だけを持つ。
+    ///
+    /// # Errors
+    /// [`Self::fit_with_absorption`]と同じ。
+    pub fn fit_with_first_stages<T>(
+        input: FeIvInput,
+        effects: FeEffects,
+        cov_type: FeCovType,
+        confidence_level: f64,
+        absorption: &FeAbsorption,
+        consume: impl FnMut(&str, FeEstimator) -> T,
+    ) -> Result<(Self, Vec<T>), PanelError> {
+        fit::fit_fe_two_sls(
+            input,
+            effects,
+            cov_type,
+            confidence_level,
+            absorption,
+            consume,
+        )
     }
 
     /// 入力データ（within変換前）。
@@ -278,12 +325,6 @@ impl FeTwoSlsEstimator {
     pub fn f_df(&self) -> Option<(usize, usize)> {
         self.f_test
             .map(|_| (self.params.nrows(), self.df_inference))
-    }
-
-    /// 内生変数ごとの第一段階（`x_endog`の順）。各第一段階は`x̃_endog[j] ~ x̃_exog + 操作変数`の
-    /// within回帰で、`cov_type`は構造式と同じ。傾きのF検定はしないので`f_statistic()`は`None`。
-    pub fn first_stages(&self) -> &[FeEstimator] {
-        &self.first_stages
     }
 
     /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順）。除外操作変数`q`個の係数がゼロという制限の、

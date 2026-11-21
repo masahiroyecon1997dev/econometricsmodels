@@ -1,8 +1,8 @@
 //! 構造残差・R²・固定効果・第一段階・自由度・不変性。
 
 use super::{
-    all_rows, entity_labels, fit, input_with, one_way_input, third_labels, time_labels,
-    two_way_input,
+    all_rows, entity_labels, fit, fit_with_stages, input_with, one_way_input, third_labels,
+    time_labels, two_way_input,
 };
 use crate::panel::common::TimeKeys;
 use crate::panel::fe::{FeCovType, FeEffects, FixedEffects};
@@ -30,6 +30,14 @@ fn demean_by_entity(column: &[f64]) -> Vec<f64> {
 
 fn one_way_fit() -> crate::panel::fe_iv::two_sls::FeTwoSlsEstimator {
     fit(one_way_input(), FeEffects::OneWay, FeCovType::Classical).unwrap()
+}
+
+/// [`one_way_fit`]と、その第一段階の`FeEstimator`（推定量は第一段階を保持しない）。
+fn one_way_fit_with_stages() -> (
+    crate::panel::fe_iv::two_sls::FeTwoSlsEstimator,
+    Vec<crate::panel::fe::FeEstimator>,
+) {
+    fit_with_stages(one_way_input(), FeEffects::OneWay, FeCovType::Classical).unwrap()
 }
 
 // ── 構造残差・R²・固定効果 ─────────────────────────────────────────
@@ -121,10 +129,10 @@ fn one_way_fixed_effects_are_the_entity_means_of_the_structural_residual_without
 
 #[test]
 fn each_first_stage_is_orthogonal_to_the_exogenous_variables_and_instruments() {
-    let estimator = one_way_fit();
+    let (_estimator, stages) = one_way_fit_with_stages();
     let input = one_way_input();
-    assert_eq!(estimator.first_stages().len(), 1);
-    let stage = &estimator.first_stages()[0];
+    assert_eq!(stages.len(), 1);
+    let stage = &stages[0];
     assert_eq!(stage.within_input().param_names(), ["x1", "z1", "z2"]);
     for column in [
         &input.x_exog()[0],
@@ -139,12 +147,57 @@ fn each_first_stage_is_orthogonal_to_the_exogenous_variables_and_instruments() {
     }
 }
 
+/// 推定量が弱操作変数診断のために持つ第一段階のwithin行列は、各第一段階の`FeEstimator`が持つ
+/// within行列とビット単位で同じ（`[x̃_exog, z̃]`は全ての第一段階で共通、`ỹ_endog`は各段階の被説明変数）。
+#[test]
+fn the_within_matrices_kept_for_the_diagnostics_match_the_first_stages() {
+    for (input, effects) in [
+        (one_way_input(), FeEffects::OneWay),
+        (two_way_input(), FeEffects::TwoWay),
+    ] {
+        let (estimator, stages) = fit_with_stages(input, effects, FeCovType::Classical).unwrap();
+        let within = estimator
+            .first_stage_within
+            .as_ref()
+            .expect("there is an endogenous variable");
+        assert_eq!(within.y_endog.ncols(), stages.len());
+        for (j, stage) in stages.iter().enumerate() {
+            assert_eq!(within.x, *stage.within_input().x(), "x of stage {j}");
+            assert_eq!(
+                within.y_endog.col(j).as_mat(),
+                stage.within_input().y().as_ref(),
+                "y of stage {j}"
+            );
+        }
+    }
+}
+
+/// `fit`と`fit_with_first_stages`は同じ推定量を返す（第一段階を渡す形でも結果は変わらない）。
+#[test]
+fn fit_with_first_stages_gives_the_same_estimator_as_fit() {
+    let plain = one_way_fit();
+    let (collected, stages) = one_way_fit_with_stages();
+    assert_eq!(stages.len(), 1);
+    assert_eq!(collected.params(), plain.params());
+    assert_eq!(collected.std_errors(), plain.std_errors());
+    assert_eq!(collected.residuals(), plain.residuals());
+    assert_eq!(
+        collected.weak_instrument_f_statistics(),
+        plain.weak_instrument_f_statistics()
+    );
+    assert_eq!(
+        collected.wu_hausman_statistic(),
+        plain.wu_hausman_statistic()
+    );
+    assert_eq!(collected.sargan_statistic(), plain.sargan_statistic());
+}
+
 #[test]
 fn a_first_stage_does_not_test_the_slopes_but_keeps_the_standard_errors() {
-    let estimator = one_way_fit();
-    assert_eq!(estimator.first_stages()[0].f_statistic(), None);
+    let (estimator, stages) = one_way_fit_with_stages();
+    assert_eq!(stages[0].f_statistic(), None);
     assert!(estimator.f_statistic().is_some());
-    assert_eq!(estimator.first_stages()[0].std_errors().nrows(), 3);
+    assert_eq!(stages[0].std_errors().nrows(), 3);
 }
 
 #[test]
@@ -153,11 +206,11 @@ fn clusters_not_above_the_first_stage_slopes_still_give_the_standard_errors() {
     let cov = FeCovType::Cluster {
         groups: Some(GroupCodes::from_labels(&third_labels())),
     };
-    let estimator = fit(one_way_input(), FeEffects::OneWay, cov).unwrap();
+    let (estimator, stages) = fit_with_stages(one_way_input(), FeEffects::OneWay, cov).unwrap();
     assert_eq!(estimator.df_inference(), 2);
-    assert_eq!(estimator.first_stages()[0].f_statistic(), None);
+    assert_eq!(stages[0].f_statistic(), None);
     for j in 0..3 {
-        let se = *estimator.first_stages()[0].std_errors().get(j, 0);
+        let se = *stages[0].std_errors().get(j, 0);
         assert!(se.is_finite() && se > 0.0, "first-stage se {se}");
     }
 }

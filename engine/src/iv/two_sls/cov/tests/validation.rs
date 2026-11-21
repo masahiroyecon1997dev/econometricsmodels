@@ -5,6 +5,7 @@ use crate::iv::common::IvError;
 use crate::iv::common::IvEstimate;
 use crate::iv::common::IvInput;
 use crate::iv::two_sls::TwoSlsEstimator;
+use crate::iv::two_sls::cov::covariance_stage;
 use crate::iv::two_sls::test_support::*;
 use crate::linear::common::row_time_order;
 use crate::linear::ols::CovType;
@@ -13,6 +14,7 @@ use crate::linear::ols::OlsInput;
 use crate::shared::error::ClusterSetting;
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
+use faer::Mat;
 
 #[test]
 fn fit_returns_invalid_hac_lags_error_when_out_of_range() {
@@ -214,4 +216,27 @@ fn fit_succeeds_with_cluster_g2_boundary_when_x_exog_is_empty() {
         (first_stage_estimator.f_statistic().unwrap() - expected.f_statistic().unwrap()).abs()
             < 1e-8
     );
+}
+
+/// 第二段階の設計行列`X̂`にレバレッジが1の行（1行だけ非ゼロの列）があると、構造式の共分散
+/// （HC2・HC3）は`UnitLeverage`で止まる。`fit`越しだと第一段階が先に同じ理由で止まるので、
+/// 構造式の呼び出し箇所を直接固定する。
+#[test]
+fn covariance_stage_rejects_hc2_and_hc3_when_the_second_stage_has_a_unit_leverage_row() {
+    let x_hat = Mat::from_fn(6, 2, |i, j| if j == 0 { 1.0 } else { f64::from(i == 2) });
+    let residuals = Mat::from_fn(6, 1, |i, _| [0.3, -0.2, 0.0, -0.4, 0.25, 0.05][i]);
+    let xtx_inv = crate::shared::covariance::xtx_inverse(&x_hat).unwrap();
+    for cov_type in [CovType::Hc2, CovType::Hc3] {
+        let result = covariance_stage(&cov_type, &x_hat, &residuals, &xtx_inv, 0.4, 4);
+        assert_eq!(
+            result.err(),
+            Some(IvError::Common(CommonError::UnitLeverage {
+                n_affected: 1,
+                first_row: 2
+            }))
+        );
+    }
+    for cov_type in [CovType::Classical, CovType::Hc0, CovType::Hc1] {
+        assert!(covariance_stage(&cov_type, &x_hat, &residuals, &xtx_inv, 0.4, 4).is_ok());
+    }
 }

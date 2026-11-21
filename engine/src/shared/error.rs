@@ -237,6 +237,13 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     PerfectFit,
 
+    /// HC2・HC3の行スケール`1/(1-h_ii)`・`1/√(1-h_ii)`が定義できない: `n_affected`行のレバレッジ`h_ii`が
+    /// 丸め誤差の範囲で1以上（または非有限）で、その行はモデルに完全にあてはまり残差が情報を持たない。
+    /// `first_row`は最初の該当行（0始まり）。判定は[`crate::shared::covariance::hc_scales`]の1か所。
+    /// レバレッジは設計行列の分解を経て初めて分かるため`ComputationError`。
+    #[error("{}", self.catalog_message())]
+    UnitLeverage { n_affected: usize, first_row: usize },
+
     /// 実装の誤りでだけ起きるはずの状態（不変条件の破れ）。`detail`は開発者向けの英語。
     #[error("{}", self.catalog_message())]
     Internal { detail: String },
@@ -337,6 +344,12 @@ impl ErrorInfo for CommonError {
             }
             Self::OutcomeConstant => ErrorReport::new(ErrorCode::OutcomeConstant),
             Self::PerfectFit => ErrorReport::new(ErrorCode::PerfectFit),
+            Self::UnitLeverage {
+                n_affected,
+                first_row,
+            } => ErrorReport::new(ErrorCode::UnitLeverageObservation)
+                .param("n_affected", *n_affected)
+                .param("first_row", *first_row),
             Self::Internal { detail } => internal(detail.clone()),
         }
     }

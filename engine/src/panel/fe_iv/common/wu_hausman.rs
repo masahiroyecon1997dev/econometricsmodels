@@ -50,6 +50,8 @@ fn is_expected_failure(err: &PanelError) -> bool {
     match err {
         PanelError::InsufficientDegreesOfFreedom { .. }
         | PanelError::ZeroVarianceAfterDemeaning { .. } => true,
+        // HC2・HC3で、補助回帰のレバレッジが1の行がある（構造式は通っても、列が多い補助回帰では起こりうる）。
+        PanelError::Common(CommonError::UnitLeverage { .. }) => true,
         PanelError::WithinRegressionFailed { source } => matches!(
             source,
             LeastSquaresError::SingularMatrix { .. }
@@ -57,6 +59,7 @@ fn is_expected_failure(err: &PanelError) -> bool {
                     CommonError::PerfectFit
                         | CommonError::InsufficientObservations { .. }
                         | CommonError::NearSingularMatrix { .. }
+                        | CommonError::UnitLeverage { .. }
                 )
         ),
         _ => false,
@@ -237,6 +240,23 @@ mod tests {
             coordinates: Mat::from_fn(3, 1, |i, _| 1.0 + i as f64),
             meat,
         }
+    }
+
+    /// 補助回帰のレバレッジが1の行（HC2・HC3）は、`PanelError::Common`でも`WithinRegressionFailed`の
+    /// 中でも、この検定だけの問題として`None`にする失敗に入る。
+    #[test]
+    fn a_unit_leverage_row_in_the_auxiliary_regression_is_an_expected_failure() {
+        let unit_leverage = || CommonError::UnitLeverage {
+            n_affected: 2,
+            first_row: 0,
+        };
+        assert!(is_expected_failure(&PanelError::Common(unit_leverage())));
+        assert!(is_expected_failure(&PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::Common(unit_leverage()),
+        }));
+        assert!(!is_expected_failure(&PanelError::Common(
+            CommonError::internal("unexpected")
+        )));
     }
 
     #[test]

@@ -7,9 +7,7 @@
 
 use faer::Mat;
 
-use crate::shared::covariance::{
-    HcScale, cluster_meat, hac_meat, hc_meat, hc_scales, resolve_hac_lags,
-};
+use crate::shared::covariance::{cluster_meat, hac_meat, hc_meat, resolve_hac_lags};
 use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::validate_cluster_groups;
@@ -86,7 +84,8 @@ pub(crate) fn validate_weight_type(
 /// モジュールdoc「`weight_type`ごとの`S`」参照（`shared::covariance`のHC0と同じ外積の和で、
 /// レバレッジ調整は無し。`S`はスカラー倍で点推定が変わらないため小標本補正も不要）。
 pub(crate) fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: usize) -> Mat<f64> {
-    let scales = hc_scales(n, |i| *residuals.get(i, 0), HcScale::Hc0);
+    // HC0の行スケールは残差そのもの（レバレッジを使わないので失敗しない）。
+    let scales: Vec<f64> = (0..n).map(|i| *residuals.get(i, 0)).collect();
     hc_meat(z, &scales)
 }
 

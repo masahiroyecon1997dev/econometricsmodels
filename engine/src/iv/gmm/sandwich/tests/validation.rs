@@ -5,12 +5,15 @@ use crate::iv::common::IvInput;
 use crate::iv::gmm::GmmEstimator;
 use crate::iv::gmm::GmmType;
 use crate::iv::gmm::WeightType;
+use crate::iv::gmm::sandwich::gmm_hc_omega;
 use crate::iv::gmm::test_support::*;
 use crate::linear::common::row_time_order;
 use crate::linear::ols::CovType;
+use crate::shared::covariance::HcVariant;
 use crate::shared::error::ClusterSetting;
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
+use faer::Mat;
 
 /// `cov_type=Cluster`で`groups`未指定なら`MissingClusterColumn`
 /// （`weight_type`側の同種の検証、`fit_returns_missing_cluster_column_error_when_
@@ -164,4 +167,25 @@ fn fit_returns_invalid_hac_lags_error_when_cov_type_hac_lags_out_of_range() {
         result.unwrap_err(),
         IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n })
     );
+}
+
+/// 白色化した操作変数`Z̃`にレバレッジが1の行があると、GMMの`Ω̂`（HC2・HC3）は`UnitLeverage`で止まる。
+/// HC0・HC1はレバレッジを使わない。
+#[test]
+fn gmm_hc_omega_rejects_hc2_and_hc3_when_the_instruments_have_a_unit_leverage_row() {
+    let n = 6;
+    let z = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { f64::from(i == 4) });
+    let residuals = Mat::from_fn(n, 1, |i, _| [0.3, -0.2, 0.1, -0.4, 0.0, 0.05][i]);
+    for variant in [HcVariant::Hc2, HcVariant::Hc3] {
+        assert_eq!(
+            gmm_hc_omega(&z, &residuals, n, 2, variant).err(),
+            Some(IvError::Common(CommonError::UnitLeverage {
+                n_affected: 1,
+                first_row: 4
+            }))
+        );
+    }
+    for variant in [HcVariant::Hc0, HcVariant::Hc1] {
+        assert!(gmm_hc_omega(&z, &residuals, n, 2, variant).is_ok());
+    }
 }

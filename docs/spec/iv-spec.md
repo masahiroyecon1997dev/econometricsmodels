@@ -352,7 +352,7 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
 - **`cov_type`ごとの共分散**: `Classical`（射影後は`ω·I`。LMはAndersonの`n·r²_min`、FはCragg-Donaldに
   一致）、`Hc0`〜`Hc3`（スコア全体に行スケールを掛ける。`Hc1`は`√(n/(n−q−k_exog−n_absorbed))`、
   `Hc2`・`Hc3`は`[X_exog, Z]`のレバレッジ`h_i`による`1/√(1−h_i)`・`1/(1−h_i)`）、`Cluster`、`Hac`（Bartlett核。
-  `lags`は共有の`hac_meat`と同じ定義）。`1−h_i ≤ 1e-10`の行があるHC2・HC3は`None`。レバレッジは`[X_exog, Z]`だけから計算し、吸収した効果の分を
+  `lags`は共有の`hac_meat`と同じ定義）。`1−h_i ≤ 1e-10`の行があるHC2・HC3は`None`（診断統計量なので`fit()`を止めない。閾値と検査は共有の`hc_scales`と同じ`UNIT_LEVERAGE_TOLERANCE`。係数の標準誤差のHC2・HC3は同じ条件で`UNIT_LEVERAGE_OBSERVATION`の`ComputationError`）。レバレッジは`[X_exog, Z]`だけから計算し、吸収した効果の分を
   含まないので、`n_absorbed > 0`のHC2・HC3も`None`（個体ダミーを回帰子に入れた定義と食い違うため。固定効果つき
   2SLSで吸収した効果のレバレッジを受け取る口を足すまでの扱い）。
 - **rk Wald Fの小標本の補正**（`l = q + k_exog`）: `F = W/q`に、`Classical`・`Hac`は`(n−l−n_absorbed)/n`、
@@ -481,13 +481,15 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
   v1スコープ外）。
 - **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
-  `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は2つ:
+  `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は3つ:
   (1) 拡張回帰が完全フィット（`y`が第二段階の説明変数と第一段階残差で丸め誤差の範囲で
   厳密に説明される。`sigma^2 = 0`でワルド統計量が定義できない）、第一段階残差が他の列と共線に
   なり設計行列が特異になる（第一段階の残差が0になる退化ケースは第一段階が`PERFECT_FIT`で
   先に止めるので、この経路には来ない）、(2) 拡張回帰は第二段階より内生変数の数だけ
   列が多い（`k_exog+2*k_endog`列）ため、境界的なサンプルサイズでは第二段階は成功するが
-  拡張回帰は観測数不足になりうる。**それ以外の失敗（数値的なほぼ特異性等）は`None`へ
+  拡張回帰は観測数不足になりうる。(3) `cov_type`がHC2・HC3で、拡張回帰のレバレッジが1の行がある
+  （`UnitLeverage`。構造式・第一段階が通っても、列が多い拡張回帰では起こりうる。係数の標準誤差の
+  `UnitLeverage`は`fit()`を失敗させる。FE-IVも同じ扱い）。**それ以外の失敗（数値的なほぼ特異性等）は`None`へ
   握りつぶさず`IvError::HausmanRegressionFailed`として伝播する**（広すぎる`Err(_)`
   キャッチで実装バグを隠さないため）。
 - `x_endog=[]`のときも`None`（同じ意味論に統合）。

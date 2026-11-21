@@ -59,7 +59,7 @@ pub(crate) fn panel_hc_cov_params(
     xtx_inv: &Mat<f64>,
     df_resid: usize,
     variant: PanelHcVariant<'_>,
-) -> Mat<f64> {
+) -> Result<Mat<f64>, CommonError> {
     let n = x.nrows();
     let resid = |i: usize| residuals[i];
     let scale = match variant {
@@ -69,9 +69,9 @@ pub(crate) fn panel_hc_cov_params(
         PanelHcVariant::Hc2(h) => HcScale::Hc2 { leverage: h },
         PanelHcVariant::Hc3(h) => HcScale::Hc3 { leverage: h },
     };
-    let row_scales = hc_scales(n, resid, scale);
+    let row_scales = hc_scales(n, resid, scale)?;
     let psi_hat = hc_meat(x, &row_scales);
-    sandwich(xtx_inv, &psi_hat)
+    Ok(sandwich(xtx_inv, &psi_hat))
 }
 
 /// クラスターロバスト係数分散共分散行列（k×k）。`shared::covariance::cluster_cov_params`と同じ

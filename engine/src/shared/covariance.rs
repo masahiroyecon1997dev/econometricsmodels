@@ -64,13 +64,24 @@ pub(crate) fn leverages(x: &Mat<f64>, xtx_inv: &Mat<f64>) -> Vec<f64> {
         .collect()
 }
 
+/// `1 - h_ii`がこれ以下の行があると、HC2・HC3の行スケールは定義できない。
+///
+/// 丸め誤差の範囲でちょうど1の行は`1 - h_ii`が`k·ε`程度（`ε = 2.2e-16`。単位が1行だけのダミーでは
+/// 約2.2e-16）になる。`1e-10`はそれより約6桁上で、「丸めの範囲か、本当に1に近いか」を分ける。
+/// 閾値の直上では`1 - h_ii`の相対誤差が約1e-5（HC3の重み`1/(1-h_ii)²`では約2e-5）になるので、
+/// テストの許容誤差（1e-8）を保証する線ではなく、任意の値が返るのを防ぐ線である。
+pub(crate) const UNIT_LEVERAGE_TOLERANCE: f64 = 1e-10;
+
 /// HCの種類ごとの行スケールの定義。どのレバレッジを使うか、何を小標本補正の分母にするかは
 /// 呼び出し側の推定量が決めるので、補正係数とレバレッジは値として受け取る
 /// （`hc_cov_params`は素の`h_ii = x_i'(X'X)⁻¹x_i`と`n/(n-k)`、パネルFEは`1/T_i`込みの
 /// レバレッジと`n/df_resid`、GMMは`Z`ベースのレバレッジと構造方程式の`k`ベースの補正を渡す）。
 ///
-/// レバレッジは各行の`h_ii`（長さ`n`、`h_ii < 1`）。`h_ii = 1`だとHC2/HC3は`inf`・`NaN`になり、
-/// 呼び出し側（推定量）がそれを防ぐ。
+/// レバレッジは各行の`h_ii`（長さ`n`）。`h_ii = 1`の行はモデルに完全にあてはまり残差が0なので、
+/// HC2/HC3の`ε̂_i/(1-h_ii)`は`0/0`になる。丸め誤差で`h_ii`が1のわずかに下になった行も、`ε̂_i`の
+/// 丸めノイズが`1-h_ii`で増幅されて任意の値になり、データの単位などで結果が変わる。
+/// [`hc_scales`]が[`UNIT_LEVERAGE_TOLERANCE`]で検出して`CommonError::UnitLeverage`にする
+/// （呼び出し側はレバレッジを検査せず`?`で伝える）。
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum HcScale<'a> {
     /// 補正なし。
@@ -92,23 +103,52 @@ pub(crate) enum HcScale<'a> {
 /// - HC2: `ε̂_i / sqrt(1-h_ii)`
 /// - HC3: `ε̂_i / (1-h_ii)`
 ///
+/// # Errors
+/// HC2/HC3で、`1 - h_ii <= UNIT_LEVERAGE_TOLERANCE`または`h_ii`が非有限の行があるとき
+/// `CommonError::UnitLeverage`（該当行の数と最初の行）。
+///
 /// # Panics
 /// HC2/HC3で`leverage`の長さが`n`と異なるとき（呼び出し側の実装の誤り。debugビルドでは
 /// `debug_assert!`が、releaseビルドでは短い場合の添字境界外が検出する）。
-pub(crate) fn hc_scales(n: usize, resid: impl Fn(usize) -> f64, scale: HcScale<'_>) -> Vec<f64> {
-    match scale {
+pub(crate) fn hc_scales(
+    n: usize,
+    resid: impl Fn(usize) -> f64,
+    scale: HcScale<'_>,
+) -> Result<Vec<f64>, CommonError> {
+    Ok(match scale {
         HcScale::Hc0 => (0..n).map(resid).collect(),
         HcScale::Hc1 { factor } => (0..n).map(|i| resid(i) * factor).collect(),
         HcScale::Hc2 { leverage } => {
             debug_assert_eq!(leverage.len(), n, "leverage must have one value per row");
+            ensure_leverage_below_one(leverage)?;
             (0..n)
                 .map(|i| resid(i) / (1.0 - leverage[i]).sqrt())
                 .collect()
         }
         HcScale::Hc3 { leverage } => {
             debug_assert_eq!(leverage.len(), n, "leverage must have one value per row");
+            ensure_leverage_below_one(leverage)?;
             (0..n).map(|i| resid(i) / (1.0 - leverage[i])).collect()
         }
+    })
+}
+
+/// 全行で`1 - h_ii > UNIT_LEVERAGE_TOLERANCE`（NaN・無限大は不可）であることを確かめる。
+fn ensure_leverage_below_one(leverage: &[f64]) -> Result<(), CommonError> {
+    let mut n_affected = 0;
+    let mut first_row = None;
+    for (i, &h) in leverage.iter().enumerate() {
+        if !h.is_finite() || 1.0 - h <= UNIT_LEVERAGE_TOLERANCE {
+            n_affected += 1;
+            first_row.get_or_insert(i);
+        }
+    }
+    match first_row {
+        Some(first_row) => Err(CommonError::UnitLeverage {
+            n_affected,
+            first_row,
+        }),
+        None => Ok(()),
     }
 }
 
@@ -139,7 +179,7 @@ fn hc_row_scales(
     residuals: &Mat<f64>,
     xtx_inv: &Mat<f64>,
     variant: HcVariant,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, CommonError> {
     let n = x.nrows();
     let k = x.ncols();
     let resid = |i: usize| *residuals.get(i, 0);
@@ -163,15 +203,18 @@ fn hc_row_scales(
 /// HC0〜HC3ロバストな係数分散共分散行列: `(X'X)⁻¹Ψ̂(X'X)⁻¹`（k×k）。
 ///
 /// `Ψ̂`は各行を[`hc_row_scales`]でスケールしたスコア行列の`S'S`（[`hc_meat`]）。
+///
+/// # Errors
+/// HC2/HC3でレバレッジが1の行があるとき`CommonError::UnitLeverage`（[`hc_scales`]）。
 pub(crate) fn hc_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
     xtx_inv: &Mat<f64>,
     variant: HcVariant,
-) -> Mat<f64> {
-    let row_scale = hc_row_scales(x, residuals, xtx_inv, variant);
+) -> Result<Mat<f64>, CommonError> {
+    let row_scale = hc_row_scales(x, residuals, xtx_inv, variant)?;
     let psi_hat = hc_meat(x, &row_scale);
-    sandwich(xtx_inv, &psi_hat)
+    Ok(sandwich(xtx_inv, &psi_hat))
 }
 
 /// `time_order`から、時系列の昇順に並べたときの行インデックス列を求める。
@@ -464,7 +507,7 @@ mod tests {
             (HcVariant::Hc3, psi(&|h| 1.0 / ((1.0 - h) * (1.0 - h)))),
         ];
         for (variant, psi_hat) in cases {
-            let cov = hc_cov_params(&x, &residuals, &xtx_inv, variant);
+            let cov = hc_cov_params(&x, &residuals, &xtx_inv, variant).unwrap();
             let expected = inv * psi_hat * inv;
             assert!(
                 (*cov.get(0, 0) - expected).abs() < 1e-12 * expected.abs(),
@@ -475,16 +518,127 @@ mod tests {
     }
 
     #[test]
+    fn hc_scales_rejects_rows_with_unit_leverage_and_reports_the_count_and_first_row() {
+        let resid = |_: usize| 1.0;
+        // ちょうど1・丸めで1のすぐ下・丸めで1を超えた行・NaN・無限大は、いずれも定義できない。
+        let h = [
+            0.2,
+            1.0,
+            1.0 - 2.2e-16,
+            1.0 + 1e-15,
+            f64::NAN,
+            f64::INFINITY,
+            0.5,
+        ];
+        for scale in [HcScale::Hc2 { leverage: &h }, HcScale::Hc3 { leverage: &h }] {
+            assert_eq!(
+                hc_scales(7, resid, scale).unwrap_err(),
+                CommonError::UnitLeverage {
+                    n_affected: 5,
+                    first_row: 1
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn hc_scales_treats_one_minus_h_at_the_tolerance_as_undefined_and_just_above_as_defined() {
+        let resid = |_: usize| 1.0;
+        // `<=`の境界。`1 - h`が閾値ちょうどになる`h`（`h = 1 - tol`の丸め）は、計算した`1 - h`が閾値以下か
+        // 直上かが丸めで決まるので、確実に下側・上側になる値で挟む。
+        let at_or_below = [1.0 - UNIT_LEVERAGE_TOLERANCE * 0.5];
+        let above = [1.0 - UNIT_LEVERAGE_TOLERANCE * 1.5];
+        for make in [
+            |h| HcScale::Hc2 { leverage: h },
+            |h| HcScale::Hc3 { leverage: h },
+        ] {
+            assert_eq!(
+                hc_scales(1, resid, make(&at_or_below)).unwrap_err(),
+                CommonError::UnitLeverage {
+                    n_affected: 1,
+                    first_row: 0
+                }
+            );
+            assert!(hc_scales(1, resid, make(&above)).is_ok());
+        }
+        // 負のレバレッジ（丸めノイズ）は`1 - h > 1`なので通る。
+        assert!(
+            hc_scales(
+                1,
+                resid,
+                HcScale::Hc2 {
+                    leverage: &[-1e-12]
+                }
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn hc_scales_rejects_negative_infinity_like_every_other_non_finite_leverage() {
+        let resid = |_: usize| 1.0;
+        let h = [f64::NEG_INFINITY, f64::INFINITY, f64::NAN];
+        assert_eq!(
+            hc_scales(3, resid, HcScale::Hc3 { leverage: &h }).unwrap_err(),
+            CommonError::UnitLeverage {
+                n_affected: 3,
+                first_row: 0
+            }
+        );
+    }
+
+    #[test]
+    fn hc_scales_accepts_leverage_just_beyond_the_tolerance_and_ignores_it_for_hc0_and_hc1() {
+        let resid = |_: usize| 1.0;
+        // `1 - h`が閾値の2倍なら定義できる（本当に1に近い行は`ε̂_i`も小さく、HC3は定義される）。
+        let near = [0.5, 1.0 - 2.0 * UNIT_LEVERAGE_TOLERANCE];
+        assert!(hc_scales(2, resid, HcScale::Hc2 { leverage: &near }).is_ok());
+        let hc3 = hc_scales(2, resid, HcScale::Hc3 { leverage: &near }).unwrap();
+        assert!((hc3[1] - 1.0 / (2.0 * UNIT_LEVERAGE_TOLERANCE)).abs() < 1e-3 * hc3[1]);
+        // HC0・HC1はレバレッジを使わないので、レバレッジが1の行があっても失敗しない。
+        assert!(hc_scales(2, resid, HcScale::Hc0).is_ok());
+        assert!(hc_scales(2, resid, HcScale::Hc1 { factor: 1.5 }).is_ok());
+    }
+
+    #[test]
+    fn hc_cov_params_rejects_hc2_and_hc3_for_a_regressor_that_is_nonzero_in_one_row() {
+        // 1行だけが1のダミー列は、その行のレバレッジがちょうど1（丸めでは1のすぐ下）になる。
+        let n = 8;
+        let x = Mat::from_fn(n, 2, |i, j| match j {
+            0 => 1.0,
+            _ => f64::from(i == 3),
+        });
+        let residuals = Mat::from_fn(n, 1, |i, _| [0.3, -0.2, 0.5, 0.0, -0.4, 0.1, 0.2, -0.5][i]);
+        let xtx_inv = xtx_inverse(&x).unwrap();
+        for variant in [HcVariant::Hc2, HcVariant::Hc3] {
+            assert_eq!(
+                hc_cov_params(&x, &residuals, &xtx_inv, variant).unwrap_err(),
+                CommonError::UnitLeverage {
+                    n_affected: 1,
+                    first_row: 3
+                },
+                "{variant:?}"
+            );
+        }
+        for variant in [HcVariant::Hc0, HcVariant::Hc1] {
+            assert!(hc_cov_params(&x, &residuals, &xtx_inv, variant).is_ok());
+        }
+    }
+
+    #[test]
     fn hc_scales_applies_the_factor_and_the_leverage_to_each_residual() {
         let resid = |i: usize| [2.0, -1.0, 0.5][i];
         let h = [0.0, 0.75, 0.5];
-        assert_eq!(hc_scales(3, resid, HcScale::Hc0), vec![2.0, -1.0, 0.5]);
         assert_eq!(
-            hc_scales(3, resid, HcScale::Hc1 { factor: 1.5 }),
+            hc_scales(3, resid, HcScale::Hc0).unwrap(),
+            vec![2.0, -1.0, 0.5]
+        );
+        assert_eq!(
+            hc_scales(3, resid, HcScale::Hc1 { factor: 1.5 }).unwrap(),
             vec![3.0, -1.5, 0.75]
         );
-        let hc2 = hc_scales(3, resid, HcScale::Hc2 { leverage: &h });
-        let hc3 = hc_scales(3, resid, HcScale::Hc3 { leverage: &h });
+        let hc2 = hc_scales(3, resid, HcScale::Hc2 { leverage: &h }).unwrap();
+        let hc3 = hc_scales(3, resid, HcScale::Hc3 { leverage: &h }).unwrap();
         for i in 0..3 {
             let e = resid(i);
             assert!((hc2[i] - e / (1.0 - h[i]).sqrt()).abs() < 1e-15);
@@ -553,7 +707,7 @@ mod tests {
         let order = time_ordering(&[0.0, 1.0, 2.0], 3);
 
         let hac = hac_cov_params(&x, &residuals, &xtx_inv, 0, &order);
-        let hc0 = hc_cov_params(&x, &residuals, &xtx_inv, HcVariant::Hc0);
+        let hc0 = hc_cov_params(&x, &residuals, &xtx_inv, HcVariant::Hc0).unwrap();
 
         assert_matrix_close(&hac, &hc0, 1e-14);
     }

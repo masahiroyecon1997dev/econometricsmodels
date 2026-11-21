@@ -89,7 +89,7 @@ pub(crate) fn panel_moment_covariance(
         }
         PanelCovType::Hc1 => {
             let factor = (n as f64 / df_resid as f64).sqrt();
-            let scales = hc_scales(n, |i| residuals[i], HcScale::Hc1 { factor });
+            let scales = hc_scales(n, |i| residuals[i], HcScale::Hc1 { factor })?;
             Ok(plain(hc_meat(z, &scales)))
         }
         PanelCovType::Hc2 | PanelCovType::Hc3 => {
@@ -106,7 +106,7 @@ pub(crate) fn panel_moment_covariance(
             } else {
                 HcScale::Hc3 { leverage: &h }
             };
-            let scales = hc_scales(n, |i| residuals[i], scale);
+            let scales = hc_scales(n, |i| residuals[i], scale)?;
             Ok(plain(hc_meat(z, &scales)))
         }
         PanelCovType::Cluster { groups } => {
@@ -188,6 +188,40 @@ mod tests {
             entity,
             levels,
         }
+    }
+
+    /// 2期間しかない個体の中でだけ動く操作変数は、その個体の2行の（吸収した効果込みの）レバレッジを1にし、
+    /// FE-GMMのHC2・HC3の`Ω̂`は`UnitLeverage`で止まる。HC1は使わない。
+    #[test]
+    fn hc2_and_hc3_reject_an_instrument_that_varies_in_one_two_period_entity() {
+        let entity =
+            GroupCodes::from_labels(&["a", "a", "b", "b", "b", "b", "b"].map(String::from));
+        // 個体ごとに平均を引いた列（`z1`は個体内で動き、`d`は個体`a`の中でだけ動く）。
+        let z1 = [0.3_f64, 1.1, 1.9, 3.2, 3.9, 5.2, 6.1];
+        let demean = |raw: [f64; 7]| -> Vec<f64> {
+            let mean_a = (raw[0] + raw[1]) / 2.0;
+            let mean_b = raw[2..].iter().sum::<f64>() / 5.0;
+            raw.iter()
+                .enumerate()
+                .map(|(i, v)| v - if i < 2 { mean_a } else { mean_b })
+                .collect()
+        };
+        let (z1, d) = (demean(z1), demean([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+        let z = Mat::from_fn(7, 2, |i, j| if j == 0 { z1[i] } else { d[i] });
+        let ztz = z.transpose() * &z;
+        let residuals = [0.3, -0.3, 0.1, -0.4, 0.25, 0.05, -0.01];
+        let levels = [&entity];
+        let input = input(&z, &ztz, &residuals, &entity, 2, &levels);
+        for cov_type in [PanelCovType::Hc2, PanelCovType::Hc3] {
+            assert!(matches!(
+                panel_moment_covariance(&cov_type, &input),
+                Err(PanelError::Common(CommonError::UnitLeverage {
+                    n_affected: 2,
+                    first_row: 0
+                }))
+            ));
+        }
+        assert!(panel_moment_covariance(&PanelCovType::Hc1, &input).is_ok());
     }
 
     /// クラスター数が`q`以下、時点数が`q`以下、バンド幅の範囲外はエラー。`Dk`は使ったバンド幅を返す。

@@ -54,6 +54,7 @@ pub enum ErrorCode {
     DesignMatrixSingular,
     MatrixNearSingular,
     PerfectFit,
+    UnitLeverageObservation,
     NotConverged,
     AbsorptionNotConverged,
     LineSearchFailed,
@@ -140,6 +141,7 @@ impl ErrorCode {
         Self::DesignMatrixSingular,
         Self::MatrixNearSingular,
         Self::PerfectFit,
+        Self::UnitLeverageObservation,
         Self::NotConverged,
         Self::AbsorptionNotConverged,
         Self::LineSearchFailed,
@@ -227,6 +229,7 @@ impl ErrorCode {
             Self::DesignMatrixSingular => "DESIGN_MATRIX_SINGULAR",
             Self::MatrixNearSingular => "MATRIX_NEAR_SINGULAR",
             Self::PerfectFit => "PERFECT_FIT",
+            Self::UnitLeverageObservation => "UNIT_LEVERAGE_OBSERVATION",
             Self::NotConverged => "NOT_CONVERGED",
             Self::AbsorptionNotConverged => "ABSORPTION_NOT_CONVERGED",
             Self::LineSearchFailed => "LINE_SEARCH_FAILED",
@@ -1605,6 +1608,27 @@ pub static CATALOG: &[ErrorSpec] = &[
         params: &[],
         message: r#"The model fits the data perfectly: the residuals are zero up to rounding, so standard errors and test statistics are not defined."#,
         hint: Some(r#"Check that the outcome is not an exact function of the regressors."#),
+        stage_allowed: true,
+    },
+    ErrorSpec {
+        code: ErrorCode::UnitLeverageObservation,
+        class: ErrorClass::Computation,
+        params: &[
+            ParamSpec {
+                name: "n_affected",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "first_row",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+        ],
+        message: r#"cov_type="hc2" and "hc3" are not defined: {n_affected} observation(s) have leverage 1 up to rounding, the first at row {first_row} (0-based), so the model fits them exactly."#,
+        hint: Some(
+            r#"Check for a regressor or instrument that takes a distinct value in only one observation, or set a different cov_type."#,
+        ),
         stage_allowed: true,
     },
     ErrorSpec {

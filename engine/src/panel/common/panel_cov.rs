@@ -124,7 +124,7 @@ pub(crate) fn panel_cov_params(
             xtx_inv,
             df_resid,
             PanelHcVariant::Hc1,
-        ))),
+        )?)),
         PanelCovType::Hc2 | PanelCovType::Hc3 => {
             let h_plain = leverages(x, xtx_inv);
             let h = match structure {
@@ -138,7 +138,7 @@ pub(crate) fn panel_cov_params(
             };
             Ok(plain(panel_hc_cov_params(
                 x, residuals, xtx_inv, df_resid, variant,
-            )))
+            )?))
         }
         PanelCovType::Cluster { groups } => {
             let ClusterSetup {
@@ -289,4 +289,112 @@ pub(super) fn dk_setup<'a>(
         t_periods,
         bandwidth,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::covariance::xtx_inverse;
+    use crate::shared::error::CommonError;
+
+    const RESIDUALS: [f64; 7] = [0.3, -0.3, 0.1, -0.4, 0.25, 0.05, -0.01];
+
+    fn entity() -> GroupCodes {
+        GroupCodes::from_labels(&["a", "a", "b", "b", "b", "b", "b"].map(String::from))
+    }
+
+    /// 個体ごとに平均を引く（within変換）。
+    fn demean(raw: &[f64], entity: &GroupCodes) -> Vec<f64> {
+        let (codes, sizes) = (entity.codes(), entity.counts());
+        let mut means = vec![0.0; sizes.len()];
+        for (v, &c) in raw.iter().zip(codes) {
+            means[c] += v / sizes[c] as f64;
+        }
+        raw.iter().zip(codes).map(|(v, &c)| v - means[c]).collect()
+    }
+
+    fn cov_error(
+        cov_type: &PanelCovType,
+        x: &Mat<f64>,
+        entity: &GroupCodes,
+        structure: PanelStructure<'_>,
+    ) -> Option<PanelError> {
+        let xtx_inv = xtx_inverse(x).unwrap();
+        panel_cov_params(
+            cov_type,
+            &PanelCovInput {
+                x,
+                residuals: &RESIDUALS,
+                xtx_inv: &xtx_inv,
+                df_resid: 4,
+                df_model: 3,
+                n_slopes: x.ncols(),
+                tests_slopes: true,
+                entity,
+                structure,
+            },
+        )
+        .err()
+    }
+
+    /// FE: 2期間しかない個体の中でだけ動く列は、その個体の2行の（吸収した効果込みの）レバレッジを1にする。
+    #[test]
+    fn fixed_effects_hc2_and_hc3_reject_a_regressor_that_varies_in_one_two_period_entity() {
+        let entity = entity();
+        let x1 = demean(&[0.3, 1.1, 1.9, 3.2, 3.9, 5.2, 6.1], &entity);
+        let d = demean(&[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], &entity);
+        let x = Mat::from_fn(7, 2, |i, j| if j == 0 { x1[i] } else { d[i] });
+        let levels = [&entity];
+        for cov_type in [PanelCovType::Hc2, PanelCovType::Hc3] {
+            assert_eq!(
+                cov_error(
+                    &cov_type,
+                    &x,
+                    &entity,
+                    PanelStructure::FixedEffects { levels: &levels }
+                ),
+                Some(PanelError::Common(CommonError::UnitLeverage {
+                    n_affected: 2,
+                    first_row: 0
+                }))
+            );
+        }
+        // HC1・classicalはレバレッジを使わない。
+        for cov_type in [PanelCovType::Classical, PanelCovType::Hc1] {
+            assert!(
+                cov_error(
+                    &cov_type,
+                    &x,
+                    &entity,
+                    PanelStructure::FixedEffects { levels: &levels }
+                )
+                .is_none()
+            );
+        }
+    }
+
+    /// RE: 吸収した効果が無いので素のレバレッジ。1行だけ非ゼロの列がある行のレバレッジが1になる。
+    #[test]
+    fn random_effects_hc2_and_hc3_reject_a_regressor_that_is_nonzero_in_one_row() {
+        let entity = entity();
+        let x = Mat::from_fn(7, 2, |i, j| if j == 0 { 1.0 } else { f64::from(i == 4) });
+        for cov_type in [PanelCovType::Hc2, PanelCovType::Hc3] {
+            assert_eq!(
+                cov_error(&cov_type, &x, &entity, PanelStructure::RandomEffects),
+                Some(PanelError::Common(CommonError::UnitLeverage {
+                    n_affected: 1,
+                    first_row: 4
+                }))
+            );
+        }
+        assert!(
+            cov_error(
+                &PanelCovType::Hc1,
+                &x,
+                &entity,
+                PanelStructure::RandomEffects
+            )
+            .is_none()
+        );
+    }
 }

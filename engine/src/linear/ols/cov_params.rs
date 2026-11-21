@@ -80,19 +80,19 @@ pub(super) fn compute_cov_params(
     let (cov_params, df_inference) = match cov_type {
         CovType::Classical => (classical_cov_params(sigma2, xtx_inv, k), df_resid),
         CovType::Hc0 => (
-            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc0),
+            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc0)?,
             df_resid,
         ),
         CovType::Hc1 => (
-            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc1),
+            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc1)?,
             df_resid,
         ),
         CovType::Hc2 => (
-            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc2),
+            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc2)?,
             df_resid,
         ),
         CovType::Hc3 => (
-            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc3),
+            hc_cov_params(x, residuals, xtx_inv, HcVariant::Hc3)?,
             df_resid,
         ),
         CovType::Hac { lags, time_order } => {

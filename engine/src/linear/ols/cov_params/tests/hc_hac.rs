@@ -1,9 +1,11 @@
 //! HC・HAC共分散のテスト。
 
+use crate::linear::common::LeastSquaresError;
 use crate::linear::common::row_time_order;
 use crate::linear::ols::OlsEstimator;
 use crate::linear::ols::cov_type::CovType;
 use crate::linear::ols::input::OlsInput;
+use crate::shared::error::CommonError;
 
 /// `n`行の単純回帰（`y = x + (i * i % 7)`）を`cov_type`で推定し`hac_lags_used`を返す補助関数。
 fn hac_lags_used_for(n: usize, cov_type: CovType) -> Option<usize> {
@@ -289,5 +291,38 @@ fn fit_hac_with_zero_lags_matches_hc0() {
             *hac.std_errors().get(j, 0),
             *hc0.std_errors().get(j, 0)
         );
+    }
+}
+
+/// 1行だけ非ゼロのダミー列は、その行のレバレッジがちょうど1（残差は0）で、HC2・HC3の行スケールが
+/// 定義できない。`fit`は`UnitLeverage`で止まる。レバレッジを使わない`cov_type`は推定できる。
+#[test]
+fn fit_rejects_hc2_and_hc3_when_a_dummy_is_nonzero_in_one_row() {
+    let y = vec![1.0, 3.0, 2.5, 4.0, 3.5, 6.0, 5.0, 7.5];
+    let x1 = vec![0.3, 1.1, 1.9, 3.2, 3.9, 5.2, 6.1, 6.8];
+    let dummy = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    let fit = |cov_type| {
+        let input = OlsInput::from_columns(
+            &y,
+            &[x1.clone(), dummy.clone()],
+            vec!["x1".to_string(), "d".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        OlsEstimator::fit(input, cov_type, 0.95)
+    };
+
+    for cov_type in [CovType::Hc2, CovType::Hc3] {
+        assert!(matches!(
+            fit(cov_type),
+            Err(LeastSquaresError::Common(CommonError::UnitLeverage {
+                n_affected: 1,
+                first_row: 3
+            }))
+        ));
+    }
+    for cov_type in [CovType::Classical, CovType::Hc0, CovType::Hc1] {
+        assert!(fit(cov_type).is_ok());
     }
 }

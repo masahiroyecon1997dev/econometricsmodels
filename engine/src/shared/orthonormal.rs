@@ -532,9 +532,10 @@ mod tests {
             HcVariant::Hc2,
             HcVariant::Hc3,
         ] {
-            let m_tilde = hc_cov_params(design.q(), &residuals, &design.identity(), variant);
+            let m_tilde =
+                hc_cov_params(design.q(), &residuals, &design.identity(), variant).unwrap();
             let new = design.coefficient_covariance(&m_tilde);
-            let old = hc_cov_params(&x, &residuals, &xtx_inv, variant);
+            let old = hc_cov_params(&x, &residuals, &xtx_inv, variant).unwrap();
             for i in 0..3 {
                 for j in 0..3 {
                     let scale = (*old.get(i, i) * *old.get(j, j)).sqrt();
@@ -563,7 +564,7 @@ mod tests {
                 cluster_cov_params(d.q(), e, &d.identity(), &groups)
             });
             let hc1 = slope_wald(&x, &y, |d, e| {
-                hc_cov_params(d.q(), e, &d.identity(), HcVariant::Hc1)
+                hc_cov_params(d.q(), e, &d.identity(), HcVariant::Hc1).unwrap()
             });
             assert_relative(cluster, cluster_exact, rtol);
             assert_relative(hc1, hc1_exact, rtol);

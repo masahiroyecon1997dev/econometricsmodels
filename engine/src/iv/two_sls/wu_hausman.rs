@@ -36,6 +36,7 @@ pub(super) struct WuHausmanTest {
 /// 行列——`rank(Ŝ) ≤ g - 1 ≥ k_endog`なら計算可能——だが、`OlsEstimator::fit`の
 /// overall F検定がその手前で弾く）。これも上記の他の理由と同じく診断統計量だけの
 /// 問題なので`None`へdegradeする。
+/// 拡張回帰の`cov_type`がHC2・HC3で、レバレッジが1の行があるとき（`UnitLeverage`）も同様。
 /// これらはWu-Hausman検定固有の問題であり、`params`/`std_errors`等の主要な推定
 /// 結果とは無関係に正しく計算できるため、`fit()`全体を失敗させず`None`を返す
 /// （`FirstStageFailed`/`SecondStageFailed`が`fit()`全体を失敗させる
@@ -95,28 +96,58 @@ pub(super) fn wu_hausman_test(
 
     match hausman_result {
         Ok(test) => Ok(Some(test)),
-        Err(LeastSquaresError::SingularMatrix { .. })
-        | Err(LeastSquaresError::Common(CommonError::PerfectFit))
-        | Err(LeastSquaresError::Common(CommonError::InsufficientObservations { .. }))
-        | Err(LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
-            ..
-        }))
-        | Err(LeastSquaresError::Common(CommonError::NearSingularMatrix { .. })) => Ok(None),
+        Err(source) if is_expected_failure(&source) => Ok(None),
         Err(source) => Err(IvError::HausmanRegressionFailed { source }),
     }
 }
 
+/// 拡張回帰の失敗のうち、この検定だけの問題として`None`にするもの（構造式・第一段階の推定とは無関係）。
+///
+/// `UnitLeverage`は、`cov_type`がHC2・HC3のとき拡張回帰`[x_exog, x_endog, v̂]`のレバレッジが1の行
+/// （構造式の第二段階`[x_exog, x̂]`は通っても、列が内生変数の数だけ多い拡張回帰では起こりうる）。
+fn is_expected_failure(err: &LeastSquaresError) -> bool {
+    matches!(
+        err,
+        LeastSquaresError::SingularMatrix { .. }
+            | LeastSquaresError::Common(
+                CommonError::PerfectFit
+                    | CommonError::InsufficientObservations { .. }
+                    | CommonError::InsufficientClustersForInference { .. }
+                    | CommonError::NearSingularMatrix { .. }
+                    | CommonError::UnitLeverage { .. }
+            )
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use super::is_expected_failure;
     use crate::iv::common::{IvEstimate, IvInput};
     use crate::iv::two_sls::TwoSlsEstimator;
     use crate::iv::two_sls::test_support::*;
+    use crate::linear::common::LeastSquaresError;
     use crate::linear::ols::CovType;
+    use crate::shared::error::CommonError;
     use crate::shared::group_codes::GroupCodes;
     use faer::Mat;
     use faer::Side;
     use faer::prelude::Solve;
     use statrs::distribution::{ContinuousCDF, FisherSnedecor};
+
+    /// 拡張回帰のレバレッジが1の行（HC2・HC3）は、この検定だけの問題として`None`にする失敗に入る。
+    /// 構造式と第一段階が通って拡張回帰だけがこの状態になる入力は作りにくいので、判定を直接固定する。
+    #[test]
+    fn a_unit_leverage_row_in_the_augmented_regression_is_an_expected_failure() {
+        let unit_leverage = LeastSquaresError::Common(CommonError::UnitLeverage {
+            n_affected: 1,
+            first_row: 0,
+        });
+        assert!(is_expected_failure(&unit_leverage));
+        // 診断の問題ではない失敗（入力の誤り・内部エラー）は`fit()`を止める。
+        assert!(!is_expected_failure(&LeastSquaresError::Common(
+            CommonError::internal("unexpected")
+        )));
+    }
 
     #[test]
     fn fit_sets_wu_hausman_statistics_to_none_when_the_augmented_regression_is_exact() {

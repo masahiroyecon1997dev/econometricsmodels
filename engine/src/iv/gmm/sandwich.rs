@@ -128,18 +128,18 @@ fn gmm_hc_omega(
 ) -> Result<Mat<f64>, IvError> {
     let resid = |i: usize| *residuals.get(i, 0);
     let scales = match variant {
-        HcVariant::Hc0 => hc_scales(n, resid, HcScale::Hc0),
+        HcVariant::Hc0 => hc_scales(n, resid, HcScale::Hc0)?,
         HcVariant::Hc1 => {
             let factor = ((n as f64) / ((n - k) as f64)).sqrt();
-            hc_scales(n, resid, HcScale::Hc1 { factor })
+            hc_scales(n, resid, HcScale::Hc1 { factor })?
         }
         HcVariant::Hc2 => {
             let h = z_leverages(z)?;
-            hc_scales(n, resid, HcScale::Hc2 { leverage: &h })
+            hc_scales(n, resid, HcScale::Hc2 { leverage: &h })?
         }
         HcVariant::Hc3 => {
             let h = z_leverages(z)?;
-            hc_scales(n, resid, HcScale::Hc3 { leverage: &h })
+            hc_scales(n, resid, HcScale::Hc3 { leverage: &h })?
         }
     };
     Ok(hc_meat(z, &scales))

@@ -111,8 +111,14 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 **classical**: **statsmodelsは`cov_type`がclassical以外だと既定で正規分布(`use_t=False`)を使うが、本プロジェクトは
 全`cov_type`でt分布に統一する**。ベンチマーク照合時は`use_t=True`を明示指定する必要がある。
 
-**HC0〜HC3**: HC2/HC3は`h_ii`が1に極めて近い退化した設計だと発散しうるが、これはHC2/HC3自体の
-数学的性質でありengine固有のバグではない。
+**HC0〜HC3**: HC2/HC3は`h_ii`が1の行（1行だけ非ゼロのダミー等）があると、その行の残差が0で重み
+`1/(1-h_ii)`が`0/0`になる。丸め誤差で`h_ii`が1のわずかに下になった行は、残差の丸めノイズが増幅されて
+列の単位などで値が変わる。以前は`MATRIX_NEAR_SINGULAR`（原因を指さない）か任意の値の標準誤差が返っていた
+ため、`1 - h_ii <= 1e-10`（`shared::covariance::UNIT_LEVERAGE_TOLERANCE`。丸めでちょうど1の行は
+`1 - h_ii`が約2e-16）の行があれば`UNIT_LEVERAGE_OBSERVATION`（`ComputationError`）にする。検査は
+`shared::covariance::hc_scales`の1か所で、OLS・WLS・2SLS・GMM・FE・RE・FEIVの全てがここを通る。
+KP・有効Fの診断は従来どおり`None`（診断統計量なので`fit()`を止めない）。閾値の直上では`1 - h_ii`の
+相対誤差が約1e-5で、テストの許容誤差（1e-8）を保証する線ではなく、任意の値が返るのを防ぐ線である。
 
 **HAC（Newey-West、Bartlettカーネル）**:
 - ラグ数`L`: `hac_lags`指定時は`0 <= L < n`を検証。未指定時の経験則はデータ非依存の式（EViews等でも

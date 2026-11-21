@@ -44,9 +44,6 @@ pub(crate) enum ScoreCovariance<'a> {
     },
 }
 
-/// `1 − h_ii`がこれ以下の行があるとHC2・HC3のスケールが定義できない。
-const UNIT_LEVERAGE_TOLERANCE: f64 = 1e-10;
-
 /// HCの行スケール(スコア全体に掛ける)。`Hc1`は`√(n/(n−n_params))`、`Hc2`・`Hc3`は一次段階の回帰子
 /// `[X_exog, Z]`のレバレッジ(`z_tilde`は`X`と直交なので`h(X) + h(Z̃)`)による。
 ///
@@ -66,11 +63,11 @@ pub(crate) fn hc_row_scales(
     let n = z_tilde.nrows();
     let one = |_: usize| 1.0;
     match variant {
-        HcVariant::Hc0 => Some(hc_scales(n, one, HcScale::Hc0)),
+        HcVariant::Hc0 => hc_scales(n, one, HcScale::Hc0).ok(),
         HcVariant::Hc1 => {
             let df = n.checked_sub(n_params).filter(|&d| d >= 1)?;
             let factor = ((n as f64) / (df as f64)).sqrt();
-            Some(hc_scales(n, one, HcScale::Hc1 { factor }))
+            hc_scales(n, one, HcScale::Hc1 { factor }).ok()
         }
         HcVariant::Hc2 | HcVariant::Hc3 => {
             if n_absorbed > 0 && absorbed_leverage.is_none() {
@@ -92,12 +89,6 @@ pub(crate) fn hc_row_scales(
                     *h += h_x;
                 }
             }
-            if leverage
-                .iter()
-                .any(|h| h.is_nan() || 1.0 - h <= UNIT_LEVERAGE_TOLERANCE)
-            {
-                return None;
-            }
             let scale = if variant == HcVariant::Hc2 {
                 HcScale::Hc2 {
                     leverage: &leverage,
@@ -107,7 +98,8 @@ pub(crate) fn hc_row_scales(
                     leverage: &leverage,
                 }
             };
-            Some(hc_scales(n, one, scale))
+            // レバレッジが1の行（`UnitLeverage`）は定義できないので`None`。
+            hc_scales(n, one, scale).ok()
         }
     }
 }

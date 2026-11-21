@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn the_range_of_gmm_max_iter_is_left_to_the_engine() {
-        // 3未満・上限超過の検査はengineが行う（`FeGmmEstimator`の`fit`）。ここでは非負の値をそのまま渡す。
+        // 3未満・上限超過（負値を含む）の検査はengineが行う（`FeGmmEstimator`の`fit`）。ここでは値をそのまま渡す。
         let options = FEIVOptions {
             gmm_type: Some("iterated".to_string()),
             gmm_weight_type: Some("robust".to_string()),
@@ -241,14 +241,22 @@ mod tests {
     }
 
     #[test]
-    fn a_negative_gmm_max_iter_is_an_error() {
-        // 範囲（3以上・上限）はengineが検査する。負値は`usize`にできないのでここで拒否する。
+    fn a_negative_gmm_max_iter_is_left_to_the_engine() {
+        // 負値も`i64`のままengineへ渡し、範囲違反は`fit`が報告する（`confidence_level`の次の順位）。
         let options = FEIVOptions {
             gmm_type: Some("iterated".to_string()),
+            gmm_weight_type: Some("robust".to_string()),
             gmm_max_iter: Some(-1),
             ..gmm_options()
         };
-        assert!(resolve(&options).is_err());
+        assert_eq!(
+            resolve(&options).unwrap(),
+            FeGmmType::Iterated {
+                weight: FeWeightType::Robust,
+                max_iter: -1,
+                tol: DEFAULT_GMM_TOL,
+            }
+        );
     }
 
     #[test]

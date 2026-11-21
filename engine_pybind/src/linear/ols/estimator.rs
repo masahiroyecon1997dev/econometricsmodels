@@ -88,7 +88,9 @@ fn fit_frame(
     // 作業領域と重なって、ピークが列`p + 1`本分だけ高くなる。
     drop(y_slice);
     drop(x_slices);
-    let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
+    // 結果に使うのは係数・標準誤差・適合度・残差・当てはめ値だけなので、設計行列を手放す経路で当てはめる
+    // （設計行列・QRの格納・`Q`が同時に生きるのを避ける）。
+    let estimator = OlsEstimator::fit_releasing_design(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
     Ok(ols_estimator_to_result(

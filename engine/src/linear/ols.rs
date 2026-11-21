@@ -47,6 +47,9 @@ pub use predict::predict_new_data;
 #[derive(Debug)]
 pub struct OlsEstimator {
     input: OlsInput,
+    /// 学習データの当てはめ値 (n, 1)。[`OlsEstimator::fit_releasing_design`]で設計行列を手放した
+    /// ときだけ`Some`（`Q·b̃`。設計行列が無いので`Xβ̂`を作れない）。`fit`系は`None`で`Xβ̂`を計算する
+    released_fitted_values: Option<Mat<f64>>,
     /// 使用した標準誤差の種別
     cov_type: CovType,
     /// 係数 (k, 1)。`input.param_names()`と対応する
@@ -151,7 +154,7 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        fit::fit_ols(input, cov_type, confidence_level, false, true)
+        fit::fit_ols(input, cov_type, confidence_level, false, true, false)
     }
 
     /// [`fit`](Self::fit)と同じだが、被説明変数が定数（`CommonError::OutcomeConstant`）か、
@@ -171,7 +174,7 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        fit::fit_ols(input, cov_type, confidence_level, false, false)
+        fit::fit_ols(input, cov_type, confidence_level, false, false, false)
     }
 
     /// [`fit`](Self::fit)と同じだが、`cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`
@@ -193,7 +196,30 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        fit::fit_ols(input, cov_type, confidence_level, true, true)
+        fit::fit_ols(input, cov_type, confidence_level, true, true, false)
+    }
+
+    /// [`fit`](Self::fit)と同じ検査・同じ結果で、`input`の設計行列を**複製せずその場でQR分解**し、
+    /// 設計行列を保持しない推定量を返す。
+    ///
+    /// `fit`は設計行列を借りて分解するため、設計行列・QRの格納・`Q`の3つ（`3·n·k`）が同時に生き、
+    /// 推定量も設計行列を持ち続ける。この関数は設計行列の領域をそのままQRの格納に使い（ピークは
+    /// `2·n·k`）、`Q`ができた時点で手放す。結果として使うのが係数・標準誤差・適合度・残差・当てはめ値
+    /// だけの呼び出し側（`engine_pybind`のOLS・WLS）が使う。
+    ///
+    /// `Q`・`R`・`β̂`・標準誤差・統計量・残差は`fit`とビット単位で同じ。違いは次の2点:
+    /// - [`fitted_values`](Self::fitted_values)は`Q·b̃`（`b̃ = Q'y`）で、`fit`の`Xβ̂`と丸め誤差の範囲
+    ///   （相対`1e-15`程度）でずれる（残差は`y - Q·b̃`なので、残差と当てはめ値は厳密に`y`に足し戻せる）
+    /// - `input().x()`は使えない（呼ぶとpanicする）。`wald_test_last_columns`等の統計量は使える
+    ///
+    /// # Errors
+    /// [`fit`](Self::fit)と同じ。ランク落ちの列名は、QRから復元した設計行列で特定する。
+    pub fn fit_releasing_design(
+        input: OlsInput,
+        cov_type: CovType,
+        confidence_level: f64,
+    ) -> Result<Self, LeastSquaresError> {
+        fit::fit_ols(input, cov_type, confidence_level, false, true, true)
     }
 
     /// 推定に使った入力データ
@@ -345,7 +371,13 @@ impl OlsEstimator {
     /// 学習データに対する予測値 `ŷ = Xβ̂`（`predict(new_data=None)`のPython APIが返す値、
     /// `docs/spec/ols-spec.md`「predict()」参照）。`fit()`のReturn本体には含めず、
     /// 必要なときに計算する別メソッドとする（Logitの`predict()`と同じ設計方針）。
+    ///
+    /// 設計行列を手放した推定量（[`fit_releasing_design`](Self::fit_releasing_design)）では、
+    /// 保持している`Q·b̃`を返す。
     pub fn fitted_values(&self) -> Mat<f64> {
-        self.input.x() * &self.params
+        match &self.released_fitted_values {
+            Some(fitted) => fitted.clone(),
+            None => self.input.x() * &self.params,
+        }
     }
 }

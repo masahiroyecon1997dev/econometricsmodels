@@ -25,13 +25,17 @@ use crate::shared::wald::wald_f_test;
 ///
 /// `allow_undefined_f_test`が真のとき、クラスター数が傾き係数の数以下でも全体F検定を`None`にして続行する。
 /// `check_outcome`が真のとき、被説明変数が定数（切片ありのみ）か完全フィットなら失敗させる。
+/// `release_design`が真のとき、設計行列を複製せずその場でQR分解し、推定量に設計行列を持たせない
+/// （`OlsEstimator::fit_releasing_design`）。
 pub(super) fn fit_ols(
     input: OlsInput,
     cov_type: CovType,
     confidence_level: f64,
     allow_undefined_f_test: bool,
     check_outcome: bool,
+    release_design: bool,
 ) -> Result<OlsEstimator, LeastSquaresError> {
+    let mut input = input;
     validate_has_regressors(input.nobs(), input.k())?;
 
     // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
@@ -64,12 +68,26 @@ pub(super) fn fit_ols(
 
     // 直交座標（`X = QR`、`b̃ = Q'y`）を係数・残差・共分散・F検定の全てに使う。ランク落ちは`R`の
     // 列ピボットQRで判定する（n×kの列ピボットQRと`(X'X)⁻¹`を別に求めない）。
-    let design = OrthonormalDesign::new_checked(input.x()).map_err(|err| {
-        LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
-    })?;
+    let design = if release_design {
+        let x = input.take_x();
+        OrthonormalDesign::new_checked_owned(x).map_err(|err| {
+            LeastSquaresError::from_rank_deficient(err.kind, &err.x, input.param_names())
+        })?
+    } else {
+        OrthonormalDesign::new_checked(input.x()).map_err(|err| {
+            LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
+        })?
+    };
     let coordinates = design.coordinates(input.y());
     let params = design.coefficients(&coordinates);
-    let residuals = design.residuals(input.y(), &coordinates);
+    // 設計行列を手放すときは、当てはめ値`Q·b̃`をここで求めて持つ（残差は`y - Q·b̃`で、
+    // `design.residuals`と同じ演算）。
+    let (residuals, released_fitted_values) = if release_design {
+        let fitted = design.q() * &coordinates;
+        (input.y() - &fitted, Some(fitted))
+    } else {
+        (design.residuals(input.y(), &coordinates), None)
+    };
 
     let df_resid = n - k;
     let ssr = residual_sum_of_squares(&residuals);
@@ -152,6 +170,7 @@ pub(super) fn fit_ols(
 
     Ok(OlsEstimator {
         input,
+        released_fitted_values,
         cov_type,
         params,
         residuals,

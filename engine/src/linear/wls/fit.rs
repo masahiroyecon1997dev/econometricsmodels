@@ -32,7 +32,8 @@ pub(super) fn fit_wls(
         dep_var_name,
         weights,
     )?;
-    let estimator = OlsEstimator::fit(input, cov_type, confidence_level)?;
+    // 元スケールの当てはめ値・残差は元の列から求める（下）ので、推定量は設計行列を持たなくてよい。
+    let estimator = OlsEstimator::fit_releasing_design(input, cov_type, confidence_level)?;
     let (fitted_values, residuals) =
         original_scale_fitted_and_residuals(y, x_columns, include_intercept, &estimator);
     let (r_squared, adj_r_squared, log_likelihood, aic, bic) =

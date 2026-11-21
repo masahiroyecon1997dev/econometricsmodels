@@ -28,6 +28,9 @@ pub struct OlsInput {
     outcome_sst: f64,
     /// 変換前の`y`が（丸め誤差の範囲で）全行で同じ値か（`has_intercept`のモデルでは説明するものが無い）
     outcome_constant: bool,
+    /// 設計行列`x`を手放した後か（`OlsEstimator::fit_releasing_design`）。`true`のとき`x`は
+    /// 行が0の空の行列で、`x()`は使えない（`nobs()`は`y`、`k()`は`x`の列数から求めるので変わらない）
+    design_released: bool,
 }
 
 impl OlsInput {
@@ -187,6 +190,7 @@ impl OlsInput {
             has_intercept: include_intercept,
             outcome_sst,
             outcome_constant,
+            design_released: false,
         })
     }
 
@@ -200,8 +204,25 @@ impl OlsInput {
         &self.y
     }
 
+    /// 設計行列 (n, k)。
+    ///
+    /// # Panics
+    /// `OlsEstimator::fit_releasing_design`が設計行列を手放した後の入力では使えない
+    /// （行が0の空の行列を黙って返さず、呼び出し側の実装誤りとして検出する）。
     pub fn x(&self) -> &Mat<f64> {
+        assert!(
+            !self.design_released,
+            "the design matrix was released by OlsEstimator::fit_releasing_design"
+        );
         &self.x
+    }
+
+    /// 設計行列を、複製せず所有権ごと取り出す（行が0の空の行列を残す）。`fit_releasing_design`が
+    /// その場でQR分解するために使う。以降`x()`は使えない。
+    pub(super) fn take_x(&mut self) -> Mat<f64> {
+        let k = self.x.ncols();
+        self.design_released = true;
+        std::mem::replace(&mut self.x, Mat::zeros(0, k))
     }
 
     pub fn param_names(&self) -> &[String] {

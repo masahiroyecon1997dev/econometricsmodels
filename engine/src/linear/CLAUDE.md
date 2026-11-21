@@ -39,6 +39,9 @@
 
 - **被説明変数の定数・完全フィットの判定は`OlsEstimator::fit`/`fit_with_optional_f_test`が行い、補助的な回帰は`fit_auxiliary`（`pub(crate)`、判定なし）を使う**: `fit_ols`は`check_outcome`フラグを持ち、QR分解の前に`OutcomeConstant`（切片あり・元の`y`が全行等しい）を、QR（`new_checked`）の直後（共分散・F検定の前）に`PerfectFit`（`is_perfect_fit(ssr, SST, k)`、`SSR <= k·ε·SST`）を返す。**`SST`は`OlsInput`が元の`y`と重みから持つ（`outcome_sst`）**——WLSの`OlsInput`は`y`を`sqrt(w)`倍に変換済みで、その平均で中心化した値は別の量になる。非中心化の総平方和（切片なし）は平均がずれた`y`で閾値が緩くなりすぎるため、被説明変数が元のモデルの`y`でない回帰（診断検定の補助回帰、IVのWu-Hausman拡張回帰、REの準偏差変換後の最終回帰とハウスマン補助回帰）には使わない。新しい呼び出し元を足すときは「この回帰の結果をモデルの結果として利用者に見せるか」で`fit`と`fit_auxiliary`を選ぶ。判定の閾値と理由は`ols-spec.md`3.3節。ノイズなしの`y`をテストに使うと`PerfectFit`になる（係数の厳密な復元を見たいときは小さなノイズを足して許容誤差を緩めるか、`fit_auxiliary`で判定を外す）。
 
+- **設計行列を手放す経路（`OlsEstimator::fit_releasing_design`）と、補助回帰専用の`AuxiliaryFit`（`ols/auxiliary.rs`）**: `fit`は設計行列を借りて分解するため、設計行列・QRの格納（`x.qr()`の複製）・`Q`の3つ（`3·n·k`）が同時に生きる。`fit_releasing_design`は`OrthonormalDesign::new_checked_owned`で設計行列をその場でQR分解して`2·n·k`にし、推定量は設計行列を持たない（`OlsInput::take_x`で空の行列を残す。`nobs()`・`k()`は変わらず、`input().x()`はpanicする）。`Q`・`R`・係数・標準誤差・統計量・残差は`fit`とビット単位で同じ（`ols/fit/tests/release_design.rs`）。**違いは`fitted_values()`だけで、`Q·b̃`（`Xβ̂`と相対`1e-15`程度ずれる）**。`engine_pybind`のOLSとWLSが使う。**他の呼び出し元は`input().x()`を読む（REの最終回帰、IVの第一段階の`fitted_values`など）ので`fit`のまま**。`AuxiliaryFit`は`OlsEstimator`を作らず`Q`・`R`・`b̃`・残差だけを持つ補助回帰（REのハウスマン検定）。**この2つは`fit`と別に検査・計算を持つので、`fit_ols`の検査や順序を変えたら`release_design.rs`と`auxiliary.rs`の`mod tests`（`fit`との一致）が落ちる**。ランク落ちで失敗したときは、QRから設計行列を復元して列名を特定する。
+- **Python経由のピークRSSは、ライブヒープの見積りと食い違うことがある**: glibcの既定ではmmap閾値が動的に上がり、8MB級の列を早く`drop`してもRSSが下がらない（解放した領域を、後で確保する大きい行列が使えない）。効くのは、確保そのものをなくす変更（複製・設計行列の保持）と、mmapされる大きい行列の解放。効果は`resource.getrusage`で変更前後を測って確かめる。
+
 ## 全手法共通ルールの再掲（見落とし防止）
 
 - 推定量構造体（`OlsEstimator`/`WlsEstimator`等）のフィールドはprivate（`.claude/rules/rust-style.md`）。

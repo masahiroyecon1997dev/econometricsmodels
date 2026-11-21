@@ -23,7 +23,8 @@ use super::result::IVResult;
 /// compute_first_stage`（`IVResult`のdocコメント・モジュールdocコメント「`first_stage()`/
 /// `weak_instrument_f_statistics`は`estimator`に依存しない共通ロジック」参照）から構築する。
 /// `overid_statistic`/`overid_p_value`は`estimator="2sls"`では`TwoSlsEstimator::
-/// sargan_statistic()`/`sargan_p_value()`（Sargan検定）、`estimator="gmm"`では
+/// overid_statistic()`/`overid_p_value()`（`cov_type`に追従する。classicalはSargan、それ以外は
+/// ロバストなHansen J）、`estimator="gmm"`では
 /// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`（Hansen J検定）から構築する。
 /// `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="2sls"`では`TwoSlsEstimator::
 /// wu_hausman_statistic()`/`wu_hausman_p_value()`、`estimator="gmm"`では
@@ -175,9 +176,9 @@ fn fit_frame(
         wald_dist: "f",
         wald_df_num: estimator.wald_df().map(|(num, _)| num),
         wald_df_denom: estimator.wald_df().map(|(_, denom)| denom),
-        overid_statistic: estimator.sargan_statistic(),
-        overid_p_value: estimator.sargan_p_value(),
-        overid_df: estimator.sargan_df(),
+        overid_statistic: estimator.overid_statistic(),
+        overid_p_value: estimator.overid_p_value(),
+        overid_df: estimator.overid_df(),
         wu_hausman_statistic: estimator.wu_hausman_statistic(),
         wu_hausman_p_value: estimator.wu_hausman_p_value(),
         wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),

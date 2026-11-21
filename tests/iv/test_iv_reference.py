@@ -137,20 +137,30 @@ def _check_result(res, ref: dict, label: str) -> None:
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    if ref["sargan_statistic"] is None:
+    # 過剰識別検定は`cov_type`に追従する（classicalはSargan、それ以外は同じ重みの2段階GMMの
+    # Hansen J。`benchmark/iv/references/linearmodels_ref.py`の`_overid_for_cov_type`参照）。
+    if ref["overid_statistic"] is None:
         assert res.overid_statistic is None, f"{label}/overid_statistic"
         assert res.overid_p_value is None, f"{label}/overid_p_value"
+        assert res.overid_df is None, f"{label}/overid_df"
     else:
         _assert_close(
             res.overid_statistic,
-            ref["sargan_statistic"],
+            ref["overid_statistic"],
             f"{label}/overid_statistic",
         )
         assert_p_value_close(
             res.overid_p_value,
-            ref["sargan_p_value"],
+            ref["overid_p_value"],
             f"{label}/overid_p_value",
             rtol=RTOL,
+        )
+    # hc0は、cov_typeに依存しない`wooldridge_overid`（ロバストなscore検定）とも照合する。
+    if "overid_statistic_wooldridge" in ref:
+        _assert_close(
+            res.overid_statistic,
+            ref["overid_statistic_wooldridge"],
+            f"{label}/overid_statistic_wooldridge",
         )
 
     # ref側がNone（df1: 拡張回帰がsaturatedで双方None）のときは比較自体を

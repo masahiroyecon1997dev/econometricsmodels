@@ -186,52 +186,16 @@ pub(crate) fn gmm_iterate(
         };
 
         while n_iter < max_steps {
-            // 点推定は正のスカラー倍不変のため`classical_s`相当（σ̂²・Z'Z）を使っても
-            // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
-            // よう、あらかじめ正しくスケーリングされたSを使う（`iv/CLAUDE.md`参照）。
-            let s_next = moment_covariance(
+            let (solution_next, s_next) = gmm_reweighted_step(
                 weight_type,
                 weight_cluster_codes,
                 hac_precomputed.as_ref(),
                 z,
-                &residuals,
+                x,
+                y,
                 ztz,
+                &residuals,
             )?;
-            // 白色化: 古典的な重み`σ̂²Z'Z`は`Z`のQR分解、ロバスト・クラスター・HACは`S`（対角を揃えた`D S D`）の
-            // 条件数が小さければ`S`のCholesky分解、大きければ`S = A'A`の`A`のQR分解（`S`を作らない。
-            // `A`の条件数の2乗で精度を失わない。HACは窓のスコア和の行）。
-            let whitening = match weight_type {
-                WeightType::Classical => WhitenedInstruments::from_instruments(z)?,
-                WeightType::Robust | WeightType::Cluster { .. } | WeightType::Hac { .. } => {
-                    match WhitenedInstruments::from_weight_if_well_conditioned(
-                        z,
-                        &s_next,
-                        WEIGHT_CHOLESKY_MAX_CONDITION,
-                    )? {
-                        Some(whitening) => whitening,
-                        None => {
-                            let rows = moment_factor_rows(
-                                weight_type,
-                                weight_cluster_codes,
-                                hac_precomputed.as_ref(),
-                                z,
-                                &residuals,
-                            )
-                            .ok_or_else(|| {
-                                CommonError::internal("the moment rows of the weight are missing")
-                            })?;
-                            WhitenedInstruments::from_factor_rows(z, &rows)?
-                        }
-                    }
-                }
-            };
-            let mut solution_next = gmm_solve(x, y, whitening)?;
-            if matches!(weight_type, WeightType::Classical) {
-                // 古典的な重み`σ̂²Z'Z`（`σ̂²`は直前の残差）。白色化は`Z'Z`のQR分解。
-                let sigma2: f64 =
-                    (0..n).map(|i| residuals.get(i, 0).powi(2)).sum::<f64>() / (n as f64);
-                solution_next = solution_next.with_weight_scale(sigma2);
-            }
             let beta_next = solution_next.beta().clone();
             n_iter += 1;
 
@@ -261,6 +225,84 @@ pub(crate) fn gmm_iterate(
         converged,
         hac_lags_used,
     })
+}
+
+/// 直前の残差`residuals`から重み行列`S`を作り、`Z`を白色化する（`gmm_reweighted_step`の前半）。
+/// 白色化した操作変数と、使った`S`を返す。2SLSの過剰識別検定（`iv/two_sls/overid.rs`）は
+/// `gmm_reweighted_step`ではなくこの関数と`gmm_solve`を直接呼ぶ。
+///
+/// 白色化は、古典的な重み`σ̂²Z'Z`は`Z`のQR分解、ロバスト・クラスター・HACは`S`（対角を揃えた
+/// `D S D`）の条件数が小さければ`S`のCholesky分解、大きければ`S = A'A`の`A`のQR分解（`S`を作らない。
+/// `A`の条件数の2乗で精度を失わない。HACは窓のスコア和の行）。再推定の前に`Z`を手放したい呼び出し側
+/// （`X`を組み立てる前に`Z`を捨ててピークのヒープを減らす2SLSの過剰識別検定）が、`gmm_solve`と分けて呼ぶ。
+///
+/// `weight_type`はどの種類かだけを見る（`Cluster`のグループは`cluster`、`Hac`のラグ数と時系列順は
+/// `hac`から取る）。`Classical`のときだけ`ztz`（`Z'Z`）を使う。
+///
+/// # Errors
+/// `S`の白色化の失敗は`NearSingularMatrix`（`GMM_WEIGHT`）。`Cluster`で`cluster`が`None`のとき
+/// `MissingClusterColumn`、`Hac`で`hac`が`None`のとき`Internal`。
+pub(crate) fn gmm_whiten_for_weight(
+    weight_type: &WeightType,
+    cluster: Option<&GroupCodes>,
+    hac: Option<&(usize, Vec<usize>)>,
+    z: &Mat<f64>,
+    ztz: &Mat<f64>,
+    residuals: &Mat<f64>,
+) -> Result<(WhitenedInstruments, Mat<f64>), CommonError> {
+    let s_next = moment_covariance(weight_type, cluster, hac, z, residuals, ztz)?;
+    let whitening = match weight_type {
+        WeightType::Classical => WhitenedInstruments::from_instruments(z)?,
+        WeightType::Robust | WeightType::Cluster { .. } | WeightType::Hac { .. } => {
+            match WhitenedInstruments::from_weight_if_well_conditioned(
+                z,
+                &s_next,
+                WEIGHT_CHOLESKY_MAX_CONDITION,
+            )? {
+                Some(whitening) => whitening,
+                None => {
+                    let rows = moment_factor_rows(weight_type, cluster, hac, z, residuals)
+                        .ok_or_else(|| {
+                            CommonError::internal("the moment rows of the weight are missing")
+                        })?;
+                    WhitenedInstruments::from_factor_rows(z, &rows)?
+                }
+            }
+        }
+    };
+    Ok((whitening, s_next))
+}
+
+/// 直前の残差`residuals`から重み行列`S`を作り、白色化して再推定する1ステップ
+/// （`gmm_iterate`のループ本体。呼び出し元はそれだけ）。再推定の解と、使った`S`を返す。
+///
+/// 点推定は正のスカラー倍不変のため`classical_s`相当（`σ̂²・Z'Z`）を使っても`Z'Z`単体を使った場合と
+/// `β̂`は変わらない。Hansen Jにそのまま使い回せるよう、あらかじめ正しくスケーリングされた`S`を使う
+/// （`iv/CLAUDE.md`参照）。白色化は[`gmm_whiten_for_weight`]。
+///
+/// # Errors
+/// [`gmm_whiten_for_weight`]のエラーと、`Ĝ = Z̃'X`のランク落ち・条件数超過の`NearSingularMatrix`
+/// （`GMM_BREAD`）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gmm_reweighted_step(
+    weight_type: &WeightType,
+    cluster: Option<&GroupCodes>,
+    hac: Option<&(usize, Vec<usize>)>,
+    z: &Mat<f64>,
+    x: &Mat<f64>,
+    y: &Mat<f64>,
+    ztz: &Mat<f64>,
+    residuals: &Mat<f64>,
+) -> Result<(GmmSolution, Mat<f64>), CommonError> {
+    let n = z.nrows();
+    let (whitening, s_next) = gmm_whiten_for_weight(weight_type, cluster, hac, z, ztz, residuals)?;
+    let mut solution_next = gmm_solve(x, y, whitening)?;
+    if matches!(weight_type, WeightType::Classical) {
+        // 古典的な重み`σ̂²Z'Z`（`σ̂²`は直前の残差）。白色化は`Z'Z`のQR分解。
+        let sigma2: f64 = (0..n).map(|i| residuals.get(i, 0).powi(2)).sum::<f64>() / (n as f64);
+        solution_next = solution_next.with_weight_scale(sigma2);
+    }
+    Ok((solution_next, s_next))
 }
 
 /// 係数ベクトルが収束したかをelementwiseで判定する: 各係数`i`について

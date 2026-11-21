@@ -16,8 +16,11 @@ iv_crosscheck.json）を生成するスクリプト。
   （`iv-spec.md`3.1節、`benchmark/iv/references/run_ivreg.R`参照）。
 - **weak_instrument_f・sargan（過剰識別検定）**: ivregの`summary(diagnostics=TRUE)`が
   常にclassical（iid）vcovで計算する仕様のため、cov_typeによらず同じ値を全cov_type
-  エントリに含める（`weak_instrument_f_statistics`/`overid_statistic`が常にclassical
-  という本実装の設計と一致）。
+  エントリに含める（`weak_instrument_f_statistics`と、classicalの`overid_statistic`
+  （Sargan）が対応する）。
+- **overid_statistic/overid_p_value（classical以外）**: 本実装の2SLSの過剰識別検定は
+  `cov_type`に追従する（`docs/spec/iv-spec.md`3.5節）。ivregに対応する検定が無いので、
+  `momentfit`の2段階GMMのHansen J（同じ重みの種類）を`_run_ivreg`が足す。
 - **wu_hausman**: 本実装がcov_typeに追従する設計のため、`summary(diagnostics=TRUE)`の
   `vcov.`引数に各cov_typeの共分散計算式を関数化して渡し、全cov_typeでクロスチェック
   する（`vcov.`は行列ではなく関数として渡す必要があることが判明、
@@ -77,7 +80,7 @@ from benchmark.iv.datasets import (
     with_card_region,
 )
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
-from benchmark.iv.references.r import run_ivreg_r
+from benchmark.iv.references.r import run_ivreg_r, run_momentfit_r
 
 # ivregが切片なしでfitできないシナリオ。回帰変数が1列だけ（`x_exog=[]`かつ
 # 切片なし）だと`ivreg.fit`が`coef(auxreg)`を行列として扱えず
@@ -104,6 +107,100 @@ def _ivreg_formula(
     return f"{y_col} ~ {prefix}{lhs} | {prefix}{instruments}"
 
 
+def _formula_roles(formula: str) -> tuple[int, int, int]:
+    """`ivreg`の式から（切片を含む外生変数の数、内生変数の数、除外操作変数の数）を数える。
+
+    式は`y ~ [0 +] x_exog + x_endog | [0 +] x_exog + instruments`（`_ivreg_formula`）。
+    `|`の左右の項の差が内生変数・除外操作変数。
+    """
+    _, rhs = formula.split("~")
+    left, right = (part.split("+") for part in rhs.split("|"))
+    has_intercept = left[0].strip() != "0"
+    left_terms = {t.strip() for t in left if t.strip() != "0"}
+    right_terms = {t.strip() for t in right if t.strip() != "0"}
+    n_exog = len(left_terms & right_terms) + (1 if has_intercept else 0)
+    return n_exog, len(left_terms - right_terms), len(right_terms - left_terms)
+
+
+# momentfitの2段階GMMのHansen J。`hc0`・`hc1`・`hc2`・`hc3`は同じ重み（素のロバスト）なので、
+# 同じ入力の呼び出しを1回にまとめる。
+_MOMENTFIT_J_CACHE: dict[tuple, tuple[float, float]] = {}
+
+
+def _momentfit_hansen_j(
+    csv_path: Path,
+    formula: str,
+    weight_type: str,
+    cluster: str | None,
+    hac_lag: int | None,
+) -> tuple[float, float]:
+    key = (str(csv_path), formula, weight_type, cluster, hac_lag)
+    if key not in _MOMENTFIT_J_CACHE:
+        result = run_momentfit_r(
+            csv_path,
+            formula,
+            weight_type,
+            "classical",
+            cluster=cluster,
+            hac_lag=hac_lag,
+        )
+        _MOMENTFIT_J_CACHE[key] = (
+            result["hansen_j_statistic"],
+            result["hansen_j_p_value"],
+        )
+    return _MOMENTFIT_J_CACHE[key]
+
+
+def _run_ivreg(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    cluster: str | None = None,
+) -> dict:
+    """`run_ivreg_r`の結果に、`cov_type`に追従する過剰識別検定の参照値を足す。
+
+    本実装の2SLSの`overid_statistic`は、`classical`がSargan、それ以外は2SLS残差から作った
+    同じ種類の重みの2段階GMMのHansen J（`docs/spec/iv-spec.md`3.5節）。`ivreg`は
+    ロバストな過剰識別検定を持たないので、`momentfit`の2段階GMM（`weight_type`は
+    `hc*`が`robust`、`cluster`、`hac`）のHansen Jを参照にする（linearmodelsの`IVGMM`とは別実装）。
+
+    - `classical`は`ivreg`のSargan（`sargan_statistic`）で、ここでは`overid_*`を足さない
+      （切片なしでは`ivreg`のSarganが定義と合わず、テストは比較しない）。
+    - 丁度識別は`None`。クラスター数が全操作変数の数より少ないときも`None`
+      （`S`が必ず特異で、本実装も`None`）。
+    """
+    entry = run_ivreg_r(csv_path, formula, cov_type, cluster=cluster)
+    if cov_type == "classical":
+        return entry
+    n_exog, n_endog, n_excluded = _formula_roles(formula)
+    if n_excluded <= n_endog:
+        entry["overid_statistic"] = None
+        entry["overid_p_value"] = None
+        return entry
+    if cov_type == "cluster":
+        n_groups = pl.read_csv(csv_path)[cluster].n_unique()
+        if n_groups < n_exog + n_excluded:
+            entry["overid_statistic"] = None
+            entry["overid_p_value"] = None
+            return entry
+        weight_type = "cluster"
+    elif cov_type == "hac":
+        weight_type = "hac"
+    else:
+        weight_type = "robust"
+    statistic, p_value = _momentfit_hansen_j(
+        csv_path,
+        formula,
+        weight_type,
+        cluster if weight_type == "cluster" else None,
+        entry.get("hac_lag") if weight_type == "hac" else None,
+    )
+    entry["overid_statistic"] = statistic
+    entry["overid_p_value"] = p_value
+    return entry
+
+
 def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
@@ -119,7 +216,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         fixtures[scenario] = {}
         # clusterは別途個別に扱う。baselineのみ別途複数パターンで確認（下記）。
         for cov_type in NON_CLUSTER_COV_TYPES:
-            entry = run_ivreg_r(csv_path, formula, cov_type)
+            entry = _run_ivreg(csv_path, formula, cov_type)
             fixtures[scenario][cov_type] = entry
 
         if scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
@@ -153,7 +250,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         fixtures["multi_endog"][scenario] = {}
         # clusterは別途個別に扱う。
         for cov_type in NON_CLUSTER_COV_TYPES:
-            entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
+            entry = _run_ivreg(multi_endog_csv, multi_endog_formula, cov_type)
             fixtures["multi_endog"][scenario][cov_type] = entry
         if scenario == "baseline":
             # 複数内生変数×クラスターロバストSE（Wu-Hausmanの自由度が(2, G-1)に
@@ -171,7 +268,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         ["x1"], THREE_ENDOG_X_ENDOG, THREE_ENDOG_INSTRUMENTS
     )
     fixtures["three_endog"] = {
-        cov_type: run_ivreg_r(three_endog_csv, three_endog_formula, cov_type)
+        cov_type: _run_ivreg(three_endog_csv, three_endog_formula, cov_type)
         for cov_type in NON_CLUSTER_COV_TYPES
     }
 
@@ -183,7 +280,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures["df1"] = {}
     # clusterは別途個別に扱う。n=3では意味のあるクラスタ数を確保できないため対象外。
     for cov_type in NON_CLUSTER_COV_TYPES:
-        entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
+        entry = _run_ivreg(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
     fixtures["no_intercept"] = build_no_intercept_fixtures(tmpdir)
@@ -218,7 +315,7 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
         # hc2/hc3はlinearmodelsに無くivregだけが参照になる（切片ありと同じ）。
         # レバレッジは射影行列に依存し、切片の有無で値が変わる。
         for cov_type in LINEARMODELS_COV_TYPES + IVREG_ONLY_COV_TYPES:
-            entry = run_ivreg_r(csv_path, formula, cov_type)
+            entry = _run_ivreg(csv_path, formula, cov_type)
             entry["sargan_statistic"] = None
             entry["sargan_p_value"] = None
             fixtures[name][cov_type] = entry
@@ -252,7 +349,7 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = tmpdir / (csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return run_ivreg_r(tmp_path, formula, "cluster", cluster="cluster_group")
+    return _run_ivreg(tmp_path, formula, "cluster", cluster="cluster_group")
 
 
 def _run_cluster_g2_case(tmpdir: Path) -> dict:
@@ -269,7 +366,7 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     )
     tmp_path = tmpdir / (csv_path.stem + "_cluster_g2.csv")
     grouped.write_csv(tmp_path)
-    return run_ivreg_r(tmp_path, formula, "cluster", cluster="cluster_group")
+    return _run_ivreg(tmp_path, formula, "cluster", cluster="cluster_group")
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
@@ -286,11 +383,11 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
     # clusterは別途個別に扱う。対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
     for cov_type in NON_CLUSTER_COV_TYPES:
-        entry = run_ivreg_r(csv_path, formula, cov_type)
+        entry = _run_ivreg(csv_path, formula, cov_type)
         fixtures[cov_type] = entry
     # 実データのグループ列（居住地域、9グループ・不均衡）でのクラスターロバストSE。
     # Wu-Hausman p値はivregの既知の制約でnull（テスト側で再計算して比較する）。
-    fixtures["cluster"] = run_ivreg_r(
+    fixtures["cluster"] = _run_ivreg(
         csv_path, formula, "cluster", cluster=CARD_REGION_COLUMN
     )
     return fixtures
@@ -321,6 +418,17 @@ def build_fixtures() -> dict:
         check=True,
     ).stdout
 
+    momentfit_version = subprocess.run(
+        [
+            "Rscript",
+            "-e",
+            "cat(as.character(packageVersion('momentfit')))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
     sandwich_version, lmtest_version = (
         subprocess.run(
             ["Rscript", "-e", f'cat(as.character(packageVersion("{pkg}")))'],
@@ -337,15 +445,18 @@ def build_fixtures() -> dict:
             "linearmodels主リファレンス（iv.json）とは独立した実装（R: ivreg + "
             "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・p値・"
             "信頼区間・nobs/df_resid・R²・ロバストWald検定（f_statistic/"
-            "f_p_value）・弱操作変数F統計量・Sargan（過剰識別検定）・"
-            "Wu-Hausman（全cov_type、clusterのみp値除く）を含む"
-            "（iv-spec.md 4章）"
+            "f_p_value）・弱操作変数F統計量・Sargan（過剰識別検定、classical）・"
+            "Wu-Hausman（全cov_type、clusterのみp値除く）を含む。"
+            "classical以外のcov_typeの過剰識別検定（overid_statistic/overid_p_value）"
+            "はR momentfitの2段階GMMのHansen J（同じ重みの種類）"
+            "（iv-spec.md 3.5節・4章）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "ivreg_version": ivreg_version,
         "sandwich_version": sandwich_version,
         "lmtest_version": lmtest_version,
+        "momentfit_version": momentfit_version,
         "note": (
             'hc2/hc3も`vcovHC(type="HC2"/"HC3")`で計算し含める（本実装と数値'
             "一致することを実機確認済み、iv-spec.md 3.1節）。GMMはivregが"
@@ -355,6 +466,15 @@ def build_fixtures() -> dict:
             "summary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、"
             "全cov_typeエントリで同じ値になる（実測確認済み）。just_identified"
             "シナリオはsargan_statistic/sargan_p_valueがnull（丁度識別）。"
+            "本実装の2SLSのoverid_statistic/overid_p_valueはcov_typeに追従するため、"
+            "classical以外のエントリにはivregに対応する検定が無く、`_run_ivreg`が"
+            "momentfitの2段階GMM（weight_typeはhc0〜hc3がrobust、clusterがcluster、"
+            "hacがhac）のHansen Jをoverid_statistic/overid_p_valueとして足す"
+            "（hc0〜hc3は同じ値: 小標本補正・レバレッジ補正を入れない定義の確認で、"
+            "momentfitがhc2/hc3の補正を持つわけではない）。丁度識別と、"
+            "クラスター数が全操作変数の数より少ない場合（Sが必ず特異）はnull"
+            "（後者は生成スクリプトの規則で、momentfitへの問い合わせではない）。"
+            "classicalのエントリは従来どおりsargan_*だけを比較する。"
             "wu_hausman_statistic/wu_hausman_p_valueは全cov_typeで実測値を持つ"
             "（`summary(diagnostics=TRUE, vcov.=<関数>)`で本実装と同じ"
             "cov_type別のロバスト共分散を診断表に反映できることが判明、"
@@ -399,8 +519,8 @@ def build_fixtures() -> dict:
             "no_interceptのsargan_statistic/sargan_p_valueはivregが残差の中心化TSSを"
             "使う式で切片なしだと負になりうるためnull。"
             "wooldridge.card（Wooldridge実データ、Card 1995、`generate_iv_fixtures.py`"
-            "のCARD_X_EXOGと同じ構成）はcluster cov_typeを除く4種のみ（対応する"
-            "自然なカテゴリ列が無いため）。"
+            "のCARD_X_EXOGと同じ構成）は4種のcov_typeに加え、居住地域から作った"
+            "9グループのclusterも持つ。"
         ),
     }
     return fixtures

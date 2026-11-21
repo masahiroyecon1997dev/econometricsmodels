@@ -55,7 +55,7 @@
 //! このファイルは外から見える面（`TwoSlsEstimator`の構造体・getter・`IvEstimate`の実装と、
 //! `fit`のエラー条件を含む契約）だけを持つ。ロジックは子モジュールに置く:
 //! `fit.rs`（第一段階・第二段階・共分散・検定をつなぐ`fit`の本体）・`cov.rs`（cov_type別の
-//! 共分散行列とWald F検定）・`wu_hausman.rs`・`sargan.rs`（診断検定）・`test_support.rs`
+//! 共分散行列とWald F検定）・`wu_hausman.rs`・`overid.rs`（過剰識別検定。`cov_type=Classical`は`sargan.rs`のSargan、それ以外はロバストなHansen J）・`test_support.rs`
 //! （複数ファイルのテストが共有するフィクスチャ）。テストは各ロジックと同じファイルの
 //! `mod tests`に置く（`fit`を通すテストと、テストが大きいファイルは`<ファイル名>/tests/`にテーマ別で置く）。
 
@@ -66,6 +66,7 @@ use faer::Mat;
 
 mod cov;
 mod fit;
+mod overid;
 mod sargan;
 #[cfg(test)]
 mod test_support;
@@ -123,12 +124,14 @@ pub struct TwoSlsEstimator {
     wu_hausman_p_value: Option<f64>,
     /// Wu-Hausman検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic`と同じ条件で`None`。
     wu_hausman_df: Option<(usize, usize)>,
-    /// Sargan過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。丁度識別
-    /// （自由度`len(instruments) - len(x_endog)`が0）なら`None`。
-    sargan_statistic: Option<f64>,
-    sargan_p_value: Option<f64>,
-    /// Sargan検定のχ²分布の自由度`len(instruments) - len(x_endog)`。丁度識別なら`None`。
-    sargan_df: Option<usize>,
+    /// 過剰識別検定（`docs/spec/iv-spec.md`3.5節）の統計量。`cov_type=Classical`はSargan、
+    /// それ以外は`cov_type`に対応するロバストなHansen J。丁度識別（自由度
+    /// `len(instruments) - len(x_endog)`が0）、または`cov_type=Cluster`でクラスター数が全操作変数の数
+    /// より少ないなら`None`。
+    overid_statistic: Option<f64>,
+    overid_p_value: Option<f64>,
+    /// 過剰識別検定のχ²分布の自由度`len(instruments) - len(x_endog)`。統計量が`None`なら`None`。
+    overid_df: Option<usize>,
 }
 
 impl TwoSlsEstimator {
@@ -191,20 +194,22 @@ impl TwoSlsEstimator {
         self.wu_hausman_p_value
     }
 
-    /// Sargan過剰識別検定の統計量。丁度識別（自由度0）の場合は`None`
-    /// （`docs/spec/iv-spec.md`3.5節、`fit()`のdocコメント参照）。
-    pub fn sargan_statistic(&self) -> Option<f64> {
-        self.sargan_statistic
+    /// 過剰識別検定の統計量。`cov_type=Classical`はSargan、それ以外は`cov_type`に対応する
+    /// ロバストなHansen J（2SLS残差から作った重み`S`でGMMを再推定した解での`J`。`Hc0`〜`Hc3`は
+    /// 同じ値）。丁度識別（自由度0）、または`cov_type=Cluster`でクラスター数が全操作変数の数より
+    /// 少ない（`S`が必ず特異になる）場合は`None`（`docs/spec/iv-spec.md`3.5節、`fit()`のdocコメント参照）。
+    pub fn overid_statistic(&self) -> Option<f64> {
+        self.overid_statistic
     }
 
-    /// Sargan過剰識別検定のp値。`sargan_statistic()`と同じ条件で`None`。
-    pub fn sargan_p_value(&self) -> Option<f64> {
-        self.sargan_p_value
+    /// 過剰識別検定のp値。`overid_statistic()`と同じ条件で`None`。
+    pub fn overid_p_value(&self) -> Option<f64> {
+        self.overid_p_value
     }
 
-    /// Sargan検定の自由度（χ²）。`sargan_statistic()`と同じ条件で`None`。
-    pub fn sargan_df(&self) -> Option<usize> {
-        self.sargan_df
+    /// 過剰識別検定の自由度（χ²）。`overid_statistic()`と同じ条件で`None`。
+    pub fn overid_df(&self) -> Option<usize> {
+        self.overid_df
     }
 
     /// Wu-Hausman検定の自由度`(分子, 分母)`（F）。`wu_hausman_statistic()`と同じ条件で`None`。

@@ -8,9 +8,8 @@
 //! GMM(within変換後のデータと自前の`Ω̂`)も同じ関数を呼ぶ。`IvInput`・系統のエラー型には依存しない。
 //! 明示的な形（`gmm_sandwich_covariance`・`hansen_j_statistic`）は、C統計量と単体テストの参照実装として残る。
 
-use faer::linalg::triangular_solve::solve_lower_triangular_in_place;
 use faer::prelude::Solve;
-use faer::{Mat, Par, Side};
+use faer::{Mat, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::error::{CommonError, MatrixKind};
@@ -150,12 +149,30 @@ impl WhitenedInstruments {
     }
 
     /// `S_unit = D S D = L_unit L_unit'`の下三角因子から、`Z̃' = L_unit⁻¹ D Z'`を前進代入で作る。
+    ///
+    /// 前進代入を列方向に行う: `Z̃`の`j`列 `= (s_j z_j − Σ_{k<j} L_jk Z̃_k) / L_jj`。各列は連続した
+    /// メモリなので、転置の見方の上でstrideつきに解く（遅い）ことも、転置を別の行列に作り直す
+    /// （ピークのヒープがn×l余計にかかる）こともなく、確保するのは`Z̃`と1列分の作業領域だけ。
     fn from_unit_lower(z: &Mat<f64>, scale: &[f64], lower: Mat<f64>) -> Self {
-        let mut z_tilde_t = Mat::from_fn(z.ncols(), z.nrows(), |j, i| scale[j] * *z.get(i, j));
-        solve_lower_triangular_in_place(lower.as_ref(), z_tilde_t.as_mut(), Par::Seq);
-        Self {
-            z_tilde: z_tilde_t.transpose().to_owned(),
+        let (n, l) = (z.nrows(), z.ncols());
+        let mut z_tilde = Mat::<f64>::zeros(n, l);
+        let mut column = vec![0.0; n];
+        for (j, &scale_j) in scale.iter().enumerate().take(l) {
+            for (c, &v) in column.iter_mut().zip(z.col_as_slice(j)) {
+                *c = scale_j * v;
+            }
+            for k in 0..j {
+                let l_jk = *lower.get(j, k);
+                for (c, &prev) in column.iter_mut().zip(z_tilde.col_as_slice(k)) {
+                    *c -= l_jk * prev;
+                }
+            }
+            let l_jj = *lower.get(j, j);
+            for (dst, &c) in z_tilde.col_as_slice_mut(j).iter_mut().zip(&column) {
+                *dst = c / l_jj;
+            }
         }
+        Self { z_tilde }
     }
 }
 
@@ -401,6 +418,33 @@ pub(crate) fn hansen_j_test(
 mod tests {
     use super::*;
     use crate::shared::wald::wald_quadratic_form;
+
+    /// `Z̃ = Z D L⁻ᵀ`は`Z̃ Lᵀ = Z D`を満たす（列方向の前進代入が三角系の解になっている）。
+    /// 下三角の`L`は任意（対角が1でなくてよい）、`D`は列ごとの尺度。
+    #[test]
+    fn from_unit_lower_solves_the_triangular_system_for_an_arbitrary_lower_factor() {
+        let z = Mat::from_fn(9, 4, |i, j| {
+            ((i * 5 + j * 3) % 7) as f64 + 0.1 * (i as f64) - 0.4 * (j as f64)
+        });
+        let scale = [0.5, 2.0, 1.5, 0.25];
+        let lower = Mat::from_fn(4, 4, |i, j| match j.cmp(&i) {
+            std::cmp::Ordering::Greater => 0.0,
+            std::cmp::Ordering::Equal => 1.0 + 0.5 * i as f64,
+            std::cmp::Ordering::Less => 0.3 * (i + j) as f64 - 0.7,
+        });
+        let whitened = WhitenedInstruments::from_unit_lower(&z, &scale, lower.clone());
+        let back = &whitened.z_tilde * lower.transpose();
+        for i in 0..9 {
+            for (j, &scale_j) in scale.iter().enumerate() {
+                let expected = scale_j * *z.get(i, j);
+                assert!(
+                    (*back.get(i, j) - expected).abs() <= 1e-12 * expected.abs().max(1.0),
+                    "({i}, {j}): {} vs {expected}",
+                    back.get(i, j)
+                );
+            }
+        }
+    }
 
     /// n=8、操作変数l=3(定数・z1・z2)、構造方程式の設計行列k=2(定数・内生変数)。
     fn data() -> (Mat<f64>, Mat<f64>, Mat<f64>) {

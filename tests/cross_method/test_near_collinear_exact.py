@@ -531,3 +531,23 @@ def test_gmm_hansen_j_matches_the_exact_value(method, cov_type, eps):
         case.exact.hansen_j,
         f"{method} {cov_type} eps={eps} Hansen J",
     )
+
+
+def test_iv_overid_is_none_when_the_cluster_weight_is_near_singular():
+    """外生変数がほぼ共線（`eps = 1e-7`）でクラスターの重みがほぼ特異な2SLSは、`fit()`が成功し、
+    係数は有限で、過剰識別検定の3つの値だけが`None`になる（同じ重みのGMMは失敗する）。
+    ロバストな重みは同じ入力で計算できる。
+    """
+    df = _iv_data(1e-7)
+    columns = (df, "y", ["x1", "x2"], ["endog"], ["z1", "z2", "z3"])
+    clustered = IV(
+        *columns, options=IVOptions(cov_type="cluster", cluster="g")
+    ).fit()
+    assert all(np.isfinite(v) for v in clustered.params.values())
+    assert clustered.overid_statistic is None
+    assert clustered.overid_p_value is None
+    assert clustered.overid_df is None
+
+    robust = IV(*columns, options=IVOptions(cov_type="hc0")).fit()
+    assert robust.overid_statistic is not None
+    assert robust.overid_df == 2

@@ -267,13 +267,13 @@ mod tests {
                 .unwrap();
 
         let gmm_j = gmm.hansen_j_statistic().unwrap();
-        let sargan = two_sls.sargan_statistic().unwrap();
+        let sargan = two_sls.overid_statistic().unwrap();
         assert!(
             (gmm_j - sargan).abs() < 1e-8,
             "hansen_j={gmm_j}, sargan={sargan}"
         );
         let gmm_p = gmm.hansen_j_p_value().unwrap();
-        let sargan_p = two_sls.sargan_p_value().unwrap();
+        let sargan_p = two_sls.overid_p_value().unwrap();
         assert!(
             (gmm_p - sargan_p).abs() < 1e-8,
             "hansen_j_p={gmm_p}, sargan_p={sargan_p}"

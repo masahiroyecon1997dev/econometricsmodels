@@ -17,6 +17,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 from _assertions import (
+    assert_close,
     assert_hac_time_reorders_rows,
     assert_option_case_insensitive,
     assert_params_table_matches_attributes,
@@ -217,17 +218,206 @@ def test_overid_statistic_present_for_gmm_hansen_j(iv_dataset):
     _assert_valid_test_statistic(res.overid_statistic, res.overid_p_value)
 
 
+def test_overid_statistic_of_2sls_follows_cov_type(iv_dataset):
+    """2SLSの`overid_statistic`は`cov_type`に追従する。classicalはSargan、
+    ロバストな`cov_type`はそれと異なる値（同じ重みの2段階GMMのHansen J）で、
+    自由度は同じ。
+    """
+    classical = our_fit(iv_dataset)
+    robust = our_fit(iv_dataset, options=IVOptions(cov_type="hc0"))
+    assert classical.overid_df == robust.overid_df == 1
+    assert classical.overid_statistic != robust.overid_statistic
+
+
+def test_overid_statistic_is_the_same_for_hc0_to_hc3(iv_dataset):
+    """重みの`S`は小標本補正もレバレッジ補正も含まない素のロバストな
+    `Σ ε̂ᵢ² zᵢzᵢ'`なので、`hc0`〜`hc3`は同じ値になる。
+    """
+    expected = our_fit(iv_dataset, options=IVOptions(cov_type="hc0"))
+    for cov_type in ("hc1", "hc2", "hc3"):
+        res = our_fit(iv_dataset, options=IVOptions(cov_type=cov_type))
+        assert res.overid_statistic == expected.overid_statistic, cov_type
+        assert res.overid_p_value == expected.overid_p_value, cov_type
+        assert res.overid_df == expected.overid_df, cov_type
+
+
+def test_overid_statistic_of_2sls_equals_gmm_hansen_j_of_the_same_weight(
+    iv_dataset,
+):
+    """2SLS残差から作った`S`でGMMを再推定した解でのHansen Jは、同じ重みの種類の
+    2段階GMM（`estimator="gmm"`）のHansen Jと一致する。classicalのSarganも、
+    等分散の重みのGMMと一致する。
+    """
+    clustered = with_cluster_groups(iv_dataset, 10)
+    cases = {
+        "classical": (
+            iv_dataset,
+            IVOptions(),
+            IVOptions(estimator="gmm", gmm_weight_type="classical"),
+        ),
+        "hc0": (
+            iv_dataset,
+            IVOptions(cov_type="hc0"),
+            IVOptions(estimator="gmm", gmm_weight_type="robust"),
+        ),
+        "cluster": (
+            clustered,
+            IVOptions(cov_type="cluster", cluster="cluster_group"),
+            IVOptions(
+                estimator="gmm",
+                gmm_weight_type="cluster",
+                cluster="cluster_group",
+            ),
+        ),
+        "hac": (
+            iv_dataset,
+            IVOptions(cov_type="hac", **hac_time_for("hac")),
+            IVOptions(
+                estimator="gmm",
+                gmm_weight_type="hac",
+                **hac_time_for("hac"),
+            ),
+        ),
+    }
+    tolerance = TOLERANCES["iv_api"]["rtol_overid_same_weight"]
+    for name, (df, two_sls_options, gmm_options) in cases.items():
+        two_sls = our_fit(df, options=two_sls_options)
+        gmm = our_fit(df, options=gmm_options)
+        assert two_sls.overid_statistic is not None, name
+        assert gmm.overid_statistic is not None, name
+        assert_close(
+            two_sls.overid_statistic,
+            gmm.overid_statistic,
+            f"{name}/overid_statistic",
+            rtol=tolerance,
+            atol=0.0,
+        )
+        assert_close(
+            two_sls.overid_p_value,
+            gmm.overid_p_value,
+            f"{name}/overid_p_value",
+            rtol=tolerance,
+            atol=0.0,
+        )
+
+
+def test_overid_statistic_of_2sls_cluster_is_none_below_instrument_count(
+    iv_dataset,
+):
+    """クラスター数`G`が全操作変数の数`l`（定数項・`x1`・`z1`・`z2`で4）より少ないと、
+    クラスターの`S`は必ず特異で、過剰識別検定は定義できない。`fit()`は失敗せず、
+    検定の3つの値だけが`None`になる（`G = l`は定義できる）。
+    """
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    below = our_fit(with_cluster_groups(iv_dataset, 3), options=options)
+    assert below.overid_statistic is None
+    assert below.overid_p_value is None
+    assert below.overid_df is None
+    assert set(below.params) == {"const", "x1", "endog1"}
+
+    at = our_fit(with_cluster_groups(iv_dataset, 4), options=options)
+    _assert_valid_test_statistic(at.overid_statistic, at.overid_p_value)
+    assert at.overid_df == 1
+
+
+def test_overid_statistic_of_2sls_cluster_at_the_boundary_matches_gmm(
+    iv_dataset,
+):
+    """`G = l`ちょうどで定義でき、同じクラスターの重みのGMMのHansen Jと一致する。
+    `x_exog=[]`（切片だけ）では`l = 3`なので、`G = 2`は`None`、`G = 3`は定義できる
+    （構造方程式の傾きは`endog1`の1個なので`G = 2`は`G > q`を満たす）。
+    """
+    tolerance = TOLERANCES["iv_api"]["rtol_overid_same_weight"]
+    for n_groups in (2, 3):
+        df = with_cluster_groups(iv_dataset, n_groups)
+        kwargs = {"x_exog": [], "instruments": ["z1", "z2"]}
+        two_sls = our_fit(
+            df,
+            options=IVOptions(cov_type="cluster", cluster="cluster_group"),
+            **kwargs,
+        )
+        if n_groups == 2:
+            assert two_sls.overid_statistic is None
+            assert two_sls.overid_df is None
+            continue
+        gmm = our_fit(
+            df,
+            options=IVOptions(
+                estimator="gmm",
+                gmm_weight_type="cluster",
+                cluster="cluster_group",
+            ),
+            **kwargs,
+        )
+        assert two_sls.overid_statistic is not None
+        assert gmm.overid_statistic is not None
+        assert_close(
+            two_sls.overid_statistic,
+            gmm.overid_statistic,
+            "G = l/overid_statistic",
+            rtol=tolerance,
+            atol=0.0,
+        )
+
+
+def test_overid_statistic_of_2sls_hac_uses_hac_time_order_not_row_order(
+    iv_dataset,
+):
+    """HACの重みは、行順ではなく`hac_time`の順でラグを取る。行を並べ替えて元の時間列を
+    `hac_time`に渡すと並べ替え前と同じ値になり、並べ替えた行順を時間として渡すと別の値になる
+    （並べ替えが効いていること）。
+    """
+    n = iv_dataset.height
+    ordered = with_row_time(iv_dataset)
+    row_order = list(range(n))[::2] + list(range(n))[1::2]
+    shuffled = reorder_rows(ordered, row_order).with_columns(
+        pl.Series("position", range(n))
+    )
+
+    def statistic(df: pl.DataFrame, hac_time: str) -> float:
+        res = IV(
+            df,
+            y="y",
+            x_exog=["x1"],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+            options=IVOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        ).fit()
+        assert res.overid_statistic is not None
+        return res.overid_statistic
+
+    expected = statistic(ordered, ROW_TIME)
+    assert_close(
+        statistic(shuffled, ROW_TIME),
+        expected,
+        "shuffled rows with the original time",
+        rtol=0.0,
+        atol=TOLERANCES["iv_api"]["atol_hac_time_reorder"],
+    )
+    effect = abs(statistic(shuffled, "position") - expected) / expected
+    assert effect > TOLERANCES["iv_api"]["min_rel_hac_time_row_order_effect"]
+
+
 @pytest.mark.parametrize(
     "options",
     [
         IVOptions(),
+        IVOptions(cov_type="hc0"),
+        IVOptions(cov_type="hac", **hac_time_for("hac")),
         IVOptions(estimator="gmm", gmm_weight_type="classical"),
         IVOptions(estimator="gmm", gmm_weight_type="robust"),
         IVOptions(
             estimator="gmm", gmm_weight_type="hac", **hac_time_for("hac")
         ),
     ],
-    ids=["2sls", "gmm_classical", "gmm_robust", "gmm_hac"],
+    ids=[
+        "2sls",
+        "2sls_hc0",
+        "2sls_hac",
+        "gmm_classical",
+        "gmm_robust",
+        "gmm_hac",
+    ],
 )
 def test_overid_test_rejects_only_when_instrument_is_invalid(
     iv_dataset, options

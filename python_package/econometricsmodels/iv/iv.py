@@ -160,8 +160,8 @@ class IVResults:
       `wald_dist`, `wald_df_num`, `wald_df_denom`.
     - Weak instruments: `weak_instrument_f_statistics`,
       `weak_instrument_f_df_num`, `weak_instrument_f_df_denom`.
-    - Overidentification (Sargan or Hansen J): `overid_statistic`,
-      `overid_p_value`, `overid_df`.
+    - Overidentification (Sargan, or Hansen's J that follows `cov_type`
+      for 2SLS): `overid_statistic`, `overid_p_value`, `overid_df`.
     - Endogeneity (2SLS only): `wu_hausman_statistic`,
       `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`.
     - Fit: `r_squared`, `adj_r_squared`.
@@ -421,11 +421,27 @@ class IVResults:
 
     @property
     def overid_statistic(self) -> float | None:
-        """Overidentification test statistic: Sargan (`estimator="2sls"`)
-        or Hansen J (`estimator="gmm"`).
+        """Overidentification test statistic.
+
+        With `estimator="2sls"` it follows `cov_type`. For `"classical"`
+        it is the Sargan statistic, which assumes homoskedastic errors.
+        For the other covariances it is Hansen's J statistic with the
+        weight matrix of that covariance, evaluated at the GMM estimate
+        that uses this weight matrix. With `"hc0"` to `"hc3"` this is
+        the robust score test of Wooldridge (1995), and the four give
+        the same value, because the weight matrix has no small-sample
+        or leverage correction, as with `gmm_weight_type="robust"`.
+        With `estimator="gmm"` it is Hansen's J statistic of the fit.
 
         `None` when just-identified (`len(instruments) ==
-        len(x_endog)`, degrees of freedom 0).
+        len(x_endog)`, degrees of freedom 0). It is also `None` for
+        2SLS when the weight matrix of the covariance is singular
+        (the fit still succeeds). That always happens with
+        `cov_type="cluster"` when the number of clusters is smaller
+        than the number of exogenous regressors (including the
+        intercept) plus excluded instruments, and it can happen rarely
+        for numerical reasons, for example with nearly collinear
+        regressors.
         """
         return self._raw.overid_statistic
 

@@ -27,6 +27,8 @@ Note:
     - `weak_instrument_f`・`sargan_statistic`/`sargan_p_value`はivregの
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
       全cov_typeで同じ値になる（`benchmark/iv/references/run_ivreg.R`参照）。
+      `overid_statistic`は本実装では`cov_type`に追従するので、classicalだけivregの
+      Sarganと比べ、それ以外はmomentfitの2段階GMMのHansen Jと比べる（`_check_result`参照）。
     - `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeでフィクスチャに
       実測値がある（`summary(diagnostics=TRUE, vcov.=<関数>)`で
       cov_type別のロバスト共分散を診断表に反映できることが判明、
@@ -160,11 +162,33 @@ def _check_result(
         f"{label}/weak_instrument_f_statistics",
     )
 
-    # check_sargan=False: 切片なしのivregは残差の中心化TSSを使うSarganで負の値に
-    # なりうる（定数項がZに入っている前提の式）ため、フィクスチャ側がnullで
-    # 比較不能。本実装側の値はlinearmodelsとの比較（`test_iv_reference.py`）で
-    # 検証する。
-    if not check_sargan:
+    # 過剰識別検定は`cov_type`に追従する。ロバストな版（`hc*`・`hac`・`cluster`）はivregに
+    # 無く、フィクスチャの`overid_statistic`はmomentfitの2段階GMMのHansen J
+    # （`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`の`_run_ivreg`）。
+    # 丁度識別と、クラスター数が全操作変数の数より少ない場合は`None`。
+    #
+    # classicalのSarganはivregの値（`sargan_statistic`）と比べる。check_sargan=False:
+    # 切片なしのivregは残差の中心化TSSを使うSarganで負の値になりうる（定数項がZに入っている
+    # 前提の式）ため、フィクスチャ側がnullで比較不能。本実装側の値はlinearmodelsとの
+    # 比較（`test_iv_reference.py`）で検証する。
+    if "overid_statistic" in ref:
+        if ref["overid_statistic"] is None:
+            assert res.overid_statistic is None, f"{label}/overid_statistic"
+            assert res.overid_p_value is None, f"{label}/overid_p_value"
+            assert res.overid_df is None, f"{label}/overid_df"
+        else:
+            _assert_close(
+                res.overid_statistic,
+                ref["overid_statistic"],
+                f"{label}/overid_statistic",
+            )
+            assert_p_value_close(
+                res.overid_p_value,
+                ref["overid_p_value"],
+                f"{label}/overid_p_value",
+                rtol=RTOL_STRICT,
+            )
+    elif not check_sargan:
         pass
     elif ref["sargan_statistic"] is None:
         assert res.overid_statistic is None, f"{label}/overid_statistic"

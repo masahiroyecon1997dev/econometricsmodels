@@ -25,15 +25,16 @@ use super::options::IVOptions;
 /// The first-stage regressions are not a field: `first_stage()` is a separate method.
 /// `weak_instrument_f_statistics` and `first_stage()` are computed the same way for
 /// both estimators. `wu_hausman_*` is available for `estimator="2sls"` only, and
-/// `overid_*` is the Sargan test (`estimator="2sls"`) or the Hansen J test
-/// (`estimator="gmm"`).
+/// `overid_*` is the overidentification test: for `estimator="2sls"` it follows
+/// `cov_type` (the Sargan test with `"classical"`, Hansen's J test that is robust to
+/// the chosen covariance otherwise), and for `estimator="gmm"` it is Hansen's J test.
 // `first_stage()`（内生変数ごとの第一段階回帰結果）はフィールドに含めず別メソッドとして公開する。
 // `LogitResult`/`ProbitResult`が`predict()`用に推定量そのものを非公開フィールドとして保持する
 // のと同じパターンだが、`IVResult`は`estimator`（2sls/gmm）非依存の非公開フィールド
 // `first_stage: Vec<(String, OLSResult)>`から構築する。`engine::iv::common::compute_first_stage`が
 // `estimator`によらず同じ第一段階回帰を計算するため、`fit`でこの表現に詰め替えるだけで済む。
 // `weak_instrument_f_statistics`・`first_stage`は`compute_first_stage`、`wu_hausman_*`は
-// `TwoSlsEstimator`、`overid_*`は`TwoSlsEstimator::sargan_*`/`GmmEstimator::hansen_j_*`から埋める。
+// `TwoSlsEstimator`、`overid_*`は`TwoSlsEstimator::overid_*`/`GmmEstimator::hansen_j_*`から埋める。
 // `IVResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IVOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -155,15 +156,23 @@ pub struct IVResult {
     /// because `x_endog` always has at least one variable.
     #[pyo3(get)]
     pub weak_instrument_f_df_denom: Option<usize>,
-    /// Overidentification test statistic: Sargan (`estimator="2sls"`) or Hansen J
-    /// (`estimator="gmm"`). `None` when just-identified (`len(instruments) ==
-    /// len(x_endog)`, degrees of freedom 0).
+    /// Overidentification test statistic. For `estimator="2sls"` it follows `cov_type`:
+    /// the Sargan statistic with `"classical"`, otherwise Hansen's J statistic with the
+    /// weight matrix of the covariance (`"hc0"` to `"hc3"` give the same value: the weight
+    /// is the plain robust one, without small-sample or leverage corrections). For
+    /// `estimator="gmm"` it is Hansen's J statistic. `None` when just-identified
+    /// (`len(instruments) == len(x_endog)`, degrees of freedom 0), and for 2SLS when the
+    /// weight matrix of the covariance is singular (the fit still succeeds): always with
+    /// `cov_type="cluster"` and fewer clusters than the exogenous regressors (including the
+    /// constant) and the excluded instruments together, and rarely for numerical reasons,
+    /// for example with nearly collinear regressors.
     #[pyo3(get)]
     pub overid_statistic: Option<f64>,
     #[pyo3(get)]
     pub overid_p_value: Option<f64>,
     /// Degrees of freedom of the chi-squared overidentification test
-    /// (`len(instruments) - len(x_endog)`); `None` when just identified.
+    /// (`len(instruments) - len(x_endog)`); `None` under the same conditions as
+    /// `overid_statistic`.
     #[pyo3(get)]
     pub overid_df: Option<usize>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous

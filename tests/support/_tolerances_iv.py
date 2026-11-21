@@ -145,5 +145,9 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         # 5.7e-8〜1.4e-5）を分ける閾値。比較許容誤差ではなく、棄却の有無の境界。
         "overid_valid_min_p_value": 0.05,
         "overid_rejection_max_p_value": 1e-4,
+        # 2SLSのロバストな過剰識別検定（`cov_type`が`hc0`・`cluster`・`hac`）と、同じ重みの種類の
+        # GMM（2段階）のHansen J（`estimator="gmm"`）の一致。同じ`S`・同じ再推定を通る別の
+        # 入口どうしの比較で、実測の最大相対差は4.1e-15。
+        "rtol_overid_same_weight": 1e-10,
     },
 }

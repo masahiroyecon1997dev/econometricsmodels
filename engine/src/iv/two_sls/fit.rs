@@ -4,7 +4,7 @@
 
 use super::TwoSlsEstimator;
 use super::cov::{CovStage, covariance_stage};
-use super::sargan::sargan_test;
+use super::overid::overid_test;
 use super::wu_hausman::wu_hausman_test;
 use crate::iv::common::{
     IvError, IvInput, compute_first_stage_with, hcat, mat_column_to_vec, validate_iv_fit_inputs,
@@ -161,7 +161,7 @@ pub(super) fn fit_two_sls(
     };
 
     let wu_hausman = wu_hausman_test(&input, first_stage_residuals, &cov_type, confidence_level)?;
-    let sargan = sargan_test(&input, &residuals, ssr)?;
+    let overid = overid_test(&input, &cov_type, hac_lags_used, &residuals, ssr)?;
 
     Ok(TwoSlsEstimator {
         weak_instrument_f_statistics,
@@ -187,9 +187,9 @@ pub(super) fn fit_two_sls(
         wu_hausman_statistic: wu_hausman.as_ref().map(|t| t.statistic),
         wu_hausman_p_value: wu_hausman.as_ref().map(|t| t.p_value),
         wu_hausman_df: wu_hausman.as_ref().map(|t| t.df),
-        sargan_statistic: sargan.as_ref().map(|t| t.statistic),
-        sargan_p_value: sargan.as_ref().map(|t| t.p_value),
-        sargan_df: sargan.as_ref().map(|t| t.df),
+        overid_statistic: overid.as_ref().map(|t| t.statistic),
+        overid_p_value: overid.as_ref().map(|t| t.p_value),
+        overid_df: overid.as_ref().map(|t| t.df),
     })
 }
 

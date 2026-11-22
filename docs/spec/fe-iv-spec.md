@@ -230,7 +230,7 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 `rust-style.md`のエラー追加手順に従う。
 
 **定数列のエラーは2分類**: 生データで定数（`REGRESSOR_CONSTANT`・`OUTCOME_CONSTANT`）と、固定効果を除くと一定（`REGRESSOR_NO_WITHIN_VARIATION`・`OUTCOME_CONSTANT_WITHIN_ENTITY`）。
-説明変数側の2つに`role`パラメータ（`x`（FE）・`x_exog`・`x_endog`・`instruments`）を持たせ、文面とhintを`{role}`で書く。個体内で一定の操作変数（時間不変）が典型的な誤りなので、
+説明変数側の2つに`argument`パラメータ（旧`role`）（`x`（FE）・`x_exog`・`x_endog`・`instruments`）を持たせ、文面とhintを`{argument}`で書く。個体内で一定の操作変数（時間不変）が典型的な誤りなので、
 hintで指摘する。変換後の分散ゼロ検出は全役割に対しこの2分類で報告する。該当列は役割ごとに全て`columns`で報告し、役割は`x_exog`・`x_endog`・`instruments`の順に最初に該当列がある役割だけを返す（`error-handling.md`5.3章）。
 
 GMMは第一段階を点推定・共分散・Waldの後に回すので、共線な外生変数・操作変数は先に`MATRIX_NEAR_SINGULAR`（`DESIGN_MATRIX_SINGULAR`＋`stage`ではない）になる。点推定が通ったうえで第一段階が失敗する入力（例えば内生変数を操作変数が完全に説明する）は、2SLSと同じく`stage=FIRST_STAGE`つきで返る。エラーの`model`は`"FEIV"`（推定量によらない。IVの`"IV"`と同じ）。

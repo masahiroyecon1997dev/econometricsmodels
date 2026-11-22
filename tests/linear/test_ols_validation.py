@@ -15,7 +15,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_expectations import escaped
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
@@ -109,7 +109,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="y",
         data_argument="data",
@@ -122,7 +122,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="y",
         data_argument="data",
@@ -135,7 +135,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="x",
         data_argument="data",
@@ -148,7 +148,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="data",
@@ -342,7 +342,7 @@ def test_predict_null_or_non_finite_values_raise(dataset):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="new_data",

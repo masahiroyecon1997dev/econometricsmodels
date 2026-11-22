@@ -19,7 +19,7 @@ from _dtype_helpers import (
     make_frame,
     unused_column,
 )
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from econometricsmodels import (
     FE,
     FEIV,
@@ -424,7 +424,7 @@ def test_non_finite_float_key_raises_for_every_method(
         with raises_error(
             ErrorCode.COLUMN_NON_FINITE,
             column=column,
-            value=pytest.approx(bad, nan_ok=True),
+            value=approx_param(bad),
             row=2,
             argument=_key_argument(column, method),
             data_argument="data",
@@ -445,7 +445,7 @@ def test_non_finite_float_key_error_counts_every_bad_value(frame):
         with raises_error(
             ErrorCode.COLUMN_NON_FINITE,
             column="cluster",
-            value=pytest.approx(float("nan"), nan_ok=True),
+            value=approx_param(float("nan")),
             row=2,
             count=3,
             argument=_key_argument("cluster", method),

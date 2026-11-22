@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(err.report().code(), ErrorCode::ColumnNonFinite);
         assert_eq!(
             full(&err),
-            "Column 'wage' (given as x) in data contains 3 non-finite value(s), the first being NaN \
+            "Column 'wage' (given as x) in data contains 3 non-finite value(s), the first being nan \
              at row 4 (0-based), and non-finite values are never dropped automatically. Remove \
              or replace the NaN and infinite values first."
         );

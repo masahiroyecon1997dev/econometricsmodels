@@ -76,7 +76,12 @@ pub enum MleError {
     /// 構築しない（`common.rs`のモジュールdocコメント「別のenumに分離せず同じ`MleError`に
     /// 含める」の方針通り）。
     #[error("{}", self.catalog_message())]
-    InvalidBinaryY { row: usize, value: f64 },
+    InvalidBinaryY {
+        /// 被説明変数の列名。
+        column: String,
+        row: usize,
+        value: f64,
+    },
 
     /// Tobit専用: `y`の実測値が、指定された打ち切り境界の範囲外にある行を含む。
     ///
@@ -87,6 +92,8 @@ pub enum MleError {
     /// （`engine/src/nonlinear/tobit.rs`と`tobit/`参照）。
     #[error("{}", self.catalog_message())]
     YOutOfCensoringBounds {
+        /// 被説明変数の列名。
+        column: String,
         row: usize,
         value: f64,
         lower: Option<f64>,
@@ -233,15 +240,24 @@ impl ErrorInfo for MleError {
                     .param("lower", *lower)
                     .param("upper", *upper)
             }
-            Self::InvalidBinaryY { row, value } => ErrorReport::new(ErrorCode::OutcomeNotBinary)
-                .param("row", *row)
-                .param("value", *value),
+            Self::InvalidBinaryY { column, row, value } => {
+                ErrorReport::new(ErrorCode::OutcomeNotBinary)
+                    .param("column", column.as_str())
+                    .param("argument", "y")
+                    .param("data_argument", "data")
+                    .param("row", *row)
+                    .param("value", *value)
+            }
             Self::YOutOfCensoringBounds {
+                column,
                 row,
                 value,
                 lower,
                 upper,
             } => ErrorReport::new(ErrorCode::OutcomeOutsideCensoringBounds)
+                .param("column", column.as_str())
+                .param("argument", "y")
+                .param("data_argument", "data")
                 .param("row", *row)
                 .param("value", *value)
                 .param("lower", *lower)
@@ -274,7 +290,7 @@ mod tests {
         let nan_tol = MleError::InvalidTol { tol: f64::NAN };
         assert_eq!(
             nan_tol.to_string(),
-            "tol must be a positive finite number, got NaN."
+            "tol must be a positive finite number, got nan."
         );
         assert_eq!(
             MleError::InvalidTol { tol: f64::INFINITY }.to_string(),
@@ -376,9 +392,13 @@ mod tests {
     fn outcome_and_censoring_errors_map_to_catalog_codes_with_valid_params() {
         let cases = [
             (
-                MleError::InvalidBinaryY { row: 3, value: 1.5 },
+                MleError::InvalidBinaryY {
+                    column: "y".to_string(),
+                    row: 3,
+                    value: 1.5,
+                },
                 ErrorCode::OutcomeNotBinary,
-                "The outcome y at row 3 (0-based) must be 0 or 1, got 1.5.",
+                "The outcome at row 3 (0-based) of column 'y' (given as y) in data must be 0 or 1, got 1.5.",
             ),
             (
                 MleError::CensoringBoundsMissing,
@@ -399,17 +419,18 @@ mod tests {
                     upper: None,
                 },
                 ErrorCode::CensoringBoundNotFinite,
-                "The censoring bounds must be finite numbers or None, got lower=NaN, upper=None.",
+                "The censoring bounds must be finite numbers or None, got lower=nan, upper=None.",
             ),
             (
                 MleError::YOutOfCensoringBounds {
+                    column: "y".to_string(),
                     row: 1,
                     value: -1.0,
                     lower: Some(0.0),
                     upper: None,
                 },
                 ErrorCode::OutcomeOutsideCensoringBounds,
-                "The outcome y at row 1 (0-based) is -1.0, outside the censoring bounds (lower=0.0, upper=None).",
+                "The outcome at row 1 (0-based) of column 'y' (given as y) in data is -1.0, outside the censoring bounds (lower=0.0, upper=None).",
             ),
             (
                 MleError::NoUncensoredObservations {

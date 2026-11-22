@@ -745,12 +745,31 @@ fn value_matches(ty: ParamType, v: &ParamValue) -> bool {
     )
 }
 
-/// 値を文に埋め込む表記にする。`Float`はRustの`{:?}`（`1.0`は`1.0`、`NaN`・`inf`はそのまま）、`None`は`None`、
+/// 非有限の`f64`の表記（`"nan"`・`"inf"`・`"-inf"`）。有限なら`None`。
+///
+/// `params`はJSONにできることを契約にしている（`NaN`は`json.dumps`が不正なJSONにする）ので、
+/// `engine_pybind`は非有限の`Float`をこの文字列で`params`に入れ、文に埋め込む表記も同じにする。
+#[must_use]
+pub fn non_finite_label(value: f64) -> Option<&'static str> {
+    if value.is_nan() {
+        Some("nan")
+    } else if value == f64::INFINITY {
+        Some("inf")
+    } else if value == f64::NEG_INFINITY {
+        Some("-inf")
+    } else {
+        None
+    }
+}
+
+/// 値を文に埋め込む表記にする。`Float`はRustの`{:?}`（`1.0`は`1.0`）、非有限は[`non_finite_label`]（`nan`・`inf`・`-inf`）、`None`は`None`、
 /// `Bool`は`True`/`False`、リストは各要素を引用符で囲み`, `でつなぐ（`ColumnList`は単一引用符、他は二重引用符）。
 fn format_value(v: &ParamValue, ty: Option<ParamType>) -> String {
     match v {
         ParamValue::Int(i) => i.to_string(),
-        ParamValue::Float(f) => format!("{f:?}"),
+        ParamValue::Float(f) => {
+            non_finite_label(*f).map_or_else(|| format!("{f:?}"), str::to_string)
+        }
         ParamValue::Str(s) => s.clone(),
         ParamValue::Bool(b) => if *b { "True" } else { "False" }.to_string(),
         ParamValue::None => "None".to_string(),
@@ -1749,6 +1768,21 @@ pub static CATALOG: &[ErrorSpec] = &[
         class: ErrorClass::Validation,
         params: &[
             ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
                 name: "row",
                 ty: ParamType::Int,
                 in_text: true,
@@ -1759,7 +1793,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The weight at row {row} (0-based) must be positive, got {value}."#,
+        message: r#"The weight at row {row} (0-based) of column '{column}' (given as {argument}) in {data_argument} must be positive, got {value}."#,
         hint: Some(r#"Drop or correct the rows with zero or negative weights."#),
         stage_allowed: false,
     },
@@ -1894,6 +1928,21 @@ pub static CATALOG: &[ErrorSpec] = &[
         class: ErrorClass::Validation,
         params: &[
             ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
                 name: "row",
                 ty: ParamType::Int,
                 in_text: true,
@@ -1904,7 +1953,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The outcome y at row {row} (0-based) must be 0 or 1, got {value}."#,
+        message: r#"The outcome at row {row} (0-based) of column '{column}' (given as {argument}) in {data_argument} must be 0 or 1, got {value}."#,
         hint: Some(
             r#"Code the outcome as 0 and 1, for example by casting a boolean column to an integer."#,
         ),
@@ -1961,6 +2010,21 @@ pub static CATALOG: &[ErrorSpec] = &[
         class: ErrorClass::Validation,
         params: &[
             ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
                 name: "row",
                 ty: ParamType::Int,
                 in_text: true,
@@ -1981,7 +2045,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The outcome y at row {row} (0-based) is {value}, outside the censoring bounds (lower={lower}, upper={upper})."#,
+        message: r#"The outcome at row {row} (0-based) of column '{column}' (given as {argument}) in {data_argument} is {value}, outside the censoring bounds (lower={lower}, upper={upper})."#,
         hint: Some(
             r#"Correct the outcome, or set lower and upper to the actual censoring points."#,
         ),
@@ -2109,12 +2173,17 @@ pub static CATALOG: &[ErrorSpec] = &[
         class: ErrorClass::Validation,
         params: &[
             ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
                 name: "argument",
                 ty: ParamType::Str,
                 in_text: true,
             },
             ParamSpec {
-                name: "column",
+                name: "data_argument",
                 ty: ParamType::Str,
                 in_text: true,
             },
@@ -2129,7 +2198,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The group '{group}' of column '{column}' in {argument} has only one observation, and singleton groups are not dropped automatically; removing singleton groups repeatedly would drop {n_dropped_rows} row(s)."#,
+        message: r#"The group '{group}' of column '{column}' (given as {argument}) in {data_argument} has only one observation, and singleton groups are not dropped automatically; removing them repeatedly would drop {n_dropped_rows} row(s)."#,
         hint: Some(
             r#"Remove its rows from the input, and repeat while removing rows leaves new singleton groups."#,
         ),
@@ -2221,7 +2290,12 @@ pub static CATALOG: &[ErrorSpec] = &[
         class: ErrorClass::Validation,
         params: &[
             ParamSpec {
-                name: "role",
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
                 ty: ParamType::Str,
                 in_text: true,
             },
@@ -2231,8 +2305,8 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"These columns of {role} have the same value in every row up to rounding, so they are collinear with the fixed effects: {columns}."#,
-        hint: Some(r#"Remove these columns from {role}."#),
+        message: r#"These columns of {argument} in {data_argument} have the same value in every row up to rounding, so they are collinear with the fixed effects: {columns}."#,
+        hint: Some(r#"Remove these columns from {argument}."#),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -2240,7 +2314,12 @@ pub static CATALOG: &[ErrorSpec] = &[
         class: ErrorClass::Validation,
         params: &[
             ParamSpec {
-                name: "role",
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
                 ty: ParamType::Str,
                 in_text: true,
             },
@@ -2250,8 +2329,8 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"These columns of {role} have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: {columns}."#,
-        hint: Some(r#"Remove these columns from {role}."#),
+        message: r#"These columns of {argument} in {data_argument} have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: {columns}."#,
+        hint: Some(r#"Remove these columns from {argument}."#),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -2328,12 +2407,24 @@ pub static CATALOG: &[ErrorSpec] = &[
     ErrorSpec {
         code: ErrorCode::AmemiyaRequiresWithinVariation,
         class: ErrorClass::Validation,
-        params: &[ParamSpec {
-            name: "columns",
-            ty: ParamType::ColumnList,
-            in_text: true,
-        }],
-        message: r#"variance_method="amemiya" needs every regressor to vary within the effects, but these do not: {columns}."#,
+        params: &[
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "columns",
+                ty: ParamType::ColumnList,
+                in_text: true,
+            },
+        ],
+        message: r#"variance_method="amemiya" needs every regressor to vary within the effects, but these columns of {argument} in {data_argument} do not: {columns}."#,
         hint: Some(
             r#"Use variance_method="swamy_arora" or "wallace_hussain", which accept such regressors."#,
         ),
@@ -2406,6 +2497,30 @@ mod tests {
     const HINT_VERBS: &[&str] = &[
         "Use", "Pass", "Set", "Remove", "Add", "Rename", "Drop", "Check", "Rescale", "Try", "Make",
         "Call", "List", "Correct", "Code", "Swap", "Report", "Increase", "Omit", "Reduce",
+    ];
+
+    /// 文に出す`params`の数の上限（`docs/spec/error-handling.md`4章）。列の特定（`column`・`argument`・
+    /// `data_argument`）と、位置・値（`row`・`value`）と、その`code`固有の量2つで7個になる。
+    const MAX_PARAMS: usize = 7;
+
+    /// `column`・`columns`を持つが、`data`の列の問題ではないため`argument`・`data_argument`の組を持たない`code`。
+    const NO_DATA_COLUMN_TRIPLE: &[(&str, &str)] = &[
+        (
+            "ROLE_DUPLICATE_COLUMN",
+            "the same column named twice in an argument; data is not read",
+        ),
+        (
+            "ROLE_COLUMN_OVERLAP",
+            "the same column named in two arguments; data is not read",
+        ),
+        (
+            "AUGMENT_COLUMN_EXISTS",
+            "the name of an output column of augment() that new_data already has",
+        ),
+        (
+            "DESIGN_MATRIX_SINGULAR",
+            "names of the columns of the design matrix, which has a derived name such as const",
+        ),
     ];
 
     /// 文面の長さの上限（未置換のテンプレート長）。スタイルガイドの「300文字程度」より余裕を持たせてある。
@@ -2557,6 +2672,44 @@ mod tests {
         }
     }
 
+    /// `data`の列の問題を報告する`code`は、列の特定（`column`または`columns`、`argument`、
+    /// `data_argument`）を持つ。行番号（`row`）を持つ`code`は、その行がどの列のものかを示す。
+    #[test]
+    fn codes_about_a_data_column_name_the_column_the_same_way() {
+        let mut problems: Vec<String> = Vec::new();
+        for spec in CATALOG {
+            let code = spec.code.as_str();
+            let names: Vec<&str> = spec.params.iter().map(|p| p.name).collect();
+            let has = |n: &str| names.contains(&n);
+            let has_column = has("column") || has("columns");
+            let exempt = NO_DATA_COLUMN_TRIPLE.iter().any(|(c, _)| *c == code);
+            if has_column && !exempt && !(has("argument") && has("data_argument")) {
+                problems.push(format!(
+                    "{code}: has a column but not both argument and data_argument"
+                ));
+            }
+            if has("row") && !(has("column") && has("argument") && has("data_argument")) {
+                problems.push(format!(
+                    "{code}: has row but not column, argument, data_argument"
+                ));
+            }
+            if has("column") && has("columns") {
+                problems.push(format!("{code}: has both column and columns"));
+            }
+            if has("role") && !has("argument") {
+                // `role`は`C_STATISTIC_UNKNOWN_VARIABLE`のように引数名とは別の概念にだけ使う。
+                problems.push(format!("{code}: role without argument"));
+            }
+        }
+        assert!(problems.is_empty(), "{problems:#?}");
+        for (code, _) in NO_DATA_COLUMN_TRIPLE {
+            assert!(
+                CATALOG.iter().any(|s| s.code.as_str() == *code),
+                "{code} in NO_DATA_COLUMN_TRIPLE is not in the catalog"
+            );
+        }
+    }
+
     #[test]
     fn templates_follow_the_style_rules() {
         let mut problems: Vec<String> = Vec::new();
@@ -2616,10 +2769,12 @@ mod tests {
                     ));
                 }
             }
-            // 6個までの目安は、文に出す`params`の数（`stage`とその補助値、文に出さない補助値は数えない）。
+            // 7個までの目安は、文に出す`params`の数（`stage`とその補助値、文に出さない補助値は数えない）。
             let counted = spec.params.iter().filter(|p| p.in_text).count();
-            if counted > 6 {
-                problems.push(format!("{code}: {counted} params exceed the limit of 6"));
+            if counted > MAX_PARAMS {
+                problems.push(format!(
+                    "{code}: {counted} params exceed the limit of {MAX_PARAMS}"
+                ));
             }
             let len = spec.message.len() + spec.hint.map_or(0, str::len);
             if len > MAX_TEXT_LEN {
@@ -2741,6 +2896,9 @@ mod tests {
             "Column 'x2' (given as x) does not exist in new_data. Check the spelling against new_data.columns."
         );
         let r = ErrorReport::new(ErrorCode::OutcomeOutsideCensoringBounds)
+            .param("column", "y")
+            .param("argument", "y")
+            .param("data_argument", "data")
             .param("row", 17_usize)
             .param("value", -2.5)
             .param("lower", Some(0.0))
@@ -2748,7 +2906,7 @@ mod tests {
         r.validate().unwrap();
         assert_eq!(
             r.message(),
-            "The outcome y at row 17 (0-based) is -2.5, outside the censoring bounds (lower=0.0, upper=None)."
+            "The outcome at row 17 (0-based) of column 'y' (given as y) in data is -2.5, outside the censoring bounds (lower=0.0, upper=None)."
         );
         let r = ErrorReport::new(ErrorCode::OptionUnknownValue)
             .param("option", "cov_type")
@@ -2759,8 +2917,13 @@ mod tests {
             "Unknown value \"robust\" for cov_type. Use one of: \"classical\", \"hc0\", \"cluster\"."
         );
         let r = ErrorReport::new(ErrorCode::AmemiyaRequiresWithinVariation)
+            .param("argument", "x")
+            .param("data_argument", "data")
             .param("columns", vec!["z", "w"]);
-        assert!(r.message().ends_with("but these do not: 'z', 'w'."));
+        assert!(
+            r.message()
+                .ends_with("columns of x in data do not: 'z', 'w'.")
+        );
         let r = ErrorReport::new(ErrorCode::InsufficientDegreesOfFreedom)
             .param("n_obs", 6)
             .param("n_params", 2)
@@ -2783,11 +2946,20 @@ mod tests {
     }
 
     #[test]
-    fn floats_follow_the_debug_format_with_fixed_non_finite_spellings() {
+    fn non_finite_label_names_only_non_finite_values() {
+        assert_eq!(non_finite_label(f64::NAN), Some("nan"));
+        assert_eq!(non_finite_label(f64::INFINITY), Some("inf"));
+        assert_eq!(non_finite_label(f64::NEG_INFINITY), Some("-inf"));
+        assert_eq!(non_finite_label(0.0), None);
+        assert_eq!(non_finite_label(f64::MAX), None);
+    }
+
+    #[test]
+    fn floats_follow_the_debug_format_with_lowercase_non_finite_spellings() {
         for (v, want) in [
             (1.0, "1.0"),
             (0.5, "0.5"),
-            (f64::NAN, "NaN"),
+            (f64::NAN, "nan"),
             (f64::INFINITY, "inf"),
             (f64::NEG_INFINITY, "-inf"),
         ] {

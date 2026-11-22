@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import re
 from pathlib import Path
@@ -95,9 +96,9 @@ def _sample_params(entry: dict[str, Any], sample: dict) -> dict[str, Any]:
 
 
 def _format_float(value: float) -> str:
-    """Rustの`{:?}`と同じ書式（`1.0`・`1e-7`・`NaN`・`inf`）。"""
+    """Rustの`{:?}`と同じ書式（`1.0`・`1e-7`）。非有限は`nan`・`inf`・`-inf`。"""
     if math.isnan(value):
-        return "NaN"
+        return "nan"
     if math.isinf(value):
         return "inf" if value > 0 else "-inf"
     return (
@@ -152,6 +153,31 @@ def test_generator_check_detects_a_stale_error_code_file(
     monkeypatch.setattr(generator, "ERROR_CODES_PATH", stale)
     assert generator.main(["--check"]) == 1
     assert stale.read_text(encoding="utf-8") == "stale\n"
+
+
+def _expected_param(value: object) -> object:
+    """`params`に入る値。非有限の`float`は`"nan"`・`"inf"`・`"-inf"`の文字列。"""
+    if isinstance(value, float) and not math.isfinite(value):
+        return _format_float(value)
+    return value
+
+
+@pytest.mark.parametrize("sample", SAMPLE_SETS)
+def test_params_are_json_serializable_and_non_finite_floats_are_strings(
+    sample: dict,
+) -> None:
+    for entry in CATALOG["codes"]:
+        params = _sample_params(entry, sample)
+        with pytest.raises((ValidationError, ComputationError)) as info:
+            _lib.raise_error_for_test(entry["code"], params)
+        err = info.value
+        # `NaN`・無限大は`json.dumps`が不正なJSONにするので、`params`には文字列で入る。
+        json.dumps(err.params, allow_nan=False)
+        for name, value in params.items():
+            assert err.params[name] == _expected_param(value), (
+                entry["code"],
+                name,
+            )
 
 
 @pytest.mark.parametrize("sample", SAMPLE_SETS)

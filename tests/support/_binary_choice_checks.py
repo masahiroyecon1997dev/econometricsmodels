@@ -44,7 +44,7 @@ from _assertions import (
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_expectations import escaped
-from _errors import raises_error, raises_one_of_errors
+from _errors import approx_param, raises_error, raises_one_of_errors
 from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     load_wooldridge_dataset,
@@ -623,7 +623,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="y",
         data_argument="data",
@@ -636,7 +636,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="y",
         data_argument="data",
@@ -649,7 +649,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="x",
         data_argument="data",
@@ -662,7 +662,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="data",
@@ -691,7 +691,12 @@ def check_non_binary_y_raises(dataset, estimator_cls, bad_value):
     """
     df = dataset.with_columns(dataset["y"].scatter(0, bad_value))
     with raises_error(
-        ErrorCode.OUTCOME_NOT_BINARY, row=0, value=float(bad_value)
+        ErrorCode.OUTCOME_NOT_BINARY,
+        column="y",
+        argument="y",
+        data_argument="data",
+        row=0,
+        value=float(bad_value),
     ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
@@ -757,7 +762,7 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="new_data",

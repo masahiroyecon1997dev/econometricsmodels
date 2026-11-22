@@ -16,7 +16,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_expectations import escaped
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
@@ -104,7 +104,12 @@ def test_non_positive_weight_raises(dataset, bad_weight):
     weight = [1.0] * (n - 1) + [bad_weight]
     df = dataset.with_columns(pl.Series("weight", weight))
     with raises_error(
-        ErrorCode.WEIGHT_NOT_POSITIVE, row=n - 1, value=bad_weight
+        ErrorCode.WEIGHT_NOT_POSITIVE,
+        column="weight",
+        argument="weight",
+        data_argument="data",
+        row=n - 1,
+        value=bad_weight,
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
@@ -117,7 +122,7 @@ def test_nan_weight_raises(dataset):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="weight",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=n - 1,
         argument="weight",
         data_argument="data",
@@ -325,7 +330,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="y",
         data_argument="data",
@@ -342,7 +347,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="y",
         data_argument="data",
@@ -359,7 +364,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="x",
         data_argument="data",
@@ -376,7 +381,7 @@ def test_non_finite_values_raise():
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="data",
@@ -459,7 +464,7 @@ def test_predict_null_or_non_finite_values_raise(unit_weight_dataset):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="new_data",

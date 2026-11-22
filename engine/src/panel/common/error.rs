@@ -530,8 +530,9 @@ impl ErrorInfo for PanelError {
                 group_id,
                 n_dropped_rows,
             } => ErrorReport::new(ErrorCode::SingletonGroup)
-                .param("argument", "effects")
                 .param("column", column.as_str())
+                .param("argument", "effects")
+                .param("data_argument", "data")
                 .param("group", group_id.as_str())
                 .param("n_dropped_rows", *n_dropped_rows),
             Self::UnbalancedPanelForTwoWay {
@@ -567,12 +568,14 @@ impl ErrorInfo for PanelError {
                 .param("max", MAX_ITER_LIMIT),
             Self::RegressorConstant { role, columns } => {
                 ErrorReport::new(ErrorCode::RegressorConstant)
-                    .param("role", role.as_str())
+                    .param("argument", role.as_str())
+                    .param("data_argument", "data")
                     .param("columns", columns.clone())
             }
             Self::ZeroVarianceAfterDemeaning { role, columns } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
-                    .param("role", role.as_str())
+                    .param("argument", role.as_str())
+                    .param("data_argument", "data")
                     .param("columns", columns.clone())
             }
             Self::OutcomeConstantWithinEntity => {
@@ -601,6 +604,8 @@ impl ErrorInfo for PanelError {
             }
             Self::AmemiyaRequiresWithinVariation { columns } => {
                 ErrorReport::new(ErrorCode::AmemiyaRequiresWithinVariation)
+                    .param("argument", "x")
+                    .param("data_argument", "data")
                     .param("columns", columns.clone())
             }
             Self::NonPositiveIdiosyncraticVariance { method, sigma2_eps } => {
@@ -716,7 +721,7 @@ mod tests {
                     n_dropped_rows: 0,
                 },
                 ErrorCode::SingletonGroup,
-                "The group 'a' of column 'firm' in effects has only one observation, and singleton groups are not dropped automatically; removing singleton groups repeatedly would drop 0 row(s).",
+                "The group 'a' of column 'firm' (given as effects) in data has only one observation, and singleton groups are not dropped automatically; removing them repeatedly would drop 0 row(s).",
             ),
             (
                 PanelError::SingletonGroup {
@@ -726,7 +731,7 @@ mod tests {
                     n_dropped_rows: 0,
                 },
                 ErrorCode::SingletonGroup,
-                "The group '2020' of column 'year' in effects has only one observation, and singleton groups are not dropped automatically; removing singleton groups repeatedly would drop 0 row(s).",
+                "The group '2020' of column 'year' (given as effects) in data has only one observation, and singleton groups are not dropped automatically; removing them repeatedly would drop 0 row(s).",
             ),
             (
                 PanelError::UnbalancedPanelForTwoWay {
@@ -771,7 +776,7 @@ mod tests {
                     columns: vec!["x1".to_string()],
                 },
                 ErrorCode::RegressorConstant,
-                "These columns of x have the same value in every row up to rounding, so they are collinear with the fixed effects: 'x1'.",
+                "These columns of x in data have the same value in every row up to rounding, so they are collinear with the fixed effects: 'x1'.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {
@@ -779,7 +784,7 @@ mod tests {
                     columns: vec!["z1".to_string()],
                 },
                 ErrorCode::RegressorNoWithinVariation,
-                "These columns of instruments have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: 'z1'.",
+                "These columns of instruments in data have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: 'z1'.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {
@@ -787,7 +792,7 @@ mod tests {
                     columns: vec!["b".to_string(), "a".to_string()],
                 },
                 ErrorCode::RegressorNoWithinVariation,
-                "These columns of x_endog have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: 'b', 'a'.",
+                "These columns of x_endog in data have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: 'b', 'a'.",
             ),
             (
                 PanelError::RegressorConstant {
@@ -795,7 +800,7 @@ mod tests {
                     columns: vec!["x2".to_string(), "x1".to_string()],
                 },
                 ErrorCode::RegressorConstant,
-                "These columns of x_exog have the same value in every row up to rounding, so they are collinear with the fixed effects: 'x2', 'x1'.",
+                "These columns of x_exog in data have the same value in every row up to rounding, so they are collinear with the fixed effects: 'x2', 'x1'.",
             ),
             (
                 PanelError::OutcomeConstantWithinEntity,
@@ -817,7 +822,7 @@ mod tests {
                     columns: vec!["a".to_string(), "b".to_string()],
                 },
                 ErrorCode::AmemiyaRequiresWithinVariation,
-                "variance_method=\"amemiya\" needs every regressor to vary within the effects, but these do not: 'a', 'b'.",
+                "variance_method=\"amemiya\" needs every regressor to vary within the effects, but these columns of x in data do not: 'a', 'b'.",
             ),
             (
                 PanelError::NonPositiveIdiosyncraticVariance {

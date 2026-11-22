@@ -20,7 +20,7 @@ from _dtype_helpers import (
     make_frame,
     unused_column,
 )
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import ROW_TIME, with_row_time
 from econometricsmodels import (
     FE,
@@ -418,7 +418,14 @@ def test_boolean_weight_is_accepted_when_all_true_and_rejected_with_false(
     with_false = roles_frame.with_columns(
         (pl.int_range(pl.len()) > 0).alias("col")
     )
-    with raises_error(ErrorCode.WEIGHT_NOT_POSITIVE, row=0, value=0.0):
+    with raises_error(
+        ErrorCode.WEIGHT_NOT_POSITIVE,
+        column="col",
+        argument="weight",
+        data_argument="data",
+        row=0,
+        value=0.0,
+    ):
         ROLE_FITS["wls.weight"](with_false)
 
 
@@ -476,7 +483,7 @@ def test_non_finite_values_are_rejected_for_narrow_floats(
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="col",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
         count=1,
         argument="x",
@@ -758,7 +765,7 @@ def test_hac_time_non_finite_value_raises(
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="t",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
         count=1,
         argument="hac_time",

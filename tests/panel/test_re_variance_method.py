@@ -632,6 +632,8 @@ def test_amemiya_rejects_regressors_without_within_variation(case):
     バランスパネルでも不均衡でも、全列がそうでも`ValidationError`で、列の名前を示す。"""
     with raises_error(
         ErrorCode.AMEMIYA_REQUIRES_WITHIN_VARIATION,
+        argument="x",
+        data_argument="data",
         columns=case.rejected_columns.split(", "),
     ):
         _fit(case, "classical", "amemiya")

@@ -351,6 +351,7 @@ fn main() {
                     true,
                     "y".into(),
                     &small.weights,
+                    "weight".to_string(),
                     cov,
                     confidence,
                 )

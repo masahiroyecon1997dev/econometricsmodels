@@ -42,6 +42,7 @@ pub(super) fn fit_logit(
         max_iter,
         tol,
         input.y(),
+        input.dep_var_name(),
         k,
         input.has_intercept(),
         &cov_type,

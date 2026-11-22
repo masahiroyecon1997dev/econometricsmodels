@@ -22,7 +22,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_expectations import escaped
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
@@ -346,7 +346,7 @@ def test_non_finite_values_raise(bad_col, value):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column=bad_col,
-        value=pytest.approx(value, nan_ok=True),
+        value=approx_param(value),
         row=1,
         argument=_ROLE_ARGUMENT[bad_col],
         data_argument="data",
@@ -1164,7 +1164,7 @@ def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol):
     with raises_error(
         ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
         option="gmm_tol",
-        value=pytest.approx(gmm_tol, nan_ok=True),
+        value=approx_param(gmm_tol),
     ):
         our_fit(iv_dataset, options=options)
 

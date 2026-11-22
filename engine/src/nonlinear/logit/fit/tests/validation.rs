@@ -261,7 +261,7 @@ fn fit_returns_invalid_binary_y_error_for_non_binary_values() {
             &x_columns,
             vec!["x1".to_string()],
             true,
-            "y".to_string(),
+            "outcome".to_string(),
         )
         .unwrap();
 
@@ -279,6 +279,7 @@ fn fit_returns_invalid_binary_y_error_for_non_binary_values() {
         assert_eq!(
             result.unwrap_err(),
             MleError::InvalidBinaryY {
+                column: "outcome".to_string(),
                 row: bad_row,
                 value: bad_value
             }

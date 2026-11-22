@@ -19,6 +19,7 @@ fn fit_returns_perfect_fit_for_exact_data_under_any_weights() {
         true,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     );
@@ -39,6 +40,7 @@ fn fit_returns_outcome_constant_for_a_constant_outcome_under_any_weights() {
         true,
         "y".to_string(),
         &[1.0, 2.0, 0.5, 3.0, 1.5],
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     );
@@ -62,6 +64,7 @@ fn fit_propagates_non_positive_weight_error() {
         true,
         "y".to_string(),
         &weights,
+        "wt".to_string(),
         CovType::Classical,
         0.95,
     );
@@ -69,6 +72,7 @@ fn fit_propagates_non_positive_weight_error() {
     assert_eq!(
         result.unwrap_err(),
         LeastSquaresError::NonPositiveWeight {
+            column: "wt".to_string(),
             row: 1,
             weight: 0.0
         }
@@ -90,6 +94,7 @@ fn fit_propagates_no_regressors_error_when_k_is_zero() {
         false,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     );

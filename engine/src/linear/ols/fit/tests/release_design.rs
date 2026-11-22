@@ -129,7 +129,16 @@ fn fit_releasing_design_matches_fit_for_a_weighted_input() {
     let (y, x) = data(N);
     let weights: Vec<f64> = (0..N).map(|i| 0.5 + (i % 5) as f64 * 0.3).collect();
     let weighted = || {
-        OlsInput::from_columns_weighted(&y, &x, names(), true, "y".to_string(), &weights).unwrap()
+        OlsInput::from_columns_weighted(
+            &y,
+            &x,
+            names(),
+            true,
+            "y".to_string(),
+            &weights,
+            "weight".to_string(),
+        )
+        .unwrap()
     };
     let borrowed = OlsEstimator::fit(weighted(), CovType::Hc1, 0.95).unwrap();
     let released = OlsEstimator::fit_releasing_design(weighted(), CovType::Hc1, 0.95).unwrap();

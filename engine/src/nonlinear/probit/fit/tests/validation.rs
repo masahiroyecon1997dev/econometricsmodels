@@ -187,7 +187,7 @@ fn fit_returns_invalid_tol_error_for_non_positive_tol() {
 #[test]
 fn fit_returns_invalid_binary_y_error_for_non_binary_y() {
     let y = vec![0.0, 1.0, 0.5, 1.0];
-    let input = ProbitInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
+    let input = ProbitInput::from_columns(&y, &[], vec![], true, "outcome".to_string()).unwrap();
     let result = ProbitEstimator::fit(
         input,
         MleFitOptions {
@@ -201,7 +201,11 @@ fn fit_returns_invalid_binary_y_error_for_non_binary_y() {
     );
     assert_eq!(
         result.unwrap_err(),
-        MleError::InvalidBinaryY { row: 2, value: 0.5 }
+        MleError::InvalidBinaryY {
+            column: "outcome".to_string(),
+            row: 2,
+            value: 0.5
+        }
     );
 }
 

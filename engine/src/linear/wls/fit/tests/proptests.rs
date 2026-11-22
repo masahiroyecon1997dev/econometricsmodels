@@ -75,7 +75,8 @@ proptest! {
         let names = x_names(k);
         let result = WlsEstimator::fit(
             &y, &x_cols, names, true, "y".to_string(),
-            &weights, CovType::Classical, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Classical, 0.95,
         );
         prop_assume!(result.is_ok());
         let wls = result.unwrap();
@@ -104,7 +105,8 @@ proptest! {
 
         let wls_result = WlsEstimator::fit(
             &y, &x_cols, names.clone(), true, "y".to_string(),
-            &weights, CovType::Classical, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Classical, 0.95,
         );
         let ols_input = OlsInput::from_columns(&y, &x_cols, names, true, "y".to_string()).unwrap();
         let ols_result = OlsEstimator::fit(ols_input, CovType::Classical, 0.95);
@@ -142,7 +144,8 @@ proptest! {
         let names = x_names(k);
         let result1 = WlsEstimator::fit(
             &y, &x_cols, names.clone(), true, "y".to_string(),
-            &weights, CovType::Classical, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Classical, 0.95,
         );
         prop_assume!(result1.is_ok());
         let wls1 = result1.unwrap();
@@ -150,7 +153,8 @@ proptest! {
         let y_scaled: Vec<f64> = y.iter().map(|v| v * c).collect();
         let result2 = WlsEstimator::fit(
             &y_scaled, &x_cols, names, true, "y".to_string(),
-            &weights, CovType::Classical, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Classical, 0.95,
         );
         prop_assume!(result2.is_ok());
         let wls2 = result2.unwrap();
@@ -171,7 +175,8 @@ proptest! {
         let names = x_names(k);
         let result1 = WlsEstimator::fit(
             &y, &x_cols, names.clone(), true, "y".to_string(),
-            &weights, CovType::Classical, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Classical, 0.95,
         );
         prop_assume!(result1.is_ok());
         let wls1 = result1.unwrap();
@@ -183,7 +188,8 @@ proptest! {
 
         let result2 = WlsEstimator::fit(
             &y, &permuted_x, permuted_names, true, "y".to_string(),
-            &weights, CovType::Classical, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Classical, 0.95,
         );
         prop_assume!(result2.is_ok());
         let wls2 = result2.unwrap();
@@ -210,14 +216,16 @@ proptest! {
         let names = x_names(k);
         let result1 = WlsEstimator::fit(
             &y, &x_cols, names.clone(), true, "y".to_string(),
-            &weights, CovType::Hc0, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Hc0, 0.95,
         );
         prop_assume!(result1.is_ok());
         let wls_hc0 = result1.unwrap();
 
         let result2 = WlsEstimator::fit(
             &y, &x_cols, names, true, "y".to_string(),
-            &weights, CovType::Hc1, 0.95,
+            &weights,
+            "weight".to_string(), CovType::Hc1, 0.95,
         );
         prop_assume!(result2.is_ok());
         let wls_hc1 = result2.unwrap();

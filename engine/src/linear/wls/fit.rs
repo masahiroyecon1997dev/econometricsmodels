@@ -18,6 +18,7 @@ pub(super) fn fit_wls(
     include_intercept: bool,
     dep_var_name: String,
     weights: &[f64],
+    weight_name: String,
     cov_type: CovType,
     confidence_level: f64,
 ) -> Result<WlsEstimator, LeastSquaresError> {
@@ -31,6 +32,7 @@ pub(super) fn fit_wls(
         include_intercept,
         dep_var_name,
         weights,
+        weight_name,
     )?;
     // 元スケールの当てはめ値・残差は元の列から求める（下）ので、推定量は設計行列を持たなくてよい。
     let estimator = OlsEstimator::fit_releasing_design(input, cov_type, confidence_level)?;

@@ -12,7 +12,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 from _dtype_helpers import make_frame
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from econometricsmodels import (
     FE,
     FEIV,
@@ -71,7 +71,7 @@ def _assert_rejected(
         expected = {
             "code": ErrorCode.COLUMN_NON_FINITE,
             "row": row,
-            "value": pytest.approx(bad, nan_ok=True),
+            "value": approx_param(bad),
             "count": 1,
         }
     with raises_error(**expected, **where):
@@ -257,7 +257,7 @@ def test_non_finite_error_counts_every_non_finite_value_of_the_column(frame):
         argument="x",
         data_argument="data",
         row=2,
-        value=float("inf"),
+        value="inf",
         count=3,
     ):
         OLS(df, "y", ["x1", "x2"]).fit()

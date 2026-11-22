@@ -15,7 +15,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - `y: str`（単一列名）、`x: list[str]`。`y`の値は`{0.0, 1.0}`の完全一致のみ許容する（statsmodelsが
   許容する単位区間`[0,1]`の比率データは対象外。本実装は常に真の2値アウトカムのみを扱うため、
-  より厳格にした）。範囲外の値は`InvalidBinaryY { row, value }`。
+  より厳格にした）。範囲外の値は`InvalidBinaryY { column, row, value }`（`column`は`y`の列名）。
 - `LogitOptions`（`#[pyclass]`）:
 
   | フィールド | 型 | デフォルト | 説明 |

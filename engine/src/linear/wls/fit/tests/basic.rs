@@ -23,6 +23,7 @@ fn fitted_values_equals_y_minus_residuals() {
         true,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     )
@@ -48,6 +49,7 @@ fn fit_recovers_known_coefficients_with_nonuniform_weights() {
         true,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     )
@@ -97,6 +99,7 @@ fn fit_without_intercept_uses_uncentered_r_squared_and_omits_const() {
         false,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     )
@@ -141,6 +144,7 @@ fn fit_with_multiple_x_columns_recovers_known_coefficients() {
         true,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     )
@@ -170,6 +174,7 @@ fn fit_with_all_weights_one_matches_ols() {
         true,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     )
@@ -242,6 +247,7 @@ fn fit_computes_r_squared_and_information_criteria_matching_statsmodels() {
         true,
         "y".to_string(),
         &weights,
+        "weight".to_string(),
         CovType::Classical,
         0.95,
     )
@@ -320,6 +326,7 @@ fn fit_matches_manually_transformed_ols_for_all_cov_types() {
             true,
             "y".to_string(),
             &weights,
+            "weight".to_string(),
             cov_type,
             0.95,
         )

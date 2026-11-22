@@ -181,7 +181,7 @@ def test_a_regressor_absorbed_by_the_third_effect_is_rejected():
         x2=pl.col("industry").str.slice(1).cast(pl.Float64)
     )
     with raises_error(
-        "REGRESSOR_NO_WITHIN_VARIATION", role="x", columns=["x2"]
+        "REGRESSOR_NO_WITHIN_VARIATION", argument="x", columns=["x2"]
     ):
         _fit(df, ["firm", "year", "industry"])
 

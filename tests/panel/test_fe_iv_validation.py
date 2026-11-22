@@ -220,7 +220,7 @@ _WITH_EXTRA_COLUMN = {
 def test_a_column_with_one_value_in_every_row_raises(df, role):
     """生の値が全て同じ列は、固定効果を除く前に`REGRESSOR_CONSTANT`（`role`付き）。"""
     with raises_error(
-        ErrorCode.REGRESSOR_CONSTANT, role=role, columns=["extra"]
+        ErrorCode.REGRESSOR_CONSTANT, argument=role, columns=["extra"]
     ):
         _fit(df.with_columns(extra=pl.lit(1.5)), **_WITH_EXTRA_COLUMN[role])
 
@@ -231,7 +231,9 @@ def test_a_column_constant_within_entities_raises(df, role):
     level = np.random.default_rng(2).normal(size=N_ENTITIES)
     data = df.with_columns(extra=pl.Series(np.repeat(level, N_PERIODS)))
     with raises_error(
-        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, role=role, columns=["extra"]
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
+        argument=role,
+        columns=["extra"],
     ):
         _fit(data, **_WITH_EXTRA_COLUMN[role])
 
@@ -263,7 +265,9 @@ def _with_extra_columns(data: pl.DataFrame) -> pl.DataFrame:
 def test_every_constant_column_of_a_role_is_reported(df, role):
     """同じロールの定数列は、最初の1列で止めず全て、引数の並び順で報告する。"""
     with raises_error(
-        ErrorCode.REGRESSOR_CONSTANT, role=role, columns=["extra2", "extra"]
+        ErrorCode.REGRESSOR_CONSTANT,
+        argument=role,
+        columns=["extra2", "extra"],
     ):
         _fit(_with_extra_columns(df), **_WITH_TWO_EXTRA_COLUMNS[role])
 
@@ -276,7 +280,7 @@ def test_every_column_constant_within_entities_is_reported(df, role):
     )
     with raises_error(
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
-        role=role,
+        argument=role,
         columns=["extra2", "extra"],
     ):
         _fit(data, **_WITH_TWO_EXTRA_COLUMNS[role])
@@ -285,7 +289,7 @@ def test_every_column_constant_within_entities_is_reported(df, role):
 def test_the_constant_columns_are_only_those_with_one_value_in_every_row(df):
     """個体ごとに一定の列は、生の値が定数ではないので`REGRESSOR_CONSTANT`の列に入らない。"""
     with raises_error(
-        ErrorCode.REGRESSOR_CONSTANT, role="x_exog", columns=["extra"]
+        ErrorCode.REGRESSOR_CONSTANT, argument="x_exog", columns=["extra"]
     ):
         _fit(_with_extra_columns(df), x_exog=["inv", "extra", "x1"])
 
@@ -294,7 +298,7 @@ def test_every_regressor_of_a_role_can_be_reported(df):
     """ロールの全ての列が該当するときは、全列を報告する。"""
     with raises_error(
         ErrorCode.REGRESSOR_CONSTANT,
-        role="x_exog",
+        argument="x_exog",
         columns=["extra2", "extra"],
     ):
         _fit(_with_extra_columns(df), x_exog=["extra2", "extra"])
@@ -340,7 +344,7 @@ def test_only_the_first_role_with_an_offending_column_is_reported(
     df, kwargs, expected
 ):
     code, role, columns = expected
-    with raises_error(code, role=role, columns=columns):
+    with raises_error(code, argument=role, columns=columns):
         _fit(_with_extra_columns(df), **kwargs)
 
 

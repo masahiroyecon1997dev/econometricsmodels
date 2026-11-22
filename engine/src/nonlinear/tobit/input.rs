@@ -132,6 +132,7 @@ impl TobitInput {
             let above = upper.is_some_and(|u| value > u);
             if below || above {
                 return Err(MleError::YOutOfCensoringBounds {
+                    column: self.dep_var_name.clone(),
                     row: i,
                     value,
                     lower,
@@ -284,12 +285,20 @@ mod tests {
         // 経由せずupper方向の分岐だけが正しく機能することを確認する
         // （両方Someのテストだけではlower=Noneの経路を独立に検証できない）。
         let y = vec![-100.0, 5.0, 11.0];
-        let result =
-            from_columns_validated(&y, &[], vec![], true, "y".to_string(), None, Some(10.0));
+        let result = from_columns_validated(
+            &y,
+            &[],
+            vec![],
+            true,
+            "outcome".to_string(),
+            None,
+            Some(10.0),
+        );
 
         assert_eq!(
             result.unwrap_err(),
             MleError::YOutOfCensoringBounds {
+                column: "outcome".to_string(),
                 row: 2,
                 value: 11.0,
                 lower: None,
@@ -524,6 +533,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             MleError::YOutOfCensoringBounds {
+                column: "y".to_string(),
                 row: 1,
                 value: -1.0,
                 lower: Some(0.0),
@@ -548,6 +558,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             MleError::YOutOfCensoringBounds {
+                column: "y".to_string(),
                 row: 2,
                 value: 11.0,
                 lower: Some(0.0),

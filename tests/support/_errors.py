@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -174,14 +176,35 @@ def _expected_param_names(code: str, params: dict[str, object]) -> set[str]:
     return names
 
 
+# 非有限の`float`の`params`での表記。`params`はJSONにできる契約なので、`NaN`・無限大は
+# `float`ではなくこの文字列で返る。
+NON_FINITE_LABELS = ("nan", "inf", "-inf")
+
+
+def _is_float_param(value: object) -> bool:
+    """有限の`float`、または非有限を表す文字列（`"nan"`・`"inf"`・`"-inf"`）。"""
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return isinstance(value, str) and value in NON_FINITE_LABELS
+
+
+def approx_param(value: float) -> object:
+    """`float`の`params`の期待値。非有限は`"nan"`・`"inf"`・`"-inf"`、有限は`pytest.approx`。"""
+    if math.isnan(value):
+        return "nan"
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    return pytest.approx(value)
+
+
 def _type_matches(type_name: str, value: object) -> bool:
     match type_name:
         case "int":
             return isinstance(value, int) and not isinstance(value, bool)
         case "float":
-            return isinstance(value, float)
+            return _is_float_param(value)
         case "float_or_none":
-            return value is None or isinstance(value, float)
+            return value is None or _is_float_param(value)
         case "str":
             return isinstance(value, str)
         case "str_list" | "column_list":
@@ -218,6 +241,13 @@ def _check_error(
             f"{expected}: param {spec['name']!r} should be {spec['type']}, "
             f"got {value!r}"
         )
+    # `params`はJSONにできる（`NaN`・無限大は文字列で返る）。
+    try:
+        json.dumps(err.params, allow_nan=False)
+    except ValueError as exc:
+        raise AssertionError(
+            f"{expected}: params are not JSON-serializable: {err.params!r}"
+        ) from exc
     for name, value in params.items():
         assert name in err.params, f"{expected}: no param {name!r}"
         assert err.params[name] == value, (

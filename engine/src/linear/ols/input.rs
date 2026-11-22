@@ -61,7 +61,8 @@ impl OlsInput {
     /// （`docs/spec/wls-spec.md`「sqrt(w)変換」参照）。`weights`の全要素が1.0のときは
     /// `from_columns`と数値的に完全に同じ結果になる。
     ///
-    /// `weights`はanalytic weightとして扱う（`docs/spec/wls-spec.md`「API引数」）。
+    /// `weights`はanalytic weightとして扱う（`docs/spec/wls-spec.md`「API引数」）。`weight_name`は
+    /// 重みの列名で、非正の重みを報告するときの`column`に使う。
     ///
     /// # Errors
     /// - `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`
@@ -75,6 +76,7 @@ impl OlsInput {
         include_intercept: bool,
         dep_var_name: String,
         weights: &[f64],
+        weight_name: String,
     ) -> Result<Self, LeastSquaresError> {
         if weights.len() != y.len() {
             return Err(LeastSquaresError::WeightDimensionMismatch {
@@ -88,7 +90,11 @@ impl OlsInput {
             // `!(w > 0.0)`は使わない）。NaN/無限大は`engine_pybind::column_extraction`が
             // 既に検出している前提だが、`engine`側の防御的チェックとして残す。
             if w.is_nan() || w <= 0.0 {
-                return Err(LeastSquaresError::NonPositiveWeight { row, weight: w });
+                return Err(LeastSquaresError::NonPositiveWeight {
+                    column: weight_name,
+                    row,
+                    weight: w,
+                });
             }
         }
 
@@ -410,6 +416,7 @@ mod tests {
             true,
             "y".to_string(),
             &weights,
+            "weight".to_string(),
         )
         .unwrap();
         let plain = OlsInput::from_columns(
@@ -444,6 +451,7 @@ mod tests {
             true,
             "y".to_string(),
             &weights,
+            "weight".to_string(),
         )
         .unwrap();
 
@@ -468,6 +476,7 @@ mod tests {
             true,
             "y".to_string(),
             &weights,
+            "weight".to_string(),
         );
 
         assert_eq!(
@@ -495,10 +504,16 @@ mod tests {
                 true,
                 "y".to_string(),
                 &weights,
+                "weight".to_string(),
             );
 
             match result.unwrap_err() {
-                LeastSquaresError::NonPositiveWeight { row, weight } => {
+                LeastSquaresError::NonPositiveWeight {
+                    column,
+                    row,
+                    weight,
+                } => {
+                    assert_eq!(column, "weight");
                     assert_eq!(row, bad_row);
                     if bad_weight.is_nan() {
                         assert!(weight.is_nan());

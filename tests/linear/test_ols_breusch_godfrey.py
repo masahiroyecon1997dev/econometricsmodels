@@ -27,7 +27,7 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import (
     CASE_SPELLINGS,
     ROW_TIME,
@@ -427,7 +427,7 @@ def test_float_time_column_with_non_finite_values_raises_validation_error(
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="t",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
         argument="time",
         data_argument="data",

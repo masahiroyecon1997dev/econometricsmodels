@@ -43,6 +43,7 @@ pub(super) fn fit_probit(
         max_iter,
         tol,
         input.y(),
+        input.dep_var_name(),
         k,
         input.has_intercept(),
         &cov_type,

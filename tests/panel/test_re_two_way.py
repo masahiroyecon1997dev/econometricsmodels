@@ -21,7 +21,7 @@ import polars as pl
 import pytest
 import statsmodels.api as sm
 from _constants import DATA_DIR
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import assert_unit_change_invariant
 from _re_oracle import hand_computed
 from econometricsmodels import (
@@ -782,7 +782,7 @@ def test_non_finite_float_group_key_columns_raise(panel, role, bad):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="key",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
         argument="effects" if role in ("entity", "time") else role,
         data_argument="data",

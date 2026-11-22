@@ -21,7 +21,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_expectations import escaped
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import (
     assert_unit_change_invariant,
     name_collision_frame,
@@ -196,7 +196,7 @@ def test_non_finite_values_raise(bad):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=1,
         argument="y",
         data_argument="data",
@@ -209,7 +209,7 @@ def test_non_finite_values_raise(bad):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=1,
         argument="x",
         data_argument="data",
@@ -280,7 +280,7 @@ def test_censoring_bound_not_finite_reports_both_bounds(censored_dataset):
     （全パターンは`tests/cross_method/test_option_types.py`）
     """
     with raises_error(
-        ErrorCode.CENSORING_BOUND_NOT_FINITE, lower=float("-inf"), upper=None
+        ErrorCode.CENSORING_BOUND_NOT_FINITE, lower="-inf", upper=None
     ):
         Tobit(
             censored_dataset,
@@ -297,6 +297,9 @@ def test_y_out_of_censoring_bounds_raises():
     df = pl.DataFrame({"y": [-1.0, 0.0, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]})
     with raises_error(
         ErrorCode.OUTCOME_OUTSIDE_CENSORING_BOUNDS,
+        column="y",
+        argument="y",
+        data_argument="data",
         row=0,
         value=-1.0,
         lower=0.0,
@@ -310,6 +313,9 @@ def test_y_above_upper_bound_raises():
     df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 5.0], "x1": [1.0, 2.0, 3.0, 4.0]})
     with raises_error(
         ErrorCode.OUTCOME_OUTSIDE_CENSORING_BOUNDS,
+        column="y",
+        argument="y",
+        data_argument="data",
         row=3,
         value=5.0,
         lower=None,
@@ -390,7 +396,7 @@ def test_predict_null_or_non_finite_values_raise(censored_dataset):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="new_data",

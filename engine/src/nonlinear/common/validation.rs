@@ -15,11 +15,15 @@ use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_c
 /// （既にengine_pybind側で行っているNaN/無限大チェックと同オーダー）で、
 /// 反復最適化本体（O(n·k²)を`max_iter`回）に対して計算コストは無視できる
 /// （実測: n=1,000,000で`fit()`全体の約0.16%）。
-pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
+pub fn validate_binary_y(y: &Mat<f64>, dep_var_name: &str) -> Result<(), MleError> {
     for i in 0..y.nrows() {
         let value = *y.get(i, 0);
         if value != 0.0 && value != 1.0 {
-            return Err(MleError::InvalidBinaryY { row: i, value });
+            return Err(MleError::InvalidBinaryY {
+                column: dep_var_name.to_string(),
+                row: i,
+                value,
+            });
         }
     }
     Ok(())
@@ -151,17 +155,20 @@ pub fn validate_mle_options(
 /// コンパイルが通ってしまうため、傾き係数の数は`usize`ではなく
 /// `has_intercept: bool`で受け取り、この関数内で`k - usize::from(has_intercept)`と
 /// して算出する（`k`との取り違えを型で防ぐ）。
+// 引数は検証の順序に揃えてあり（上のdocコメント）、まとめる型を作ると順序が読めなくなるため許容する。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_fit_preconditions(
     confidence_level: f64,
     max_iter: i64,
     tol: f64,
     y: &Mat<f64>,
+    dep_var_name: &str,
     k: usize,
     has_intercept: bool,
     cov_type: &CovType,
 ) -> Result<(), MleError> {
     validate_mle_options(confidence_level, max_iter, tol)?;
-    validate_binary_y(y)?;
+    validate_binary_y(y, dep_var_name)?;
 
     let n = y.nrows();
     validate_has_regressors(n, k)?;
@@ -179,15 +186,19 @@ mod tests {
     #[test]
     fn validate_binary_y_ok_for_all_zero_and_one() {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
-        assert_eq!(validate_binary_y(&y), Ok(()));
+        assert_eq!(validate_binary_y(&y, "y"), Ok(()));
     }
 
     #[test]
     fn validate_binary_y_returns_invalid_binary_y_error_for_non_binary_value() {
         let y = Mat::from_fn(3, 1, |i, _| [0.0, 0.5, 1.0][i]);
         assert_eq!(
-            validate_binary_y(&y),
-            Err(MleError::InvalidBinaryY { row: 1, value: 0.5 })
+            validate_binary_y(&y, "y"),
+            Err(MleError::InvalidBinaryY {
+                column: "y".to_string(),
+                row: 1,
+                value: 0.5
+            })
         );
     }
 
@@ -195,8 +206,12 @@ mod tests {
     fn validate_binary_y_reports_first_violation_row() {
         let y = Mat::from_fn(3, 1, |i, _| [2.0, 0.0, -1.0][i]);
         assert_eq!(
-            validate_binary_y(&y),
-            Err(MleError::InvalidBinaryY { row: 0, value: 2.0 })
+            validate_binary_y(&y, "y"),
+            Err(MleError::InvalidBinaryY {
+                column: "y".to_string(),
+                row: 0,
+                value: 2.0
+            })
         );
     }
 
@@ -263,7 +278,7 @@ mod tests {
     fn validate_fit_preconditions_ok_for_valid_inputs() {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, "y", 2, true, &CovType::Classical),
             Ok(())
         );
     }
@@ -274,7 +289,7 @@ mod tests {
         // 検証順序通り`InvalidConfidenceLevel`が先に返ることを確認する。
         let y = Mat::from_fn(2, 1, |i, _| [0.0, 2.0][i]);
         assert_eq!(
-            validate_fit_preconditions(1.5, 100, 1e-8, &y, 2, true, &CovType::Classical),
+            validate_fit_preconditions(1.5, 100, 1e-8, &y, "y", 2, true, &CovType::Classical),
             Err(CommonError::InvalidConfidenceLevel {
                 confidence_level: 1.5
             }
@@ -286,7 +301,7 @@ mod tests {
     fn validate_fit_preconditions_returns_no_regressors_when_k_is_zero() {
         let y = Mat::from_fn(3, 1, |i, _| [0.0, 1.0, 0.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 0, false, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, "y", 0, false, &CovType::Classical),
             Err(CommonError::NoRegressors { n: 3 }.into())
         );
     }
@@ -295,7 +310,7 @@ mod tests {
     fn validate_fit_preconditions_returns_insufficient_observations_when_n_less_equal_k() {
         let y = Mat::from_fn(2, 1, |i, _| [0.0, 1.0][i]);
         assert_eq!(
-            validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
+            validate_fit_preconditions(0.95, 100, 1e-8, &y, "y", 2, true, &CovType::Classical),
             Err(CommonError::InsufficientObservations { n: 2, k: 2 }.into())
         );
     }
@@ -309,6 +324,7 @@ mod tests {
                 100,
                 1e-8,
                 &y,
+                "y",
                 2,
                 true,
                 &CovType::Cluster { groups: None }
@@ -335,6 +351,7 @@ mod tests {
                 100,
                 1e-8,
                 &y,
+                "y",
                 3,
                 true,
                 &CovType::Cluster {

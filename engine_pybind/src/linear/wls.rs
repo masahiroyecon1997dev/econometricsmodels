@@ -478,6 +478,7 @@ fn fit_frame(
         options.include_intercept,
         y,
         &weight_slice,
+        weight.clone(),
         cov_type,
         options.confidence_level,
     )

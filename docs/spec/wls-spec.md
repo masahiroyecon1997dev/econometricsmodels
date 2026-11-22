@@ -71,7 +71,7 @@ WLSは`OlsEstimator::fit`をそのまま呼ぶため、既存の`LeastSquaresErr
 エラー型として使い続ける（専用の`WlsError`型は新設しない）。
 
 - `WeightDimensionMismatch { y_rows, weight_rows }`: 重み配列と`y`の行数不一致（防御的チェック）。
-- `NonPositiveWeight { row, weight }`: 重みが0以下（NaN含む）。
+- `NonPositiveWeight { column, row, weight }`: 重みが0以下（NaN含む）。`column`は重みの列名で、`from_columns_weighted`が`weight_name`として受け取る（`report()`が`argument="weight"`・`data_argument="data"`を足す）。
 
 被説明変数が定数（`OUTCOME_CONSTANT`、切片あり）と完全フィット（`PERFECT_FIT`）の判定は
 `OlsEstimator::fit`の判定（`ols-spec.md`3.3節）をそのまま使う。総平方和は変換後の$\tilde y$ではなく

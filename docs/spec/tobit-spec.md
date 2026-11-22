@@ -32,8 +32,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   - `lower`/`upper`が両方`None`は`CensoringBoundsMissing`、両方`Some`で`lower >= upper`は`CensoringBoundsNotOrdered`、NaN・無限大は`CensoringBoundNotFinite`
     （「境界設定自体が不正」、`ValidationError`）。
   - `y`の実測値が指定境界と矛盾する場合（`lower`指定時に`y < lower`の行、または`upper`指定時に
-    `y > upper`の行がある）は`YOutOfCensoringBounds { row, value }`（「境界設定は妥当だがデータと
-    矛盾」、`ValidationError`）。`InvalidBinaryY`と同型の「行番号＋値」パターン。
+    `y > upper`の行がある）は`YOutOfCensoringBounds { column, row, value, lower, upper }`（「境界設定は妥当だがデータと
+    矛盾」、`ValidationError`）。`InvalidBinaryY`と同型の「列名＋行番号＋値」パターン（`column`は`y`の列名。`report()`が`argument="y"`・`data_argument="data"`を足す）。
   - 検証は`fit()`冒頭のO(n)スキャン1回（非有限値チェックと同オーダー、Newton反復のO(n·k)に対して
     無視できる）。
 - **非識別データの検出**: `y`が`lower`/`upper`いずれの境界にも一致しない観測（厳密に内部の観測）が

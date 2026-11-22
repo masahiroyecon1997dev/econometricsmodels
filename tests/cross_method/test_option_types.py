@@ -15,7 +15,7 @@ import polars as pl
 import pytest
 from _dtype_helpers import N, make_frame
 from _error_expectations import escaped
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from econometricsmodels import (
     FE,
     FEIV,
@@ -453,7 +453,7 @@ class TestMleOptionValues:
         with raises_error(
             ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
             option="tol",
-            value=pytest.approx(value, nan_ok=True),
+            value=approx_param(value),
         ):
             _fit(options, df)
 
@@ -486,7 +486,7 @@ def test_invalid_confidence_level_is_validation_error_for_every_method(
 
     with raises_error(
         ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE,
-        value=pytest.approx(value, nan_ok=True),
+        value=approx_param(value),
     ):
         _fit(options, df)
 
@@ -507,7 +507,7 @@ def test_invalid_tobit_bound_is_validation_error(df, field, bad, how):
 
     with raises_error(
         ErrorCode.CENSORING_BOUND_NOT_FINITE,
-        **{field: pytest.approx(expected, nan_ok=True)},
+        **{field: approx_param(expected)},
     ):
         _fit(options, df)
 
@@ -588,7 +588,7 @@ def test_invalid_gmm_tol_is_validation_error(df, cls, tol, how):
     with raises_error(
         ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
         option="gmm_tol",
-        value=pytest.approx(tol, nan_ok=True),
+        value=approx_param(tol),
     ):
         _fit(options, df)
 

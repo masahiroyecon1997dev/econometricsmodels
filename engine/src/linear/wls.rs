@@ -71,6 +71,7 @@ impl WlsEstimator {
         include_intercept: bool,
         dep_var_name: String,
         weights: &[f64],
+        weight_name: String,
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
@@ -81,6 +82,7 @@ impl WlsEstimator {
             include_intercept,
             dep_var_name,
             weights,
+            weight_name,
             cov_type,
             confidence_level,
         )

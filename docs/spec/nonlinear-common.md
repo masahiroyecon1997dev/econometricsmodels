@@ -257,8 +257,8 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 | `EvaluationBudgetExceeded { budget }`・`LineSearchFailed { max_iters }` | `LINE_SEARCH_FAILED`（`ComputationError`） | line searchの評価回数バジェット超過（1.2節）・line searchの反復上限到達（`lbfgs`） |
 | `UncensoredIntervalTooNarrow { lower, upper, sigma }`（Tobit専用） | `UNCENSORED_INTERVAL_TOO_NARROW`（`ComputationError`） | `expected_uncensored`の非打ち切り区間が`σ̂`の1%未満（`tobit-spec.md`3.5節） |
 | `CensoringBoundsMissing`・`CensoringBoundsNotOrdered`・`CensoringBoundNotFinite`（Tobit専用） | `CENSORING_BOUNDS_MISSING`・`CENSORING_BOUNDS_NOT_ORDERED`・`CENSORING_BOUND_NOT_FINITE`（`ValidationError`） | 境界が両方`None`・下限≧上限・NaN/無限大 |
-| `InvalidBinaryY { row, value }`（Logit/Probit専用） | `OUTCOME_NOT_BINARY`（`ValidationError`） | `y`が`{0.0, 1.0}`以外 |
-| `YOutOfCensoringBounds { row, value, lower, upper }`（Tobit専用） | `OUTCOME_OUTSIDE_CENSORING_BOUNDS`（`ValidationError`） | `y`が打ち切り境界の外 |
+| `InvalidBinaryY { column, row, value }`（Logit/Probit専用） | `OUTCOME_NOT_BINARY`（`ValidationError`） | `y`が`{0.0, 1.0}`以外 |
+| `YOutOfCensoringBounds { column, row, value, lower, upper }`（Tobit専用） | `OUTCOME_OUTSIDE_CENSORING_BOUNDS`（`ValidationError`） | `y`が打ち切り境界の外 |
 | `NoUncensoredObservations { lower, upper }`（Tobit専用） | `NO_UNCENSORED_OBSERVATIONS`（`ValidationError`） | 境界の内側に観測が1件も無い |
 
 各バリアントは`ErrorInfo::report()`で`code`・`params`に変換され、`engine_pybind`側の

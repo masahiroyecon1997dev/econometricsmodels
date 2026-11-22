@@ -411,7 +411,7 @@ mod tests {
                 confidence_level: f64::NAN
             }
             .to_string()
-            .ends_with("got NaN.")
+            .ends_with("got nan.")
         );
     }
 

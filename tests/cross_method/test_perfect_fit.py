@@ -637,6 +637,16 @@ def test_nonlinear_constant_outcome_for_every_cov_type(model, cov_type, df):
 
 
 @pytest.mark.parametrize("model", NONLINEAR_MODELS)
+def test_nonlinear_constant_outcome_ignores_raise_on_non_convergence(
+    model, df
+):
+    """入力だけから分かる誤りなので、`raise_on_non_convergence=False`でも結果を返さず弾く。"""
+    data = df.with_columns(y=pl.lit(_constant_value(model, 1.0)))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit_nonlinear(model, data, raise_on_non_convergence=False)
+
+
+@pytest.mark.parametrize("model", NONLINEAR_MODELS)
 def test_nonlinear_constant_outcome_with_clustered_errors(model, df):
     """クラスター数が足りていれば、`cov_type="cluster"`でも`OUTCOME_CONSTANT`を返す。"""
     data = df.with_columns(y=pl.lit(_constant_value(model, 1.0)))

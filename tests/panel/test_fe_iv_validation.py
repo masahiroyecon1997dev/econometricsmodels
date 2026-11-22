@@ -219,7 +219,9 @@ _WITH_EXTRA_COLUMN = {
 @pytest.mark.parametrize("role", list(_WITH_EXTRA_COLUMN))
 def test_a_column_with_one_value_in_every_row_raises(df, role):
     """生の値が全て同じ列は、固定効果を除く前に`REGRESSOR_CONSTANT`（`role`付き）。"""
-    with raises_error(ErrorCode.REGRESSOR_CONSTANT, role=role, column="extra"):
+    with raises_error(
+        ErrorCode.REGRESSOR_CONSTANT, role=role, columns=["extra"]
+    ):
         _fit(df.with_columns(extra=pl.lit(1.5)), **_WITH_EXTRA_COLUMN[role])
 
 
@@ -229,9 +231,117 @@ def test_a_column_constant_within_entities_raises(df, role):
     level = np.random.default_rng(2).normal(size=N_ENTITIES)
     data = df.with_columns(extra=pl.Series(np.repeat(level, N_PERIODS)))
     with raises_error(
-        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, role=role, column="extra"
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, role=role, columns=["extra"]
     ):
         _fit(data, **_WITH_EXTRA_COLUMN[role])
+
+
+# 同じロールに、名前の昇順にならない2列（`extra2`が先）を入れた引数。並び順が引数どおり
+# （名前順ではない）であることまで確かめる。
+_WITH_TWO_EXTRA_COLUMNS = {
+    "x_exog": {"x_exog": ["extra2", "x1", "extra"]},
+    "x_endog": {
+        "x_endog": ["extra2", "a", "extra"],
+        "instruments": ["z1", "z2", "z3"],
+    },
+    "instruments": {"instruments": ["extra2", "z1", "z2", "extra"]},
+}
+
+
+def _with_extra_columns(data: pl.DataFrame) -> pl.DataFrame:
+    """生の値が定数の列`extra`・`extra2`と、個体ごとに一定の列`inv`・`inv2`を足す。"""
+    level = np.random.default_rng(2).normal(size=N_ENTITIES)
+    return data.with_columns(
+        extra=pl.lit(1.5),
+        extra2=pl.lit(2.5),
+        inv=pl.Series(np.repeat(level, N_PERIODS)),
+        inv2=pl.Series(np.repeat(level**2 + 1.0, N_PERIODS)),
+    )
+
+
+@pytest.mark.parametrize("role", list(_WITH_TWO_EXTRA_COLUMNS))
+def test_every_constant_column_of_a_role_is_reported(df, role):
+    """同じロールの定数列は、最初の1列で止めず全て、引数の並び順で報告する。"""
+    with raises_error(
+        ErrorCode.REGRESSOR_CONSTANT, role=role, columns=["extra2", "extra"]
+    ):
+        _fit(_with_extra_columns(df), **_WITH_TWO_EXTRA_COLUMNS[role])
+
+
+@pytest.mark.parametrize("role", list(_WITH_TWO_EXTRA_COLUMNS))
+def test_every_column_constant_within_entities_is_reported(df, role):
+    """個体ごとに一定の列も、同じロールの全てを引数の並び順で報告する。"""
+    data = _with_extra_columns(df).with_columns(
+        extra=pl.col("inv"), extra2=pl.col("inv2")
+    )
+    with raises_error(
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
+        role=role,
+        columns=["extra2", "extra"],
+    ):
+        _fit(data, **_WITH_TWO_EXTRA_COLUMNS[role])
+
+
+def test_the_constant_columns_are_only_those_with_one_value_in_every_row(df):
+    """個体ごとに一定の列は、生の値が定数ではないので`REGRESSOR_CONSTANT`の列に入らない。"""
+    with raises_error(
+        ErrorCode.REGRESSOR_CONSTANT, role="x_exog", columns=["extra"]
+    ):
+        _fit(_with_extra_columns(df), x_exog=["inv", "extra", "x1"])
+
+
+def test_every_regressor_of_a_role_can_be_reported(df):
+    """ロールの全ての列が該当するときは、全列を報告する。"""
+    with raises_error(
+        ErrorCode.REGRESSOR_CONSTANT,
+        role="x_exog",
+        columns=["extra2", "extra"],
+    ):
+        _fit(_with_extra_columns(df), x_exog=["extra2", "extra"])
+
+
+# 役割は`x_exog`、`x_endog`、`instruments`の順に調べ、該当列のある最初の役割だけを報告する。
+# 生の値が定数の列（`REGRESSOR_CONSTANT`）は、固定効果を除いた後の検査より先に調べる。
+_FIRST_ROLE_CASES = [
+    pytest.param(
+        {
+            "x_exog": ["extra"],
+            "x_endog": ["extra2"],
+            "instruments": ["z1", "inv"],
+        },
+        (ErrorCode.REGRESSOR_CONSTANT, "x_exog", ["extra"]),
+        id="constant-in-every-role",
+    ),
+    pytest.param(
+        {"x_endog": ["extra"], "instruments": ["z1", "extra2"]},
+        (ErrorCode.REGRESSOR_CONSTANT, "x_endog", ["extra"]),
+        id="constant-in-endog-and-instruments",
+    ),
+    pytest.param(
+        {"x_exog": ["inv"], "x_endog": ["inv2"]},
+        (ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, "x_exog", ["inv"]),
+        id="invariant-in-exog-and-endog",
+    ),
+    pytest.param(
+        {"x_endog": ["inv"], "instruments": ["z1", "inv2"]},
+        (ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, "x_endog", ["inv"]),
+        id="invariant-in-endog-and-instruments",
+    ),
+    pytest.param(
+        {"x_exog": ["inv"], "instruments": ["z1", "extra"]},
+        (ErrorCode.REGRESSOR_CONSTANT, "instruments", ["extra"]),
+        id="constant-instrument-before-invariant-exog",
+    ),
+]
+
+
+@pytest.mark.parametrize(("kwargs", "expected"), _FIRST_ROLE_CASES)
+def test_only_the_first_role_with_an_offending_column_is_reported(
+    df, kwargs, expected
+):
+    code, role, columns = expected
+    with raises_error(code, role=role, columns=columns):
+        _fit(_with_extra_columns(df), **kwargs)
 
 
 def test_a_time_invariant_column_is_accepted_with_a_time_only_effect(df):

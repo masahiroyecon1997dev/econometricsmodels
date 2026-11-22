@@ -257,7 +257,105 @@ fn a_column_that_is_constant_in_the_raw_data_is_reported_with_its_role() {
             error_of(fit_one_way(input)),
             PanelError::RegressorConstant {
                 role,
-                column: column.to_string(),
+                columns: vec![column.to_string()],
+            }
+        );
+    }
+}
+
+#[test]
+fn every_constant_column_of_a_role_is_reported_in_the_order_of_the_role() {
+    let (y, x1, x2, z1, z2) = columns();
+    let (c1, c2) = (vec![2.5; 40], vec![-1.0; 40]);
+    let cases = [
+        (
+            custom(
+                &y,
+                vec![c2.clone(), x1.clone(), c1.clone()],
+                vec![x2.clone()],
+                &[z1.clone(), z2.clone()],
+            ),
+            ColumnRole::XExog,
+            vec!["x0", "x2"],
+        ),
+        (
+            custom(
+                &y,
+                vec![x1.clone()],
+                vec![c1.clone(), c2.clone()],
+                &[z1.clone(), z2.clone()],
+            ),
+            ColumnRole::XEndog,
+            vec!["e0", "e1"],
+        ),
+        (
+            custom(
+                &y,
+                &[x1],
+                &[x2],
+                &[c2.clone(), z1.clone(), c1.clone(), z2.clone()],
+            ),
+            ColumnRole::Instruments,
+            vec!["z0", "z2"],
+        ),
+    ];
+    for (input, role, columns) in cases {
+        assert_eq!(
+            error_of(fit_one_way(input)),
+            PanelError::RegressorConstant {
+                role,
+                columns: columns.into_iter().map(String::from).collect(),
+            }
+        );
+    }
+}
+
+#[test]
+fn only_the_first_role_with_a_constant_column_is_reported() {
+    // 役割は`x_exog`、`x_endog`、`instruments`の順に調べ、該当列のある最初の役割だけを返す。
+    let (y, x1, x2, z1, z2) = columns();
+    let constant = vec![2.5; 40];
+    let cases = [
+        // 全ての役割に定数列がある。
+        (
+            custom(
+                &y,
+                vec![constant.clone()],
+                vec![constant.clone()],
+                &[constant.clone(), z2.clone()],
+            ),
+            ColumnRole::XExog,
+            "x0",
+        ),
+        // `x_endog`と`instruments`だけ。
+        (
+            custom(
+                &y,
+                vec![x1.clone()],
+                vec![constant.clone()],
+                &[constant.clone(), z2.clone()],
+            ),
+            ColumnRole::XEndog,
+            "e0",
+        ),
+        // `x_exog`が個体内で一定でも、生の値が定数の`instruments`が先（定数の検査は変換より前）。
+        (
+            custom(
+                &y,
+                vec![entity_constant(|i| i as f64)],
+                vec![x2],
+                &[constant, z1],
+            ),
+            ColumnRole::Instruments,
+            "z0",
+        ),
+    ];
+    for (input, role, column) in cases {
+        assert_eq!(
+            error_of(fit_one_way(input)),
+            PanelError::RegressorConstant {
+                role,
+                columns: vec![column.to_string()],
             }
         );
     }
@@ -307,10 +405,47 @@ fn a_column_without_within_variation_is_reported_with_its_role() {
             error_of(fit_one_way(input)),
             PanelError::ZeroVarianceAfterDemeaning {
                 role,
-                column: column.to_string(),
+                columns: vec![column.to_string()],
             }
         );
     }
+}
+
+#[test]
+fn every_column_without_within_variation_of_a_role_is_reported_and_roles_go_in_order() {
+    let (y, x1, x2, z1, z2) = columns();
+    let (a, b) = (
+        entity_constant(|i| i as f64),
+        entity_constant(|i| (i * i) as f64),
+    );
+    // 同じ役割の該当列は、並び順で全て報告する。
+    let err = error_of(fit_one_way(custom(
+        &y,
+        vec![b.clone(), x1.clone(), a.clone()],
+        vec![x2.clone()],
+        &[z1.clone(), z2.clone()],
+    )));
+    assert_eq!(
+        err,
+        PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::XExog,
+            columns: vec!["x0".to_string(), "x2".to_string()],
+        }
+    );
+    // 役割の順: `x_endog`と`instruments`の両方にあれば`x_endog`だけ。
+    let err = error_of(fit_one_way(custom(
+        &y,
+        vec![x1],
+        vec![a.clone(), b.clone()],
+        &[a, b],
+    )));
+    assert_eq!(
+        err,
+        PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::XEndog,
+            columns: vec!["e0".to_string(), "e1".to_string()],
+        }
+    );
 }
 
 #[test]
@@ -476,7 +611,7 @@ fn a_column_explained_by_the_two_effects_is_reported_after_the_alternating_proje
         err,
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::Instruments,
-            column: "z1".to_string(),
+            columns: vec!["z1".to_string()],
         }
     );
 }

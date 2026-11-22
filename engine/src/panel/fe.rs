@@ -51,9 +51,10 @@
 //!   最初の1件を報告する。2-wayはentity・timeを対称に検出し、`time`の存在確認を最初に行う。
 //! - **分散ゼロの説明変数**（`validate_no_zero_variance_regressors`）: within変換後の列の分散が
 //!   ゼロなら`PanelError::ZeroVarianceAfterDemeaning`。時間不変の変数（1-way）と、time FEと
-//!   完全共線な列（2-way）を同じ検査で拾う（`column_is_zero_variance`）。
+//!   完全共線な列（2-way）を同じ検査で拾う（`column_is_zero_variance`）。該当する列は全て
+//!   `columns`で報告する。
 //! - **定数の列・被説明変数・完全フィット**: `fe-spec.md`1章。生の値が全ての行で同じ説明変数は
-//!   `RegressorConstant`、同じ被説明変数は`OutcomeConstant`、固定効果を除いた後に分散がなくなる場合は
+//!   `RegressorConstant`（該当列は全て報告する）、同じ被説明変数は`OutcomeConstant`、固定効果を除いた後に分散がなくなる場合は
 //!   `ZeroVarianceAfterDemeaning`・`OutcomeConstantWithinEntity`、残差がゼロなら`PerfectFit`。
 //!
 //! ## 自由度とF統計量

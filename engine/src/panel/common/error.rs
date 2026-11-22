@@ -191,16 +191,24 @@ pub enum PanelError {
     /// 説明変数の値が全ての行で（丸め誤差を除いて）同じ。固定効果（個体ごとの切片）と共線になる。
     /// 固定効果を除いた後で分散がなくなる[`Self::ZeroVarianceAfterDemeaning`]とは、原因が生データの
     /// 定数かどうかで区別する。
+    /// 該当する列は同じ`role`の中の全てを`columns`に入れる（`x`の並び順）。
     #[error("{}", self.catalog_message())]
-    RegressorConstant { role: ColumnRole, column: String },
+    RegressorConstant {
+        role: ColumnRole,
+        columns: Vec<String>,
+    },
 
     /// within変換（デミーニング）後に分散がゼロになる説明変数がある。
     ///
     /// 時間不変変数（1-way FEで問題になる典型例）だけでなく、2-wayで time FE と
     /// 完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる
     /// （`docs/spec/fe-spec.md`1章。1-way/2-wayで同一ロジックを共有する）。
+    /// 該当する列は同じ`role`の中の全てを`columns`に入れる（`x`の並び順）。
     #[error("{}", self.catalog_message())]
-    ZeroVarianceAfterDemeaning { role: ColumnRole, column: String },
+    ZeroVarianceAfterDemeaning {
+        role: ColumnRole,
+        columns: Vec<String>,
+    },
 
     /// 被説明変数がwithin変換後に分散ゼロ（個体内で定数、2-wayなら個体効果と時点効果だけで
     /// 説明される）。固定効果が説明するものが残らず、within回帰のR-squaredが定義できない。
@@ -557,15 +565,15 @@ impl ErrorInfo for PanelError {
                 .param("value", *max_iter)
                 .param("min", MAX_ITER_MIN)
                 .param("max", MAX_ITER_LIMIT),
-            Self::RegressorConstant { role, column } => {
+            Self::RegressorConstant { role, columns } => {
                 ErrorReport::new(ErrorCode::RegressorConstant)
                     .param("role", role.as_str())
-                    .param("column", column.as_str())
+                    .param("columns", columns.clone())
             }
-            Self::ZeroVarianceAfterDemeaning { role, column } => {
+            Self::ZeroVarianceAfterDemeaning { role, columns } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
                     .param("role", role.as_str())
-                    .param("column", column.as_str())
+                    .param("columns", columns.clone())
             }
             Self::OutcomeConstantWithinEntity => {
                 ErrorReport::new(ErrorCode::OutcomeConstantWithinEntity)
@@ -760,18 +768,34 @@ mod tests {
             (
                 PanelError::RegressorConstant {
                     role: ColumnRole::X,
-                    column: "x1".to_string(),
+                    columns: vec!["x1".to_string()],
                 },
                 ErrorCode::RegressorConstant,
-                "Column 'x1' of x has the same value in every row up to rounding, so it is collinear with the fixed effects.",
+                "These columns of x have the same value in every row up to rounding, so they are collinear with the fixed effects: 'x1'.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {
                     role: ColumnRole::Instruments,
-                    column: "z1".to_string(),
+                    columns: vec!["z1".to_string()],
                 },
                 ErrorCode::RegressorNoWithinVariation,
-                "Column 'z1' of instruments has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects.",
+                "These columns of instruments have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: 'z1'.",
+            ),
+            (
+                PanelError::ZeroVarianceAfterDemeaning {
+                    role: ColumnRole::XEndog,
+                    columns: vec!["b".to_string(), "a".to_string()],
+                },
+                ErrorCode::RegressorNoWithinVariation,
+                "These columns of x_endog have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: 'b', 'a'.",
+            ),
+            (
+                PanelError::RegressorConstant {
+                    role: ColumnRole::XExog,
+                    columns: vec!["x2".to_string(), "x1".to_string()],
+                },
+                ErrorCode::RegressorConstant,
+                "These columns of x_exog have the same value in every row up to rounding, so they are collinear with the fixed effects: 'x2', 'x1'.",
             ),
             (
                 PanelError::OutcomeConstantWithinEntity,

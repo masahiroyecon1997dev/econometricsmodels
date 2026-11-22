@@ -34,7 +34,7 @@ fn validate_no_zero_variance_regressors_detects_time_invariant_variable_in_one_w
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "female".to_string(),
+            columns: vec!["female".to_string()],
         }
     );
 }
@@ -174,15 +174,14 @@ fn validate_no_zero_variance_regressors_detects_entity_invariant_variable_in_two
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "year_dummy".to_string(),
+            columns: vec!["year_dummy".to_string()],
         }
     );
 }
 
 #[test]
-fn validate_no_zero_variance_regressors_reports_first_offending_column_in_name_order() {
-    // 2列とも時間不変。`x_names`の順で最初（"const_a"）のみを報告する
-    // （関数docコメントの方針）。
+fn validate_no_zero_variance_regressors_reports_every_offending_column_in_name_order() {
+    // 2列とも時間不変。`x_names`の順で該当する列を全て報告する（関数docコメントの方針）。
     let entity = strings(&["a", "a", "b", "b"]);
     let y = [1.0, 2.0, 3.0, 4.0];
     let const_a = vec![1.0, 1.0, 2.0, 2.0];
@@ -204,7 +203,7 @@ fn validate_no_zero_variance_regressors_reports_first_offending_column_in_name_o
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "const_a".to_string(),
+            columns: vec!["const_a".to_string(), "const_b".to_string()],
         }
     );
 }

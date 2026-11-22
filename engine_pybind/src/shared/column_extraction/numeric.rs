@@ -121,9 +121,12 @@ fn cast_to_finite_f64_values(
 
     // polarsのnull_count()はNaN/無限大を検出しない（値としては存在するため）。
     // IEEE754のNaN・infinityは別途スキャンする必要がある。
-    if let Some((row, &bad_value)) = values.iter().enumerate().find(|(_, v)| !v.is_finite()) {
+    // 最初の1件（行と値）に加えて、その列の非有限値の全件数も数える。
+    let mut non_finite = values.iter().enumerate().filter(|(_, v)| !v.is_finite());
+    if let Some((row, &bad_value)) = non_finite.next() {
+        let count = 1 + non_finite.count();
         return Err(ColumnExtractionError::non_finite(
-            name, row, bad_value, source,
+            name, row, bad_value, count, source,
         ));
     }
 
@@ -261,6 +264,42 @@ mod tests {
 
     fn names(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| v.to_string()).collect()
+    }
+
+    /// `cast_to_finite_f64_values`が返す`NonFinite`の`(row, value, count)`。
+    fn non_finite_report(series: Series) -> (usize, f64, usize) {
+        match cast_to_finite_f64_values("x", &Column::from(series), SRC) {
+            Err(ColumnExtractionError::NonFinite {
+                row, value, count, ..
+            }) => (row, value, count),
+            other => panic!("expected NonFinite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_finite_error_reports_the_first_value_and_the_count_of_the_column() {
+        let series = Series::new("x".into(), [1.0_f64, f64::NAN, 2.0, f64::INFINITY]);
+        let (row, value, count) = non_finite_report(series);
+
+        assert_eq!(row, 1);
+        assert!(value.is_nan());
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn non_finite_error_counts_across_chunks_and_for_float32() {
+        let mut chunked = Series::new("x".into(), [f64::NEG_INFINITY, 1.0]);
+        chunked
+            .append(&Series::new("x".into(), [f64::NAN, f64::INFINITY]))
+            .unwrap();
+        assert!(chunked.n_chunks() > 1);
+        let (row, value, count) = non_finite_report(chunked);
+        assert_eq!((row, value, count), (0, f64::NEG_INFINITY, 3));
+
+        // 32ビットの列は64ビットに変換してから数える。
+        let narrow = Series::new("x".into(), [0.5_f32, f32::INFINITY, f32::NAN]);
+        let (row, value, count) = non_finite_report(narrow);
+        assert_eq!((row, value, count), (1, f64::INFINITY, 2));
     }
 
     #[test]

@@ -373,6 +373,8 @@ demeanしたR²」を3種とも定義すると誤る）:
 | `IdentifierDimensionMismatch` / `TwoWayRequiresTime` | `INTERNAL_ERROR`（Python APIからは起こらない） | `ComputationError` |
 | `WithinRegressionFailed` / `FTestFailed`（RE: `BetweenRegressionFailed` / `QuasiDemeanedRegressionFailed` / `PooledRegressionFailed` / `HausmanTestFailed`） | 内側の`LeastSquaresError`の`code`に、どの回帰かを示す`stage`を付ける（`stage`を付けてよい`code`のみ） | `code`のクラスで決まる |
 
+`RegressorConstant`・`ZeroVarianceAfterDemeaning`は該当する説明変数を全て`columns`に入れる（`error-handling.md`5.3章）。
+
 `PanelError`はFE/REで共有し、`FeError`/`ReError`は個別に作らない。engine側に新バリアントを
 追加したら`ErrorInfo::report()`が対応する`code`を返すようにする（`match`が網羅的なので、
 更新漏れはコンパイルエラーで検出される）。

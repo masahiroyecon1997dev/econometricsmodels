@@ -318,7 +318,7 @@ fn factorize_key_column(
     factorize_keys(ca.iter().map(|v| present_value(name, v)))
 }
 
-/// 浮動小数の列に非有限値（NaN・無限大）があれば、最初の1件を`ValidationError`にする。
+/// 浮動小数の列に非有限値（NaN・無限大）があれば`ValidationError`にする（最初の1件の行と値、列内の全件数を報告する）。
 fn reject_non_finite(
     name: &str,
     series: &Column,
@@ -330,13 +330,14 @@ fn reject_non_finite(
     let ca = as_f64
         .f64()
         .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
-    if let Some((row, bad_value)) = ca
+    let mut non_finite = ca
         .iter()
         .enumerate()
-        .find_map(|(row, v)| v.filter(|v| !v.is_finite()).map(|v| (row, v)))
-    {
+        .filter_map(|(row, v)| v.filter(|v| !v.is_finite()).map(|v| (row, v)));
+    if let Some((row, bad_value)) = non_finite.next() {
+        let count = 1 + non_finite.count();
         return Err(ColumnExtractionError::non_finite(
-            name, row, bad_value, source,
+            name, row, bad_value, count, source,
         ));
     }
     Ok(())
@@ -357,6 +358,36 @@ mod tests {
 
             assert!(extract_group_key_column(&df, "k", SRC).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn reject_non_finite_counts_every_non_finite_value_across_chunks() {
+        // 複数チャンクの列でも、最初の1件の行と値、全チャンクの合計件数を報告する。
+        let mut series = Series::new("k".into(), [1.0_f64, f64::INFINITY, 2.0]);
+        series
+            .append(&Series::new("k".into(), [f64::NAN, 3.0, f64::NEG_INFINITY]))
+            .unwrap();
+        assert!(series.n_chunks() > 1);
+
+        let err = reject_non_finite("k", &Column::from(series), SRC).unwrap_err();
+
+        match err {
+            ColumnExtractionError::NonFinite {
+                row, value, count, ..
+            } => {
+                assert_eq!(row, 1);
+                assert_eq!(value, f64::INFINITY);
+                assert_eq!(count, 3);
+            }
+            other => panic!("expected NonFinite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reject_non_finite_accepts_a_column_of_finite_values() {
+        let series = Series::new("k".into(), [1.0_f64, -2.5, 0.0]);
+
+        assert!(reject_non_finite("k", &Column::from(series), SRC).is_ok());
     }
 
     #[test]

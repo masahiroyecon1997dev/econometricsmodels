@@ -478,6 +478,7 @@ def test_non_finite_values_are_rejected_for_narrow_floats(
         column="col",
         value=pytest.approx(bad, nan_ok=True),
         row=3,
+        count=1,
         argument="x",
         data_argument="data",
     ):
@@ -759,6 +760,7 @@ def test_hac_time_non_finite_value_raises(
         column="t",
         value=pytest.approx(bad, nan_ok=True),
         row=3,
+        count=1,
         argument="hac_time",
         data_argument="data",
     ):

@@ -443,7 +443,7 @@ fn a_regressor_constant_within_each_entity_is_rejected_as_collinear_with_the_fix
         data.fit(FeCovType::Classical).unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "x2".to_string()
+            columns: vec!["x2".to_string()]
         }
     );
 }
@@ -620,7 +620,7 @@ fn a_regressor_constant_within_each_entity_is_rejected_even_when_the_projection_
         data.fit(FeCovType::Classical).unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "x2".to_string()
+            columns: vec!["x2".to_string()]
         }
     );
 }

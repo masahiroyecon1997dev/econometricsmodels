@@ -124,6 +124,24 @@
 - 位置を持つ検査は列を横断しない。`COLUMN_NON_FINITE`・`COLUMN_CONTAINS_NULL`は1列のままで、その列の全件数`count`を持つ。`COLUMN_NON_FINITE`の`row`・`value`は最初の1件で、`count`が1より大きいとき「最初の」と文面で示す。列を横断すると、`row`がどの列の位置か分からなくなり、`argument`も1つに決まらない。
 - 全列の走査は、すでに終わっているwithin変換と同じ次数の費用で、失敗経路でだけ走る。
 
+## 5.4 定数の被説明変数（手法横断）
+
+`y`が全行で同じ値のときの報告を、手法ごとに次の表にそろえる。`OUTCOME_CONSTANT`は`y`の値だけで決まるので`ValidationError`（3.1章）。判定は`shared::validation::has_no_variation`の1か所（丸め誤差の範囲で定数とみなす相対閾値。OLS・WLS・IV・FE・RE・Logit・Probit・Tobitで共通）。
+
+| 手法 | 切片あり | 切片なし |
+|---|---|---|
+| OLS・WLS・IV（2SLS・GMM） | `OUTCOME_CONSTANT` | 通常どおり推定する |
+| Logit・Probit | `OUTCOME_CONSTANT`（`y`は全行0または全行1） | 通常どおり推定する |
+| Tobit | `OUTCOME_CONSTANT`（非打ち切りの値が全行で同じ） | 通常どおり推定する |
+| FE・FEIV・RE | `OUTCOME_CONSTANT`（生の値が全行で同じ）。固定効果を除いて分散が残らないものは`OUTCOME_CONSTANT_WITHIN_ENTITY` | 同左（`include_intercept`の区別が無い） |
+
+理由と実装上の注意:
+
+- **切片なしを対象外にする理由**: 切片なしでは定数の`y`にも説明する対象がある。線形モデルでは非中心化の総平方和が正で、Logit・Probit・Tobitでも`x`の符号が混ざっていれば最尤推定量は有限に定まる（Logit・Probitで`x`が全て同じ符号なら、通常どおり完全分離として`SEPARATION_DETECTED`になる）。切片ありで弾く理由は、切片だけで`y`を説明できてしまい、Logit・Probitでは`SEPARATION_DETECTED`（原因が`y`と分からない）、Tobitでは`σ→0`の退化による`NOT_CONVERGED`になるため。
+- **検査の順序は「`y`が許される形か → `y`が定数か」**: Logit・Probitは二値性（`OUTCOME_NOT_BINARY`）の後、Tobitは打ち切り境界と非打ち切り観測の有無（`NO_UNCENSORED_OBSERVATIONS`）の後に`OUTCOME_CONSTANT`を調べる。全行が同じ境界値に一致するTobitの`y`は、定数でもより具体的な`NO_UNCENSORED_OBSERVATIONS`を返す。位置は、どの手法でも設定値・観測数・クラスター数の検査の後（5.2章の項目4）で、特異行列・最適化より前。
+- **対象にしないもの**: Tobitで非打ち切りの値が全て同じでも打ち切られた行がある`y`（定数ではなく、モデルが必ずしも未定義ではない）。扱いは別に決める。`tests/cross_method/test_perfect_fit.py`が「`OUTCOME_CONSTANT`にならない」ことだけを固定する。
+- 共通の関数は`nonlinear::common::validate_outcome_not_constant`（Logit・Probitは`validate_fit_preconditions`の末尾、Tobitは`fit`が個別に呼ぶ）。テストは`tests/cross_method/test_perfect_fit.py`（切片あり・なし、`solver`、`cov_type`、境界との順序）とengineの各`fit/tests/validation.rs`。
+
 ## 6. 実装
 
 ### engine（PyO3非依存）

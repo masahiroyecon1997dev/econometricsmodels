@@ -5,7 +5,7 @@ use faer::Mat;
 use super::error::MleError;
 use super::options::CovType;
 use crate::shared::error::{ClusterSetting, CommonError};
-use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
+use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN, has_no_variation};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
@@ -25,6 +25,32 @@ pub fn validate_binary_y(y: &Mat<f64>, dep_var_name: &str) -> Result<(), MleErro
                 value,
             });
         }
+    }
+    Ok(())
+}
+
+/// 切片があり、`y`が（丸め誤差の範囲で）全行で同じ値なら`CommonError::OutcomeConstant`を返す
+/// （OLS・WLS・IVと同じ判定[`has_no_variation`]。Logit/Probit/Tobit共通）。
+///
+/// 定数の`y`は入力の値だけで決まり説明するものが無いので`ValidationError`として最適化の前に弾く。
+/// 弾かなければ、Logit/Probitは完全分離（`SEPARATION_DETECTED`）、Tobitは`σ→0`の退化による
+/// `NOT_CONVERGED`と、原因が`y`にあると分からないエラーになる。切片なしのモデルでは定数でも
+/// 説明する対象があり（OLSの非中心化の総平方和が正であることに当たる）MLEも有限に定まりうるので、
+/// 対象外にして通常どおり推定する。
+///
+/// 呼び出し順は、`y`が許される形か（Logit/Probitの二値性、Tobitの非打ち切り観測の有無）を
+/// 確かめた後。Tobitで全行が打ち切り境界と一致する場合は、より具体的な
+/// `NoUncensoredObservations`が先に返る。
+pub(crate) fn validate_outcome_not_constant(
+    y: &Mat<f64>,
+    has_intercept: bool,
+) -> Result<(), MleError> {
+    if !has_intercept {
+        return Ok(());
+    }
+    let values: Vec<f64> = (0..y.nrows()).map(|i| *y.get(i, 0)).collect();
+    if has_no_variation(&values) {
+        return Err(CommonError::OutcomeConstant.into());
     }
     Ok(())
 }
@@ -129,8 +155,11 @@ pub fn validate_mle_options(
 /// `fit()`冒頭で行う共通の入力検証（Logit/Probit専用）。検証順序:
 /// [`validate_mle_options`]（`confidence_level`→`max_iter`→`tol`）→`y`の二値性→
 /// `k==0`→`n<=k`→`cov_type=Cluster`のグループ列（グループキー未指定・クラスター数
-/// 2未満・クラスター数`g <= 傾き係数の数`）。元はLogit/Probitそれぞれの`fit()`に
-/// 一字一句同一のブロックとして重複していたため、こちらへ集約した。
+/// 2未満・クラスター数`g <= 傾き係数の数`）→切片ありで`y`が定数
+/// （[`validate_outcome_not_constant`]）。
+///
+/// 元はLogit/Probitそれぞれの`fit()`に一字一句同一のブロックとして重複していたため、
+/// こちらへ集約した。
 ///
 /// Tobitの`fit()`はこの関数を呼ばず、[`validate_mle_options`]に続けて必要な検証を
 /// 個別に呼ぶ。Logit/Probitとの違いは次の通りで、いずれもこの関数を引数で分岐させる
@@ -143,7 +172,8 @@ pub fn validate_mle_options(
 /// - `cov_type=Cluster`（[`validate_cluster_cov_type`]）: Logit/Probitと同じく傾き係数の数
 ///   `k - usize::from(has_intercept)`を渡す（差異なし）
 /// - Tobit固有の検証として、非打ち切り観測が1件以上あること
-///   （`tobit/statistics.rs`の`validate_has_uncensored_observations`）を最後に追加で行う
+///   （`tobit/statistics.rs`の`validate_has_uncensored_observations`）を追加で行い、その後に
+///   `y`が定数でないこと（[`validate_outcome_not_constant`]）を確かめる
 ///
 /// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::CensoringBoundsMissing`等、
 /// `y`と境界の整合性＝`MleError::YOutOfCensoringBounds`）は、この関数ではなくTobitの`fit()`が
@@ -173,7 +203,8 @@ pub(crate) fn validate_fit_preconditions(
     let n = y.nrows();
     validate_has_regressors(n, k)?;
     validate_sufficient_observations(n, k)?;
-    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))
+    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))?;
+    validate_outcome_not_constant(y, has_intercept)
 }
 
 #[cfg(test)]
@@ -392,5 +423,27 @@ mod tests {
                 CommonError::InsufficientClustersForInference { g: 3, q: 3 }
             ))
         ));
+    }
+
+    #[test]
+    fn validate_outcome_not_constant_rejects_a_constant_outcome_only_with_an_intercept() {
+        let y = Mat::from_fn(4, 1, |_, _| 5.0);
+        assert_eq!(
+            validate_outcome_not_constant(&y, true),
+            Err(CommonError::OutcomeConstant.into())
+        );
+        assert_eq!(validate_outcome_not_constant(&y, false), Ok(()));
+    }
+
+    #[test]
+    fn validate_outcome_not_constant_uses_the_relative_tolerance_of_ols() {
+        // 1 ulpの違いは定数とみなし、相対的に十分な変動は定数としない。
+        let ulp = Mat::from_fn(3, 1, |i, _| [0.1 + 0.2, 0.3, 0.3][i]);
+        assert_eq!(
+            validate_outcome_not_constant(&ulp, true),
+            Err(CommonError::OutcomeConstant.into())
+        );
+        let varying = Mat::from_fn(3, 1, |i, _| [0.0, 1.0, 0.0][i]);
+        assert_eq!(validate_outcome_not_constant(&varying, true), Ok(()));
     }
 }

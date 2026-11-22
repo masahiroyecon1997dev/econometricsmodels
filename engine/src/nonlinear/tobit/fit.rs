@@ -12,7 +12,8 @@ use super::scaling::TobitScaling;
 use super::statistics::{log_likelihood, validate_has_uncensored_observations};
 use crate::nonlinear::common::{
     MleError, MleFitOptions, cov_params_for_type, run_solver_keeping_problem, scores_needed,
-    validate_cluster_cov_type, validate_mle_options, validate_sufficient_observations,
+    validate_cluster_cov_type, validate_mle_options, validate_outcome_not_constant,
+    validate_sufficient_observations,
 };
 use crate::shared::inference;
 use crate::shared::normal::StandardNormal;
@@ -45,6 +46,9 @@ pub(super) fn fit_tobit(
     validate_sufficient_observations(n, k + 1)?;
     validate_cluster_cov_type(&cov_type, n, k - usize::from(input.has_intercept()))?;
     validate_has_uncensored_observations(input.y(), input.lower(), input.upper())?;
+    // 非打ち切り観測がある（全行が境界に一致する場合は上で`NoUncensoredObservations`になる）うえで、
+    // 切片ありなのに`y`が全行で同じ値だと`σ→0`に退化して`NOT_CONVERGED`になるため、先に弾く。
+    validate_outcome_not_constant(input.y(), input.has_intercept())?;
 
     // `x`（切片ありなら列を平均センタリング＋スケーリング、切片なしはスケーリング
     // のみ）と`y`（と打ち切り境界、`y`の母集団標準偏差を2の冪に丸めた値で一律

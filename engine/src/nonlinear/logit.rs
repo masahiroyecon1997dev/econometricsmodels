@@ -177,6 +177,8 @@ impl LogitEstimator {
     /// - `y`が`{0.0, 1.0}`以外の値を含む: `MleError::InvalidBinaryY`
     /// - `k`（定数項を含む説明変数の数）が0（定数項も説明変数も無い）: `CommonError::NoRegressors`
     /// - 観測数`n`が`k`以下: `CommonError::InsufficientObservations`
+    /// - 切片があり`y`が（丸め誤差の範囲で）全行で同じ値: `CommonError::OutcomeConstant`（完全分離として`SeparationDetected`に
+    ///   しない。切片なしでは対象外。`cov_type=Cluster`の検証の後）
     /// - 設計行列がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （最適化前の列ピボットQRランクチェックで`solver`によらず検出）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`

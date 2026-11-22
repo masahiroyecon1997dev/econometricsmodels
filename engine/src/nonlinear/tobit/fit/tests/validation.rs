@@ -608,3 +608,114 @@ fn fit_reports_settings_before_the_censoring_bounds_and_the_observation_count() 
         MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
     );
 }
+
+fn tobit_options() -> MleFitOptions {
+    MleFitOptions {
+        solver: SolverType::Newton,
+        max_iter: 100,
+        tol: 1e-8,
+        raise_on_non_convergence: true,
+        cov_type: CovType::Classical,
+        confidence_level: 0.95,
+    }
+}
+
+fn tobit_input(
+    y: &[f64],
+    has_intercept: bool,
+    lower: Option<f64>,
+    upper: Option<f64>,
+) -> TobitInput {
+    let x: Vec<f64> = (0..y.len()).map(|i| i as f64 - 3.5).collect();
+    TobitInput::from_columns(
+        y,
+        &[x],
+        vec!["x1".to_string()],
+        has_intercept,
+        "y".to_string(),
+        lower,
+        upper,
+    )
+    .unwrap()
+}
+
+/// 切片ありで、非打ち切りの`y`が全行で同じ値なら、`σ→0`に退化して`NonConvergence`になる前に
+/// `OutcomeConstant`（`ValidationError`）で弾く。境界の設定（片側・両側）・`solver`に依らない。
+#[test]
+fn fit_returns_outcome_constant_error_for_a_constant_uncensored_outcome_with_an_intercept() {
+    let y = vec![5.0; 8];
+    for (lower, upper) in [
+        (Some(0.0), None),
+        (None, Some(10.0)),
+        (Some(0.0), Some(10.0)),
+    ] {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
+            let result = TobitEstimator::fit(
+                tobit_input(&y, true, lower, upper),
+                MleFitOptions {
+                    solver,
+                    ..tobit_options()
+                },
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                MleError::Common(CommonError::OutcomeConstant),
+                "lower={lower:?}, upper={upper:?}, solver={solver:?}"
+            );
+        }
+    }
+}
+
+/// 全行が同じ境界値に一致する場合は、`y`が定数でもより具体的な`NoUncensoredObservations`を返す
+/// （`y`が許される形か → `y`が定数か、の順）。
+#[test]
+fn fit_reports_no_uncensored_observations_before_the_constant_outcome() {
+    let y = vec![0.0; 8];
+    assert_eq!(
+        TobitEstimator::fit(tobit_input(&y, true, Some(0.0), None), tobit_options()).unwrap_err(),
+        MleError::NoUncensoredObservations {
+            lower: Some(0.0),
+            upper: None
+        }
+    );
+}
+
+/// 切片なしの定数の`y`は`OutcomeConstant`にせず、通常どおり推定する。
+#[test]
+fn fit_estimates_a_constant_uncensored_outcome_without_an_intercept() {
+    let y = vec![5.0; 8];
+    let estimator =
+        TobitEstimator::fit(tobit_input(&y, false, Some(0.0), None), tobit_options()).unwrap();
+    assert!(estimator.converged());
+}
+
+/// 非打ち切りの値が全て同じでも、打ち切られた行があれば`y`は定数ではないので対象外
+/// （この場合の扱いは別に決める。ここでは`OutcomeConstant`にならないことだけを固定する）。
+#[test]
+fn fit_does_not_report_a_constant_outcome_when_some_rows_are_censored() {
+    let y = vec![5.0, 0.0, 5.0, 0.0, 5.0, 0.0, 5.0, 0.0];
+    let result = TobitEstimator::fit(tobit_input(&y, true, Some(0.0), None), tobit_options());
+    assert_ne!(
+        result.err(),
+        Some(MleError::Common(CommonError::OutcomeConstant))
+    );
+}
+
+/// 定数の`y`の検査は、クラスター数の検査より後（入力の形・大きさの検査が先）。
+#[test]
+fn fit_reports_the_cluster_check_before_the_constant_outcome() {
+    let y = vec![5.0; 8];
+    let result = TobitEstimator::fit(
+        tobit_input(&y, true, Some(0.0), None),
+        MleFitOptions {
+            cov_type: CovType::Cluster { groups: None },
+            ..tobit_options()
+        },
+    );
+    assert_eq!(
+        result.unwrap_err(),
+        MleError::Common(CommonError::MissingClusterColumn {
+            setting: ClusterSetting::CovType,
+        })
+    );
+}

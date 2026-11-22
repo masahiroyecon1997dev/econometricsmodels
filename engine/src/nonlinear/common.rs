@@ -85,4 +85,6 @@ pub use validation::{
     validate_binary_y, validate_confidence_level, validate_has_regressors, validate_mle_options,
     validate_sufficient_observations,
 };
-pub(crate) use validation::{validate_cluster_cov_type, validate_fit_preconditions};
+pub(crate) use validation::{
+    validate_cluster_cov_type, validate_fit_preconditions, validate_outcome_not_constant,
+};

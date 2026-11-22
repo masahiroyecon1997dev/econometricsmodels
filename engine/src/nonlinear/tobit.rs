@@ -253,6 +253,8 @@ impl TobitEstimator {
     /// - 観測数`n`が総パラメータ数`k+1`以下: `CommonError::InsufficientObservations`
     /// - 非打ち切り観測（`y`が`lower`/`upper`いずれの境界にも一致しない観測）が1件も無い:
     ///   `MleError::NoUncensoredObservations`（`validate_has_uncensored_observations`参照）
+    /// - 切片があり`y`が（丸め誤差の範囲で）全行で同じ値（上の非打ち切り観測の検証の後）: `CommonError::OutcomeConstant`
+    ///   （`σ→0`の退化で`NonConvergence`にしない。切片なしでは対象外）
     /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:

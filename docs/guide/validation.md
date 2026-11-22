@@ -157,8 +157,8 @@ Each bullet is a situation that raises a `ValidationError`.
 
 **Outcome**
 
-- In OLS, WLS and IV with an intercept, `y` has the same value in every row, up to rounding (`OUTCOME_CONSTANT`: there is nothing to explain; the test is the same relative one as for a regressor with no within-variation in FE). A model without an intercept may have a constant `y`.
-- FE, FEIV and RE report a `y` with the same value in every row as `OUTCOME_CONSTANT`, and a `y` that has no variation left after the fixed effects are removed as `OUTCOME_CONSTANT_WITHIN_ENTITY` (see below). Logit and Probit report a constant `y` as complete separation (`SEPARATION_DETECTED`, a `ComputationError`), and Tobit as an optimizer that does not converge (`NOT_CONVERGED`, a `ComputationError`).
+- In OLS, WLS, IV, Logit, Probit and Tobit with an intercept, `y` has the same value in every row, up to rounding (`OUTCOME_CONSTANT`: there is nothing to explain; the test is the same relative one as for a regressor with no within-variation in FE). A model without an intercept may have a constant `y`. In Logit and Probit the constant `y` is 0 or 1 in every row, which would otherwise surface as complete separation (`SEPARATION_DETECTED`); in Tobit it is reported before the optimizer, which would otherwise fail to converge (`NOT_CONVERGED`). A Tobit `y` that equals a censoring bound in every row keeps its own error (`NO_UNCENSORED_OBSERVATIONS`).
+- FE, FEIV and RE report a `y` with the same value in every row as `OUTCOME_CONSTANT`, and a `y` that has no variation left after the fixed effects are removed as `OUTCOME_CONSTANT_WITHIN_ENTITY` (see below).
 
 **Missing values**
 

@@ -363,3 +363,119 @@ fn fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matri
         }
     }
 }
+
+/// 切片ありで`y`が全行で同じ値なら、`solver`・`cov_type`に依らず最適化の前に`OutcomeConstant`
+/// （`ValidationError`）で弾く。弾かなければ完全分離（`SeparationDetected`）になり、原因が`y`と分からない。
+#[test]
+fn fit_returns_outcome_constant_error_for_a_constant_outcome_with_an_intercept() {
+    let x = vec![-2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0, -3.0];
+    for constant in [0.0, 1.0] {
+        let y = vec![constant; x.len()];
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
+            let input = ProbitInput::from_columns(
+                &y,
+                std::slice::from_ref(&x),
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let result = ProbitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver,
+                    max_iter: 35,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                MleError::Common(CommonError::OutcomeConstant),
+                "constant={constant}, solver={solver:?}"
+            );
+        }
+    }
+}
+
+/// 切片なしでは定数の`y`でも説明する対象があり、`OutcomeConstant`にせず通常どおり推定する
+/// （OLS・WLS・IVの切片なしと同じ。`x`の符号が混ざっていれば完全分離でもない）。
+#[test]
+fn fit_estimates_a_constant_outcome_without_an_intercept() {
+    let x = vec![-2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0, -3.0];
+    let y = vec![1.0; x.len()];
+    let input = ProbitInput::from_columns(&y, &[x], vec!["x1".to_string()], false, "y".to_string())
+        .unwrap();
+    let estimator = ProbitEstimator::fit(
+        input,
+        MleFitOptions {
+            solver: SolverType::Newton,
+            max_iter: 35,
+            tol: 1e-6,
+            raise_on_non_convergence: true,
+            cov_type: CovType::Classical,
+            confidence_level: 0.95,
+        },
+    )
+    .unwrap();
+    assert!(estimator.converged());
+}
+
+/// 定数の`y`の検証は、設定値・`y`の二値性・観測数・クラスターの検証より後（入力の形の検証が先）。
+#[test]
+fn fit_reports_the_constant_outcome_after_the_cluster_check() {
+    let x = vec![-2.0, -1.0, -0.5, 0.5, 1.0, 2.0];
+    let y = vec![1.0; x.len()];
+    let input =
+        ProbitInput::from_columns(&y, &[x], vec!["x1".to_string()], true, "y".to_string()).unwrap();
+    let result = ProbitEstimator::fit(
+        input,
+        MleFitOptions {
+            solver: SolverType::Newton,
+            max_iter: 35,
+            tol: 1e-6,
+            raise_on_non_convergence: true,
+            cov_type: CovType::Cluster { groups: None },
+            confidence_level: 0.95,
+        },
+    );
+    assert_eq!(
+        result.unwrap_err(),
+        MleError::Common(CommonError::MissingClusterColumn {
+            setting: ClusterSetting::CovType,
+        })
+    );
+}
+
+/// `y`が許される形か（二値性）の検査は、定数かどうかの検査より先。全行5.0の`y`は定数でもあるが、
+/// 0/1でないことを先に報告する。
+#[test]
+fn fit_reports_the_non_binary_outcome_before_the_constant_outcome() {
+    let x = vec![-2.0, -1.0, -0.5, 0.5, 1.0, 2.0];
+    let y = vec![5.0; x.len()];
+    let input = ProbitInput::from_columns(
+        &y,
+        std::slice::from_ref(&x),
+        vec!["x1".to_string()],
+        true,
+        "y".to_string(),
+    )
+    .unwrap();
+    let result = ProbitEstimator::fit(
+        input,
+        MleFitOptions {
+            solver: SolverType::Newton,
+            max_iter: 35,
+            tol: 1e-6,
+            raise_on_non_convergence: true,
+            cov_type: CovType::Classical,
+            confidence_level: 0.95,
+        },
+    );
+    assert_eq!(
+        result.unwrap_err(),
+        MleError::InvalidBinaryY { row: 0, value: 5.0 }
+    );
+}

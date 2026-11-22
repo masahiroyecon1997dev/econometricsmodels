@@ -5,9 +5,9 @@
 use super::TwoSlsEstimator;
 use super::cov::{CovStage, covariance_stage};
 use super::overid::overid_test;
-use super::wu_hausman::wu_hausman_test;
 use crate::iv::common::{
     IvError, IvInput, compute_first_stage_with, hcat, mat_column_to_vec, validate_iv_fit_inputs,
+    wu_hausman_test,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::CovType;
@@ -153,7 +153,8 @@ pub(super) fn fit_two_sls(
         wald_f_test(&coordinates, &meat, k_constant, df_model, df_inference)?
     };
 
-    let wu_hausman = wu_hausman_test(&input, first_stage_residuals, &cov_type, confidence_level)?;
+    let residual_columns: Vec<&[f64]> = first_stage_residuals.iter().map(Vec::as_slice).collect();
+    let wu_hausman = wu_hausman_test(&input, &residual_columns, &cov_type, confidence_level)?;
     let overid = overid_test(&input, &cov_type, hac_lags_used, &residuals, ssr)?;
 
     Ok(TwoSlsEstimator {

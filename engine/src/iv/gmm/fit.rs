@@ -8,7 +8,10 @@ use super::GmmEstimator;
 use super::GmmType;
 use super::hansen_j::hansen_j_test;
 use super::sandwich::{GmmCovariance, sandwich_covariance};
-use crate::iv::common::{IvError, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs};
+use crate::iv::common::{
+    IvError, IvInput, compute_first_stage_with, hcat, mat_column_to_vec, validate_iv_fit_inputs,
+    wu_hausman_test,
+};
 use crate::linear::ols::CovType;
 use crate::shared::error::CommonError;
 use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
@@ -17,13 +20,19 @@ use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::wald::wald_chi2_test;
 
-/// [`GmmEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
+/// [`GmmEstimator::fit`]・[`GmmEstimator::fit_with_first_stage_residuals`]の本体。契約（エラー条件を
+/// 含む）は`fit`のdocコメント参照。
+///
+/// `first_stage_residuals`は内生変数ごとの第一段階のOLS残差（`x_endog`の順、各`n`個、借用）。`None`なら
+/// Wu-Hausmanの補助回帰の直前にここで第一段階を回して求める（`Some`なら呼び出し側が回した第一段階の
+/// 残差をそのまま使う。形が合わないのは呼び出し側の誤りで、`INTERNAL_ERROR`）。
 pub(super) fn fit_gmm(
     input: IvInput,
     gmm_type: GmmType,
     raise_on_non_convergence: bool,
     cov_type: CovType,
     confidence_level: f64,
+    first_stage_residuals: Option<&[&[f64]]>,
 ) -> Result<GmmEstimator, IvError> {
     // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
     crate::shared::parallelism::ensure_serial();
@@ -37,6 +46,14 @@ pub(super) fn fit_gmm(
     // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
     // `validate_weight_type`側で検証する。
     validate_iv_fit_inputs(&input, &cov_type, confidence_level, Some(&gmm_type))?;
+    if let Some(columns) = first_stage_residuals
+        && (columns.len() != input.k_endog() || columns.iter().any(|column| column.len() != n))
+    {
+        return Err(CommonError::internal(
+            "first-stage residuals do not match the endogenous variables and observations",
+        )
+        .into());
+    }
     let k = input.k_exog() + input.k_endog();
 
     // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
@@ -149,6 +166,27 @@ pub(super) fn fit_gmm(
         wald_chi2_test(&wald.coordinates, &wald.meat, k_constant, df_model)?
     };
 
+    // Wu-Hausman内生性検定（`common/wu_hausman.rs`。2SLSと共有）。補助回帰は第一段階の残差を足した最小二乗で、
+    // 点推定・重み・共分散を使わないので、構造式のエラーを先に返してから回す。点推定に使った行列と重みは
+    // 補助回帰の前に手放す（第一段階の残差を同時に持つ時間を短くする）。
+    drop((x, z, solution));
+    let computed: Vec<Vec<f64>>;
+    let first_stage_residuals: Vec<&[f64]> = match first_stage_residuals {
+        Some(columns) => columns.to_vec(),
+        None => {
+            computed =
+                compute_first_stage_with(&input, &cov_type, confidence_level, |_, estimator| {
+                    mat_column_to_vec(estimator.residuals(), 0)
+                })?
+                .0
+                .into_iter()
+                .map(|(_, residuals)| residuals)
+                .collect();
+            computed.iter().map(Vec::as_slice).collect()
+        }
+    };
+    let wu_hausman = wu_hausman_test(&input, &first_stage_residuals, &cov_type, confidence_level)?;
+
     Ok(GmmEstimator {
         params: beta,
         param_names,
@@ -176,6 +214,9 @@ pub(super) fn fit_gmm(
         hansen_j_statistic: hansen_j.as_ref().map(|t| t.statistic),
         hansen_j_p_value: hansen_j.as_ref().map(|t| t.p_value),
         hansen_j_df: hansen_j.as_ref().map(|t| t.df),
+        wu_hausman_statistic: wu_hausman.map(|t| t.statistic),
+        wu_hausman_p_value: wu_hausman.map(|t| t.p_value),
+        wu_hausman_df: wu_hausman.map(|t| t.df),
     })
 }
 

@@ -11,7 +11,7 @@ Pass an `IVOptions` as `options=`. Options of `None` take the effective default 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
 | `estimator` | `"2sls"` or `"gmm"` | `"2sls"` | |
-| `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | For GMM it is independent of `gmm_weight_type`. For 2SLS it also selects the overidentification test: Sargan with `"classical"`, otherwise Hansen's J with the weight of that covariance (see [Definitions: IV](../methods/iv.md#overidentification-overid_statistic)). Also used by `kleibergen_paap()`, `effective_f()` and, for 2SLS and `gmm_type="one_step"`, `c_stat()` |
+| `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | For GMM it is independent of `gmm_weight_type`. For 2SLS it also selects the overidentification test: Sargan with `"classical"`, otherwise Hansen's J with the weight of that covariance (see [Definitions: IV](../methods/iv.md#overidentification-overid_statistic)). Also used by the Wu-Hausman test (with both estimators, independent of the GMM weight), `kleibergen_paap()`, `effective_f()` and, for 2SLS and `gmm_type="one_step"`, `c_stat()` |
 | `cluster` | Column that defines the clusters | `None` | With `cov_type="cluster"` or `gmm_weight_type="cluster"` |
 | `hac_time` | Column that gives the time order | `None` | Required with `cov_type="hac"` or `gmm_weight_type="hac"` |
 | `hac_lags` | Number of Newey-West lags | `None` (automatic) | With `"hac"` in either |

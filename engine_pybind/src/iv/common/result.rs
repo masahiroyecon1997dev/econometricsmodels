@@ -24,8 +24,8 @@ use super::options::IVOptions;
 ///
 /// The first-stage regressions are not a field: `first_stage()` is a separate method.
 /// `weak_instrument_f_statistics` and `first_stage()` are computed the same way for
-/// both estimators. `wu_hausman_*` is available for `estimator="2sls"` only, and
-/// `overid_*` is the overidentification test: for `estimator="2sls"` it follows
+/// both estimators. `wu_hausman_*` is also computed for both estimators (it follows
+/// `cov_type`, not the GMM weight), and `overid_*` is the overidentification test: for `estimator="2sls"` it follows
 /// `cov_type` (the Sargan test with `"classical"`, Hansen's J test that is robust to
 /// the chosen covariance otherwise), and for `estimator="gmm"` it is Hansen's J test.
 // `first_stage()`（内生変数ごとの第一段階回帰結果）はフィールドに含めず別メソッドとして公開する。
@@ -34,7 +34,7 @@ use super::options::IVOptions;
 // `first_stage: Vec<(String, OLSResult)>`から構築する。`engine::iv::common::compute_first_stage`が
 // `estimator`によらず同じ第一段階回帰を計算するため、`fit`でこの表現に詰め替えるだけで済む。
 // `weak_instrument_f_statistics`・`first_stage`は`compute_first_stage`、`wu_hausman_*`は
-// `TwoSlsEstimator`、`overid_*`は`TwoSlsEstimator::overid_*`/`GmmEstimator::hansen_j_*`から埋める。
+// `TwoSlsEstimator`・`GmmEstimator`、`overid_*`は`TwoSlsEstimator::overid_*`/`GmmEstimator::hansen_j_*`から埋める。
 // `IVResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IVOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -184,8 +184,9 @@ pub struct IVResult {
     /// the second-stage regressors and the first-stage residuals, so the augmented regression
     /// fits perfectly; or there are too few observations or clusters for the extra residual
     /// columns) — this does not fail
-    /// `fit()` itself, since the other results remain valid. **Always `None` for
-    /// `estimator="gmm"`** (not implemented for GMM).
+    /// `fit()` itself, since the other results remain valid. Computed for both
+    /// estimators; with the same data and `cov_type` the value is identical for `"2sls"`
+    /// and `"gmm"` (the test uses neither the second-stage coefficients nor the GMM weight).
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
     /// P-value of the Wu-Hausman test. `None` exactly when `wu_hausman_statistic` is `None`.

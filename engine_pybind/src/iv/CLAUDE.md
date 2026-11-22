@@ -21,7 +21,7 @@
 ## 診断統計量の配線
 
 - `weak_instrument_f_statistics`: `compute_first_stage`が返す`(String, f64)`を`HashMap<String, f64>`に詰める。
-- `wu_hausman_statistic`/`wu_hausman_p_value`: `TwoSlsEstimator`の`Option<f64>`をそのまま代入する。`engine`側の判断で、拡張回帰が特異な場合（第一段階残差の分散がゼロ等）も`None`になる。この場合も`fit()`自体は失敗しない（`engine/src/iv/CLAUDE.md`「Wu-Hausmanの拡張回帰が特異な場合は…」参照）。`estimator="gmm"`では常に`None`（`GmmEstimator`はWu-Hausman検定を実装しない）。
+- `wu_hausman_statistic`/`wu_hausman_p_value`/`wu_hausman_df_*`: `TwoSlsEstimator`・`GmmEstimator`の`Option`をそのまま代入する（`cov_type`に従い、GMMの重みには依らない。同じデータ・`cov_type`なら2SLSと同じ値）。`engine`側の判断で、拡張回帰が特異な場合（第一段階残差の分散がゼロ等）も`None`になる。この場合も`fit()`自体は失敗しない（`engine/src/iv/CLAUDE.md`「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合は…」参照）。GMMには、`fit`が`compute_first_stage_with`で回した第一段階の`OLSResult`が持つ残差（`first_stage`の`residuals`）を借用で`GmmEstimator::fit_with_first_stage_residuals`へ渡す（補助回帰のために第一段階を二重に回さず、残差を別に複製もしない。渡す残差は第一段階のOLS残差でなければならず、engineは列の数と長さしか検査しない）。
 - `overid_statistic`/`overid_p_value`/`overid_df`: `estimator="2sls"`は`TwoSlsEstimator::sargan_*`（Sargan）、`estimator="gmm"`は`GmmEstimator::hansen_j_*`（Hansen J）から代入する。丁度識別では`None`。
 - `converged: bool`/`n_iter: i64`: `raise_on_non_convergence=False`でもGMMが収束したかをPython側で確認できるようにするための`IVResult`のフィールド（`LogitResult`/`ProbitResult`と同じ位置づけ）。`estimator="2sls"`は閉形式・非反復なので常に`converged=true`・`n_iter=1`。
 

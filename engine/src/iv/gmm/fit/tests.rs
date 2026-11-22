@@ -6,6 +6,7 @@
 //! - `weight_validation.rs`: 重み行列の入力検証・エラー返却・クラスター数の境界（受理する側を含む）
 //! - `weight_robust_hac.rs`: ロバスト重み・HAC重み（ラグの解決・時間順序・手計算との照合）
 //! - `weight_cluster.rs`: クラスター重み（クラスター数と操作変数の数・モーメント共分散）
+//! - `wu_hausman.rs`: Wu-Hausman内生性検定（2SLSとの一致・第一段階の残差の受け渡し・補助回帰だけの失敗）
 //! - `proptests.rs`: property-basedテスト
 
 use crate::iv::common::IvError;
@@ -24,6 +25,7 @@ mod validation;
 mod weight_cluster;
 mod weight_robust_hac;
 mod weight_validation;
+mod wu_hausman;
 
 // ── 複数のテーマが使うヘルパー ──────────────────────────────────────
 

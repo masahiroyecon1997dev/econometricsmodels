@@ -79,7 +79,7 @@ print(gmm.params["endog1"], gmm.stat_dist)  # normal and chi-squared tests
 ```python
 print(two_sls.weak_instrument_f_statistics)  # {"endog1": ...}
 print(two_sls.overid_statistic, two_sls.overid_p_value)  # Sargan (2SLS, classical)
-print(two_sls.wu_hausman_statistic, two_sls.wu_hausman_p_value)  # 2SLS only
+print(two_sls.wu_hausman_statistic, two_sls.wu_hausman_p_value)  # 2SLS and GMM
 print(gmm.overid_statistic, gmm.overid_p_value)  # Hansen's J (GMM)
 
 first_stage = two_sls.first_stage()
@@ -95,7 +95,7 @@ How to read them:
     - *Robustness.* The Sargan test assumes homoskedastic errors. Every other version is robust to what the covariance allows for (heteroskedasticity, clustering, autocorrelation). `"hc0"` to `"hc3"` give the same value.
     - *When it is `None`.* Both fields are `None` when the model is just-identified (as many instruments as endogenous variables), because there is nothing to test. For 2SLS they are also `None` when the weight matrix of the covariance is singular: always with `cov_type="cluster"` and fewer clusters than the exogenous regressors (including the constant) and the excluded instruments together, and rarely, with nearly collinear regressors, for numerical reasons. The fit itself still succeeds.
 - **Exogeneity and instrument validity, post-estimation** (`c_stat()`). A method, not a field. It tests whether chosen endogenous variables are exogenous and chosen excluded instruments are valid, for both estimators, and has its own section [below](#exogeneity-and-instrument-validity-post-estimation).
-- **Endogeneity** (`wu_hausman_statistic`, `wu_hausman_p_value`, 2SLS only). The null hypothesis is that the suspect regressors are in fact exogenous, so that OLS would be consistent. A small p-value supports treating them as endogenous and using IV; a large one means the data cannot distinguish IV from OLS, and OLS is then more precise. For GMM, where these fields are `None`, use [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation). For 2SLS, `c_stat()` is an alternative that can test a subset of the endogenous variables and can also test instruments.
+- **Endogeneity** (`wu_hausman_statistic`, `wu_hausman_p_value`, both estimators). The null hypothesis is that the suspect regressors are in fact exogenous, so that OLS would be consistent. A small p-value supports treating them as endogenous and using IV; a large one means the data cannot distinguish IV from OLS, and OLS is then more precise. The test follows `cov_type` and does not use the GMM weight, so for the same data and `cov_type` it takes the same value with `estimator="2sls"` and `estimator="gmm"`. [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation) is the alternative that uses the GMM weight (robust or cluster) and can test a subset of the endogenous variables and can also test instruments.
 
 See [Definitions: IV](../methods/iv.md#diagnostics) for what each diagnostic tests, and the [Options and results](../api/iv.md) for when it is `None`.
 

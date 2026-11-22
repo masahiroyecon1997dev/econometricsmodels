@@ -7,7 +7,8 @@
 //! このファイルは公開パス（`crate::iv::common::*`）を保つ再エクスポートだけを持ち、中身は
 //! `common/`の子モジュールに役割別に置く: `error.rs`（`IvError`）・`input.rs`（`IvInput`と
 //! 列変換ヘルパー）・`validation.rs`（`fit()`冒頭の入力検証）・`first_stage.rs`（第一段階回帰と
-//! 弱操作変数診断）・`estimate.rs`（`IvEstimate`）・`proptest_support.rs`（`#[cfg(test)]`の
+//! 弱操作変数診断）・
+//! `wu_hausman.rs`（Wu-Hausman内生性検定。2SLSとGMMが共有）・`estimate.rs`（`IvEstimate`）・`proptest_support.rs`（`#[cfg(test)]`の
 //! property-basedテスト用ケース生成器）。
 
 mod error;
@@ -18,6 +19,7 @@ mod input;
 pub(crate) mod proptest_support;
 mod validation;
 mod weak_instruments;
+mod wu_hausman;
 
 pub use crate::shared::effective_f::{EffectiveF, PatnaikCriticalValue};
 pub use crate::shared::kleibergen_paap::RankTest;
@@ -35,3 +37,4 @@ pub use weak_instruments::{
     CraggDonald, KleibergenPaap, StockYogoCriticalValues, compute_cragg_donald,
     compute_effective_f, compute_kleibergen_paap,
 };
+pub(crate) use wu_hausman::wu_hausman_test;

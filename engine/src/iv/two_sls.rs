@@ -53,7 +53,7 @@
 //! このファイルは外から見える面（`TwoSlsEstimator`の構造体・getter・`IvEstimate`の実装と、
 //! `fit`のエラー条件を含む契約）だけを持つ。ロジックは子モジュールに置く:
 //! `fit.rs`（第一段階・第二段階・共分散・検定をつなぐ`fit`の本体）・`cov.rs`（cov_type別の
-//! 共分散行列とWald F検定）・`wu_hausman.rs`・`overid.rs`（過剰識別検定。`cov_type=Classical`は`sargan.rs`のSargan、それ以外はロバストなHansen J）・`test_support.rs`
+//! 共分散行列とWald F検定）・`overid.rs`（過剰識別検定。`cov_type=Classical`は`sargan.rs`のSargan、それ以外はロバストなHansen J）・`test_support.rs`
 //! （複数ファイルのテストが共有するフィクスチャ）。テストは各ロジックと同じファイルの
 //! `mod tests`に置く（`fit`を通すテストと、テストが大きいファイルは`<ファイル名>/tests/`にテーマ別で置く）。
 
@@ -68,7 +68,6 @@ mod overid;
 mod sargan;
 #[cfg(test)]
 mod test_support;
-mod wu_hausman;
 
 /// 2SLSの点推定結果。
 ///

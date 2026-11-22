@@ -31,9 +31,10 @@
 //! 共用する（`IVOptions`に別フィールドを増やさない設計、`resolve_weight_type`参照）。
 //! `gmm_weight_type`と`cov_type`が異なる場合でも同じ列を共用する。
 //!
-//! `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="gmm"`では常に`None`
-//! （`GmmEstimator`はWu-Hausman検定を持たない、`docs/spec/iv-spec.md`3.6節はTwoSlsEstimator
-//! のみのスコープ）。`overid_statistic`/`overid_p_value`は`estimator="gmm"`では
+//! `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator`によらず`cov_type`に従う回帰ベースの検定で、
+//! `TwoSlsEstimator`・`GmmEstimator`のどちらからも配線する（GMMには`fit`が回した第一段階の残差を
+//! `fit_with_first_stage_residuals`で渡し、補助回帰のために第一段階を二重に回さない）。
+//! `overid_statistic`/`overid_p_value`は`estimator="gmm"`では
 //! `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`から配線する
 //! （`estimator="2sls"`のSargan検定と同じ`Option<f64>`同士の代入）。
 

@@ -217,7 +217,7 @@ The regression-based (control function) version: the first-stage residuals \(\ha
 
 linearmodels reports the Wald statistic of this regression with a chi-squared reference. Here that statistic is divided by the number of endogenous variables and compared with an F distribution. The degrees of freedom are the number of endogenous variables and the residual degrees of freedom of the augmented regression, \(n - k - k_{\text{endog}}\) (\(G - 1\) with `cov_type="cluster"`).
 
-It is `None` for `estimator="gmm"` (use [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation-c_stat) there), and also when the augmented regression cannot be estimated: it has \(k_{\text{endog}}\) more columns than the structural equation, so there may be too few observations or clusters, or it may fit perfectly.
+It is computed with both estimators, and the reference distribution is F in both (unlike the z and chi-squared tests of the GMM coefficients, this is the Wald test of a least-squares regression). The augmented regression is a least-squares regression that uses neither the second-stage coefficients nor the GMM weight, so for the same data and `cov_type` the value is the same with `estimator="2sls"` and `estimator="gmm"`; [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation-c_stat) is the test that uses the GMM weight. It is `None` when the augmented regression cannot be estimated: it has \(k_{\text{endog}}\) more columns than the structural equation, so there may be too few observations or clusters, or it may fit perfectly.
 
 ### Exogeneity and instrument validity, post-estimation: `c_stat()`
 

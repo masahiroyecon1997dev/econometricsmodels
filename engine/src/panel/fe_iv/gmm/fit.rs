@@ -20,8 +20,8 @@ use crate::shared::error::CommonError;
 use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
 use crate::shared::gmm_weight::validate_weight_type;
 use crate::shared::inference::{InferenceTable, inference_table};
+use crate::shared::normal::StandardNormal;
 use crate::shared::wald::wald_chi2_test;
-use statrs::distribution::Normal;
 
 /// [`FeGmmEstimator::fit_with_first_stages`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 ///
@@ -199,7 +199,7 @@ pub(super) fn fit_fe_gmm<T>(
     )?;
     let (cov_params, wald_coordinates) = solution.covariance(&omega_tilde);
 
-    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
+    let normal = StandardNormal;
     let InferenceTable {
         std_errors,
         test_stats,

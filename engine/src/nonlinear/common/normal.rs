@@ -1,6 +1,8 @@
-//! 標準正規分布の`φ`・`Φ`の評価（`|u|`のクランプ）。ProbitとTobitの尤度が共有する。
+//! 標準正規分布の`φ`・`Φ`の評価（`|u|`のクランプ）。ProbitとTobitの尤度が共有する。`Φ`は
+//! `shared::normal::normal_cdf`（`libm::erfc`。`statrs`の`Normal::cdf`は相対誤差が約`1e-10`）。
 
-use statrs::distribution::{Continuous, ContinuousCDF, Normal};
+use crate::shared::normal::normal_cdf;
+use statrs::distribution::{Continuous, Normal};
 
 /// `φ(u)`・`Φ(u)`を評価する前に`u`をこの絶対値以下にクランプする閾値。`u`がこれより
 /// 極端になると`λ=φ(u)/Φ(u)`（逆ミルズ比、一般化残差）が`0.0/0.0`のNaNになりうる
@@ -23,5 +25,5 @@ pub const U_CLAMP: f64 = 8.125_890_664_701_908;
 /// （`score`/`loglike`はクリップするが`hessian`はしない）を避ける。
 pub fn clamped_pdf_cdf(normal: &Normal, u: f64) -> (f64, f64) {
     let u = u.clamp(-U_CLAMP, U_CLAMP);
-    (normal.pdf(u), normal.cdf(u))
+    (normal.pdf(u), normal_cdf(u))
 }

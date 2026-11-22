@@ -1,12 +1,11 @@
 //! 限界効果（`MarginalEffects`・`MarginalEffectsAt`）と、デルタ法による標準誤差・推論統計量。
 
 use faer::Mat;
-use statrs::distribution::Normal;
 
 use super::error::MleError;
 use super::validation::validate_confidence_level;
-use crate::shared::error::CommonError;
 use crate::shared::inference;
+use crate::shared::normal::StandardNormal;
 
 /// 限界効果（`marginal_effects`）をどの代表点で評価するか。文字列パース（Python文字列 →
 /// この型への変換）は`engine_pybind`側の責務（`SolverType`/`CovType`と同じ設計。
@@ -250,10 +249,7 @@ pub fn marginal_effects_from_w_s(
 
     let (dydx, jacobian) = dydx_and_jacobian(k, params, w, s);
 
-    // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを要求する
-    // statrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
-    // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`fit()`と同じ扱い）。
-    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
+    let normal = StandardNormal;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let k_constant = usize::from(has_intercept);
@@ -301,7 +297,8 @@ mod tests {
 
     use super::*;
 
-    use statrs::distribution::ContinuousCDF;
+    use crate::shared::error::CommonError;
+    use statrs::distribution::{ContinuousCDF, Normal};
 
     /// `column_means`を、定数項列（1.0固定）と傾きを持つ列の両方で直接検証する
     /// （切片列も除外せず計算する契約、`column_means`のdocコメント参照）。

@@ -28,6 +28,7 @@ pub(crate) mod least_squares;
 pub(crate) mod linear_algebra;
 pub(crate) mod linear_program;
 pub(crate) mod noncentral_chi_squared;
+pub(crate) mod normal;
 pub(crate) mod orthonormal;
 pub(crate) mod score_covariance;
 pub(crate) mod stock_yogo;

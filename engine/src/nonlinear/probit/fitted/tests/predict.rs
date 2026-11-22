@@ -8,9 +8,8 @@ use crate::nonlinear::probit::ProbitEstimator;
 use crate::nonlinear::probit::ProbitFitted;
 use crate::nonlinear::probit::ProbitInput;
 use crate::nonlinear::probit::test_support::*;
+use crate::shared::normal::normal_cdf;
 use faer::Mat;
-use statrs::distribution::ContinuousCDF;
-use statrs::distribution::Normal;
 
 /// 切片のみモデルは全観測で`p_i=ȳ`（closed form、他のテストと同じ性質）なので、
 /// `predict()`が返す予測確率が`ȳ`と一致することを検証できる
@@ -38,7 +37,7 @@ fn predict_matches_closed_form_for_intercept_only_model() {
     }
 }
 
-/// 多変量モデルでは`predict()`に閉じた形の解析解が無いため、`Normal::standard().cdf`
+/// 多変量モデルでは`predict()`に閉じた形の解析解が無いため、`normal_cdf`
 /// から直接`p_i=Φ(x_i'θ)`を計算する式で独立に再計算し、突き合わせる
 /// （`LogitEstimator`の対応するテストの`logistic`をΦに置き換えたProbit版）。
 #[test]
@@ -71,11 +70,10 @@ fn predict_matches_independently_recomputed_normal_cdf_of_linear_predictor() {
     let x = estimator.input().x();
     let n = 4;
     let k = 3;
-    let normal = Normal::standard();
     let predicted = estimator.predict();
     for (i, &p_i) in predicted.iter().enumerate().take(n) {
         let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
-        assert!((p_i - normal.cdf(z)).abs() < 1e-12);
+        assert!((p_i - normal_cdf(z)).abs() < 1e-12);
     }
 }
 
@@ -109,7 +107,6 @@ fn predict_new_data_matches_independently_recomputed_normal_cdf_of_linear_predic
     .unwrap();
 
     let params = estimator.params().to_vec();
-    let normal = Normal::standard();
     // 学習データには無い新規のx値
     let new_x_columns = vec![vec![15.0, 25.0], vec![0.0, -3.0]];
     let predicted = estimator.predict_new_data(&new_x_columns);
@@ -117,7 +114,7 @@ fn predict_new_data_matches_independently_recomputed_normal_cdf_of_linear_predic
     assert_eq!(predicted.len(), 2);
     for (i, &p_i) in predicted.iter().enumerate() {
         let z = params[0] + new_x_columns[0][i] * params[1] + new_x_columns[1][i] * params[2];
-        assert!((p_i - normal.cdf(z)).abs() < 1e-12);
+        assert!((p_i - normal_cdf(z)).abs() < 1e-12);
     }
 }
 
@@ -151,7 +148,6 @@ fn predict_new_data_without_intercept_matches_independently_recomputed_normal_cd
     .unwrap();
 
     let params = estimator.params().to_vec();
-    let normal = Normal::standard();
     // 学習データには無い新規のx値
     let new_x_columns = vec![vec![15.0, 25.0], vec![0.0, -3.0]];
     let predicted = estimator.predict_new_data(&new_x_columns);
@@ -159,7 +155,7 @@ fn predict_new_data_without_intercept_matches_independently_recomputed_normal_cd
     assert_eq!(predicted.len(), 2);
     for (i, &p_i) in predicted.iter().enumerate() {
         let z = new_x_columns[0][i] * params[0] + new_x_columns[1][i] * params[1];
-        assert!((p_i - normal.cdf(z)).abs() < 1e-12);
+        assert!((p_i - normal_cdf(z)).abs() < 1e-12);
     }
 }
 

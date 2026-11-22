@@ -27,6 +27,10 @@ faer = "=0.24.4"
 # default-features = false でnalgebra/rand機能を無効化し、CDF計算に必要な最小限の依存に絞る。
 # （メンバー側の[dependencies]でdefault-featuresを上書きできないため、ここで指定する）
 statrs = { version = "=0.19.1", default-features = false }
+# libm: 標準正規分布のCDF・生存関数の`erfc`（`shared/normal.rs`）。`statrs`の`Normal::cdf`は
+# 相対誤差が約1e-10あり、`libm::erfc`は約1e-14。faerの依存として既にビルドされているクレートで、
+# 追加のビルド・配布物の増加は無い。
+libm = "=0.2.16"
 # argmin: 非線形モデル（Logit/Probit/Tobit）のMLE数値最適化。
 # argmin-mathのfaerバックエンドはfaer 0.23までしか対応しておらず、本プロジェクトのfaerピン
 # （=0.24.4）と噛み合わないため使わない（docs/spec/nonlinear-common.md1.1節

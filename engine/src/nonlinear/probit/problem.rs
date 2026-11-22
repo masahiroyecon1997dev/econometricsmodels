@@ -159,6 +159,7 @@ mod tests {
     use crate::nonlinear::common::SolverType;
     use crate::nonlinear::common::U_CLAMP;
     use crate::nonlinear::common::clamped_pdf_cdf;
+    use crate::shared::normal::normal_cdf;
 
     use crate::nonlinear::common::destandardize_params;
 
@@ -377,7 +378,7 @@ mod tests {
         for i in 0..y.len() {
             let z = params[0] + params[1] * x_columns[0][i];
             let q = 2.0 * y[i] - 1.0;
-            let lambda = q * normal.pdf(q * z) / normal.cdf(q * z);
+            let lambda = q * normal.pdf(q * z) / normal_cdf(q * z);
 
             let residual = problem.generalized_residual(i, &params, &normal);
             assert!((residual - lambda).abs() < 1e-12, "row {i}");

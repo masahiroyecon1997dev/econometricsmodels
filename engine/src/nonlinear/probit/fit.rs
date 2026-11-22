@@ -15,6 +15,7 @@ use crate::nonlinear::common::{
 };
 use crate::nonlinear::separation::verify_no_separation;
 use crate::shared::inference;
+use crate::shared::normal::StandardNormal;
 use faer::Mat;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
@@ -102,7 +103,7 @@ pub(super) fn fit_probit(
     let cov_params_std = cov_params_for_type(&cov_type, &hessian_std, scores.as_ref(), n, k)?;
     let cov_params = destandardize_cov_params(&cov_params_std, &scale);
 
-    let normal = Normal::standard();
+    let normal = StandardNormal;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let mut std_errors = vec![0.0; k];

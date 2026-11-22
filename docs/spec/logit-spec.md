@@ -237,7 +237,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 | `hc1` | `hc0`に小標本補正 `n/(n-k)` を乗じる |
 | `cluster` | `Σ = correction・H⁻¹(Σ_g S_gS_g')H⁻¹`（`S_g`はグループ内スコア和、小標本補正込み） |
 
-検定分布は**標準正規分布**（z検定、statrs `Normal`）。
+検定分布は**標準正規分布**（z検定。p値は`shared::normal::StandardNormal`の`sf`、臨界値は`statrs`の`inverse_cdf`。理由は`nonlinear-common.md`）。
 
 - クラスターのグループキー未指定は`MissingClusterColumn`、クラスター数`<2`は`InsufficientClusters`
   （検証ロジックはOLSの`validate_cluster_groups`と共有、`engine::shared::validation`）。反復最適化・多段

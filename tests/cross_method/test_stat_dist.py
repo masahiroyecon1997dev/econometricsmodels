@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
+from _assertions import assert_close
 from _cross_method_helpers import (
     FE_DF_RESID_ONE_WAY,
     FE_DF_RESID_TWO_WAY,
@@ -22,6 +23,7 @@ from _cross_method_helpers import (
     fit_fe,
     fit_re,
 )
+from _tolerances import TOLERANCES
 from econometricsmodels import (
     FE,
     FEIV,
@@ -41,6 +43,8 @@ from econometricsmodels import (
 )
 from scipy import stats as sps
 
+NORMAL_P_VALUE = TOLERANCES["stat_dist_normal_p_value"]
+
 
 def _check_t(res, df_expected: int) -> None:
     assert res.stat_dist == "t"
@@ -57,6 +61,14 @@ def _check_normal(res) -> None:
     assert res.stat_dist == "normal"
     assert res.stat_df is None
     assert set(res.test_stats) == set(res.params)
+    # p値は標準正規分布の両側確率（z検定の生存関数が`1e-14`級の精度であることまで固定する）。
+    for name, z in res.test_stats.items():
+        assert_close(
+            res.p_values[name],
+            2.0 * sps.norm.sf(abs(z)),
+            f"p_value/{name}",
+            **NORMAL_P_VALUE,
+        )
 
 
 # ── 手法別の分布と自由度 ──────────────────────────────────────────────
@@ -109,7 +121,7 @@ def test_iv_distribution_follows_estimator(panel_df, estimator, dist):
     if dist == "t":
         assert res.stat_df == res.df_resid
     else:
-        assert res.stat_df is None
+        _check_normal(res)
     assert set(res.test_stats) == set(res.params)
 
 

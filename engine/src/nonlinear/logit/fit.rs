@@ -14,10 +14,9 @@ use crate::nonlinear::common::{
     run_solver_keeping_problem, scores_needed, standardize_columns, validate_fit_preconditions,
 };
 use crate::nonlinear::separation::verify_no_separation;
-use crate::shared::error::CommonError;
 use crate::shared::inference;
+use crate::shared::normal::StandardNormal;
 use faer::Mat;
-use statrs::distribution::Normal;
 
 /// [`LogitEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 pub(super) fn fit_logit(
@@ -99,10 +98,7 @@ pub(super) fn fit_logit(
     let cov_params_std = cov_params_for_type(&cov_type, &hessian_std, scores.as_ref(), n, k)?;
     let cov_params = destandardize_cov_params(&cov_params_std, &scale);
 
-    // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを
-    // 要求するstatrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
-    // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
-    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
+    let normal = StandardNormal;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let mut std_errors = vec![0.0; k];

@@ -312,7 +312,8 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
 
 **標準正規分布（z検定）**を採用する。MLEの漸近理論`θ̂ ~ N(θ, Σ)`に基づき、
 `z = θ̂ⱼ / se(θ̂ⱼ)`、p値は標準正規分布の両側確率、信頼区間は標準正規分布の臨界値を使う
-（`statrs::distribution::Normal`）。OLSは「`cov_type`に関わらずt分布で統一」という方針だが、
+（p値の`sf`は`shared::normal::StandardNormal`（`libm::erfc`、相対誤差`1e-14`）、臨界値は`statrs`の`inverse_cdf`。
+`statrs`の`Normal::cdf`・`sf`は相対誤差が最大約`1e-10`あるので、`Φ`・`sf`には使わない）。OLSは「`cov_type`に関わらずt分布で統一」という方針だが、
 MLEベースの非線形モデルは漸近理論が正規分布に基づいており、OLSの`n-k`に相当する自然な
 自由度が存在しないためt分布統一方針は踏襲しない（statsmodels/R glmともにz検定が標準
 であることとも一致）。

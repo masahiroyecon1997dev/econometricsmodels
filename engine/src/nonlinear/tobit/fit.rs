@@ -15,9 +15,9 @@ use crate::nonlinear::common::{
     validate_cluster_cov_type, validate_mle_options, validate_sufficient_observations,
 };
 use crate::shared::inference;
+use crate::shared::normal::StandardNormal;
 use crate::shared::wald::wald_chi2_test;
 use faer::Mat;
-use statrs::distribution::Normal;
 
 /// [`TobitEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 pub(super) fn fit_tobit(
@@ -98,7 +98,7 @@ pub(super) fn fit_tobit(
     // `tobit.rs`の`TobitEstimator::fit`のdocコメント「標準化空間」「σのSE」節参照）。
     let cov_params = scaling.destandardize_cov_params(&cov_params_std, sigma);
 
-    let normal = Normal::standard();
+    let normal = StandardNormal;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let mut std_errors = vec![0.0; k + 1];

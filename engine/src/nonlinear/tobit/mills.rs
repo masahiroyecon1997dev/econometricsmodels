@@ -13,9 +13,10 @@ const MILLS_CONTINUED_FRACTION_THRESHOLD: f64 = 3.0;
 /// 連分数展開の段数（`a>=MILLS_CONTINUED_FRACTION_THRESHOLD`で倍精度に十分収束する）。
 const MILLS_CONTINUED_FRACTION_DEPTH: u32 = 60;
 
-/// `Φ(x)-1/2`（`x>=0`）を絶対誤差`≈5e-16`以下で計算する。`statrs`の`Normal::cdf`は絶対誤差が
-/// 約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）あり、`W=Φ(zb)-Φ(za)`で割る量では限界効果の
-/// 標準誤差に`100`倍程度に増幅されて現れる（`k=20`で相対`1e-8`）ため使わない。
+/// `Φ(x)-1/2`（`x>=0`）を絶対誤差`≈5e-16`以下で計算する。`W=Φ(zb)-Φ(za)`で割る量は
+/// `Φ`の誤差が`100`倍程度に増幅されて限界効果の標準誤差に現れる（`statrs`の`Normal::cdf`
+/// （絶対誤差約`1.4e-11`）では`k=20`で相対`1e-8`ずれた。今の`Φ`は`libm::erfc`）ため、
+/// `W`の裾の相対精度を保てるこの級数・連分数を使う。
 /// `x<MILLS_CONTINUED_FRACTION_THRESHOLD`では`normal_cdf_minus_half_series`、それ以上では
 /// `1/2-φ(x)/λ(x)`（`λ`は連分数、`Φ(x)`が1に近いので絶対誤差で足りる）。
 fn normal_cdf_minus_half(normal: &Normal, x: f64) -> f64 {
@@ -299,8 +300,8 @@ mod tests {
         );
     }
 
-    /// `statrs`の`Normal::cdf`（絶対誤差約`1.4e-11`）に代わる`normal_cdf_minus_half`・
-    /// `normal_survival`の精度。参照は`scipy.special`（`0.5·erf(x/√2)`・`ndtr(-a)`）。
+    /// `normal_cdf_minus_half`・`normal_survival`の精度（`statrs`の`Normal::cdf`は絶対誤差が
+    /// 約`1.4e-11`で、これらはそれより正確）。参照は`scipy.special`（`0.5·erf(x/√2)`・`ndtr(-a)`）。
     /// `Φ(-8)≈6.2e-16`のような裾でも相対`1e-13`、`1/2`近傍も絶対`1e-16`級で一致する。
     #[test]
     fn normal_cdf_minus_half_and_survival_match_scipy_to_machine_precision() {

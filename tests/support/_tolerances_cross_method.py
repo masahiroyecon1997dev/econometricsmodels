@@ -14,6 +14,11 @@ CROSS_METHOD_TOLERANCES: dict[str, dict[str, float]] = {
     # 有効数字が5桁以下に劣化すると上限が5e-5以上になり、検出できる。
     # 整形は値を丸めるだけで0近傍の扱いは変わらないため、絶対誤差のフロアは置かない。
     "results_repr": {"rtol": 5.5e-6, "atol": 0.0},
+    # z検定の両側p値（Logit・Probit・Tobit・IV/FE-IVのGMM）を、`scipy.stats.norm.sf`から
+    # 再計算した値と比べる。標準正規分布の生存関数は`libm::erfc`で、相対誤差は約1e-14
+    # （`statrs`の`Normal::sf`は約1e-10で、この許容誤差では検出される）。実測の最大は3e-15。
+    # 裾のp値も相対比較にするため絶対誤差のフロアは置かない。
+    "stat_dist_normal_p_value": {"rtol": 1e-12, "atol": 0.0},
     # ほぼ共線な傾き（`eps = 1e-5, 1e-6, 1e-7`。列を揃えた条件数は約2.8e5〜2.8e7で、受け入れる
     # 上限5e7の内側）の全体Wald統計量を、有理数の厳密値と比べる。OLS・WLS・IV・FE・FE-IVの
     # 全`cov_type`（classical・hc0〜hc3・cluster）の実測の最大相対差は2.6e-9（IVの`eps = 1e-7`）。

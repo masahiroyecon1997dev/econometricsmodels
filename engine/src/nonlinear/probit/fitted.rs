@@ -9,8 +9,8 @@ use crate::nonlinear::common::{
     column_medians, marginal_effects_from_w_s, pred_table, predict_from_link, predict_new_data,
 };
 use crate::shared::error::CommonError;
+use crate::shared::normal::normal_cdf;
 use faer::Mat;
-use statrs::distribution::{ContinuousCDF, Normal};
 
 /// Probitの推定結果のうち、予測・的中表・限界効果に必要な最小の状態（入力データ・係数・係数の分散共分散行列）。
 ///
@@ -133,8 +133,7 @@ impl ProbitFitted {
     ///
     /// 新規データでの予測（out-of-sample）は`predict_new_data`。
     pub fn predict(&self) -> Vec<f64> {
-        let normal = Normal::standard();
-        predict_from_link(self.input.x(), &self.params, |z| normal.cdf(z))
+        predict_from_link(self.input.x(), &self.params, normal_cdf)
     }
 
     /// 新規データ（out-of-sample、`new_x_columns`）に対する予測確率
@@ -144,12 +143,11 @@ impl ProbitFitted {
     /// `new_x_columns`の本数・順序の契約、パニック条件は
     /// `nonlinear::common::predict_new_data`のdocコメント参照。
     pub fn predict_new_data(&self, new_x_columns: &[Vec<f64>]) -> Vec<f64> {
-        let normal = Normal::standard();
         predict_new_data(
             &self.params,
             self.input.has_intercept(),
             new_x_columns,
-            |z| normal.cdf(z),
+            normal_cdf,
         )
     }
 

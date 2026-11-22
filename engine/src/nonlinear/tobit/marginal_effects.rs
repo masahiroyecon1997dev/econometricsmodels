@@ -3,8 +3,8 @@
 
 use super::target::{MarginalEffectsTarget, target_w_and_s};
 use crate::nonlinear::common::{MarginalEffects, MleError, validate_confidence_level};
-use crate::shared::error::CommonError;
 use crate::shared::inference;
+use crate::shared::normal::StandardNormal;
 use faer::Mat;
 use statrs::distribution::Normal;
 
@@ -119,11 +119,7 @@ pub(super) fn marginal_effects_from_tobit_w_s(
         })
         .collect();
 
-    // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを要求する
-    // statrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
-    // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`marginal_effects_from_w_s`
-    // と同じ扱い）。
-    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
+    let normal = StandardNormal;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let k_constant = usize::from(has_intercept);

@@ -167,7 +167,7 @@
 //!
 //! **検定分布はz（標準正規）**（`docs/spec/iv-spec.md`3.2節で確定済み、2-step efficient GMMの
 //! 漸近正規性が根拠）。`engine::shared::inference`の分布非依存関数（`critical_value`/
-//! `compute_inference_stat`）を`statrs::distribution::Normal`で使う（`two_sls.rs`が
+//! `compute_inference_stat`）を`shared::normal::StandardNormal`で使う（`two_sls.rs`が
 //! `StudentsT`で使うのと同じ関数で、分布に依存しない設計方針に沿っている）。
 //!
 //! **F統計量は常にロバストWald検定（χ²、`df_model`で割らない生の二次形式）**

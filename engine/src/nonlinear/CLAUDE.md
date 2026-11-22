@@ -103,6 +103,8 @@
   - **LP定式化の注意**: 目的関数を`Σ‖z‖`などで正規化すると`n`で縮み、和の閾値は`n`で雑音が積もる。単位長の行にそろえ、解の最大マージンを絶対閾値と比べる。分離観測の個数を数える定式化（`s_i≤1`）は`n=1e5`で12〜18秒と超線形に遅く不採用。
   - **実測・限界**: `docs/spec/logit-spec.md`3.2節・4章。再現データは`benchmark/nonlinear/datasets.py`の`quasi_complete_separation`・`complete_separation`と`tests/support/_helpers.py`の`small_sample_separation_dataset`・`strongly_collinear_binary_dataset`。
 
+- **標準正規分布の`Φ`・生存関数は`statrs`の`Normal::cdf`・`sf`を使わず、`shared::normal`の`normal_cdf`・`normal_sf`・`StandardNormal`を使う**: `statrs`の`erfc`は相対誤差が最大約`1e-10`（`z=-0.75`付近）で、Probit・Tobitの尤度・標準誤差・予測と、z検定のp値（Logit・Probit・Tobit・GMM）に`1e-10`の誤差が乗っていた（Probitのcluster標準誤差が厳密値と`6e-11〜1e-10`ずれた。同じ`Φ`の値を入れた厳密計算とは`2.5e-14`で、共分散の組み立ては正確）。`libm::erfc`は約`1e-14`で10〜25%速い（`z∈[-8,8]`の`φ+Φ`が34.6ns対43.2ns）。`clamped_pdf_cdf`が`Φ`を`normal_cdf`で返し、`inference`の関数には`StandardNormal`を渡す。密度`φ`（`3e-16`）・`inverse_cdf`（`2e-16`）は`statrs`のままでよい。テストで「独立に再計算した`Φ`」と比べるときも`statrs`の`cdf`を参照にしない（`1e-12`の比較が合わない）。**新しい手法でz検定のp値や`Φ`を使うときも同じ`shared::normal`を通すこと**。回帰ガード: `shared/normal.rs`のテスト（130桁の10進演算の参照値）。大標本の時間は変わらない（Probit・Tobit n=1,000,000で差が測定のばらつき内）。
+
 ## fit中のメモリ（ピークRSS）
 
 - **Python側のピークRSSは、確保そのものをなくす変更と、mmapされる大きい行列の解放だけが効く**（列を早くdropしても、glibcの動的なmmap閾値のため、8MB級の列の解放ではRSSが下がらない。詳細は`engine/src/linear/CLAUDE.md`）。変更は`resource.getrusage`で変更前後のピークRSSを測って確かめる。ライブヒープ（`engine/examples/memory_probe.rs`）は見積りで、RSSの代わりにはならない。
@@ -122,7 +124,7 @@
 
 - **`W=Φ(zb)-Φ(za)`で割る量は、`W`を作らずに`Pa=φ(za)/W`・`Pb=φ(zb)/W`を直接計算する**（`tobit/mills.rs`の`truncation_pdf_ratios`）。既存3 targetは`W`で割らないので、`clamped_pdf_cdf`（`|z|>8.13`でクランプ）で足りたが、`E[y|uncensored]`は`μ`が境界から遠い観測（実データ`many_regressors`で`za=72`）で`W→0`になり、素の`φ/W`は`0/0`になる。片側は逆ミルズ比（`a>=3`は連分数）、両側は上側/下側の裾を比（`p·q/(q-r·p)`）で、中央は正の項の和で組む。
 - **`w`の偏微分を`1+ρ2-ρ1²`の教科書形のまま書かない**: `z²`と`z·Pa`の引き算で絶対誤差が`ε·z³`になり、`z=72`で`s_sigma`の相対誤差が`5e-9`、限界効果の標準誤差が`1e-8`ずれた（Rクロスチェックの許容`1e-8`で露呈）。`A=Pa-za`・`B=zb+Pb`を引き算せず直接計算し、`w=1-Pa·A-Pb·B+2·Pa·Pb`等で評価する。回帰ガード: `uncensored_terms_and_w_match_high_precision_reference_in_extreme_tails`（80桁の10進演算の参照値）。
-- **`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）**: `W`の逆数にかかる量では標準誤差に約100倍で増幅されるため、この経路では`normal_cdf_minus_half`・`normal_survival`（テイラー級数＋連分数。`a→3`の級数側で`λ`の相対誤差は最大`4e-13`、`gap=λ-a`は最大`4e-12`）を使う。`normal_cdf_minus_half`は`x>=0`が前提。既存の`ExpectedObserved`等は`W`で割らないので`statrs`のままでよい。
+- **`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）**: `W`の逆数にかかる量では標準誤差に約100倍で増幅されるため、この経路では`normal_cdf_minus_half`・`normal_survival`（テイラー級数＋連分数。`a→3`の級数側で`λ`の相対誤差は最大`4e-13`、`gap=λ-a`は最大`4e-12`）を使う。`normal_cdf_minus_half`は`x>=0`が前提。既存の`ExpectedObserved`等は`W`で割らないので`clamped_pdf_cdf`の`Φ`（`libm::erfc`）のままでよい。
 - **非打ち切り区間が`σ̂`に比べて極端に狭い（`δ=(upper-lower)/σ̂<1e-2`）場合は`MleError::UncensoredIntervalTooNarrow`（`ComputationError`）にする**（`ensure_uncensored_interval_resolvable`、`predict`・`predict_new_data`・`marginal_effects`の入口で1回検査）。`q-r·p`・`W`が桁落ちし、`w`の相対誤差は約`12ε/δ⁴`、デルタ法の`s`はさらに悪い（`δ=1e-3`で`s`が`w`の1%超、`δ≲1e-4`で`w`が100%超）。**級数への内部切り替えはしない**（近似へ黙って変わる）。`ValidationError`でもない（`σ̂`で決まる条件で入力が不正なのではない）。閾値の根拠は`MIN_UNCENSORED_WIDTH_RATIO`のdocコメントと`docs/spec/tobit-spec.md`3.5節。`predict`系は`Result`を返す。`docs/spec/tobit-spec.md`3.5節「限界」・4章。
 
 ## Tobitのproperty-basedテスト（`tobit/fit/tests/proptests.rs`・`tobit/target.rs`・`tobit/problem.rs`の`mod proptests`）

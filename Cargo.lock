@@ -687,6 +687,7 @@ dependencies = [
  "argmin",
  "argmin-math",
  "faer",
+ "libm",
  "proptest",
  "statrs",
  "thiserror 2.0.21",

@@ -2,8 +2,6 @@
 //!
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く（`basic`・`reference`・`cov_type`・`validation`・`proptests`等）。
 
-use statrs::distribution::Normal;
-
 use super::GmmEstimator;
 use super::GmmType;
 use super::hansen_j::hansen_j_test;
@@ -18,6 +16,7 @@ use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_ste
 use crate::shared::gmm_weight::validate_weight_type;
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
+use crate::shared::normal::StandardNormal;
 use crate::shared::wald::wald_chi2_test;
 
 /// [`GmmEstimator::fit`]・[`GmmEstimator::fit_with_first_stage_residuals`]の本体。契約（エラー条件を
@@ -146,7 +145,7 @@ pub(super) fn fit_gmm(
     // `cov_type=Hac`のラグ数は`weight_type=Hac`のラグ数より優先する。
     let hac_lags_used = cov_hac_lags.or(hac_lags_used);
 
-    let normal_dist = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
+    let normal_dist = StandardNormal;
     let InferenceTable {
         std_errors,
         test_stats,

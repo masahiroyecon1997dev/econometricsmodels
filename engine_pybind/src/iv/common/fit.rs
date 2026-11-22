@@ -26,9 +26,10 @@ use super::result::IVResult;
 /// overid_statistic()`/`overid_p_value()`（`cov_type`に追従する。classicalはSargan、それ以外は
 /// ロバストなHansen J）、`estimator="gmm"`では
 /// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`（Hansen J検定）から構築する。
-/// `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="2sls"`では`TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()`、`estimator="gmm"`では
-/// 常に`None`（`GmmEstimator`は実装しない、モジュールdocコメント参照）。
+/// `wu_hausman_statistic`/`wu_hausman_p_value`は`TwoSlsEstimator::wu_hausman_statistic()`/
+/// `wu_hausman_p_value()`・`GmmEstimator::wu_hausman_statistic()`/`wu_hausman_p_value()`から構築する
+/// （`cov_type`に従い、GMMの重みには依らない。同じデータ・`cov_type`なら両推定量で同じ値）。GMMには
+/// 上の第一段階の残差を渡して、補助回帰のために第一段階を二重に回さない。
 ///
 /// # Errors
 /// - `confidence_level`が`(0, 1)`の範囲外、または`gmm_type="iterated"`で`gmm_max_iter`・`gmm_tol`が
@@ -142,12 +143,20 @@ fn fit_frame(
     };
 
     if let Some(gmm) = plan.gmm {
-        let estimator = GmmEstimator::fit(
+        // GMMのWu-Hausmanが使う第一段階の残差は、`first_stage`の`OLSResult`が持つ残差を借りる
+        // （`IVResult`が保持するものと別に複製しない。補助回帰が終わると借用は終わる）。
+        let first_stage_residuals: Vec<&[f64]> = shared
+            .first_stage
+            .iter()
+            .map(|(_, result)| result.residuals.as_slice())
+            .collect();
+        let estimator = GmmEstimator::fit_with_first_stage_residuals(
             input,
             gmm.gmm_type,
             options.raise_on_non_convergence.unwrap_or(true),
             cov_type,
             options.confidence_level,
+            &first_stage_residuals,
         )
         .map_err(iv_error_to_pyerr)?;
 
@@ -162,10 +171,10 @@ fn fit_frame(
             overid_statistic: estimator.hansen_j_statistic(),
             overid_p_value: estimator.hansen_j_p_value(),
             overid_df: estimator.hansen_j_df(),
-            wu_hausman_statistic: None,
-            wu_hausman_p_value: None,
-            wu_hausman_df_num: None,
-            wu_hausman_df_denom: None,
+            wu_hausman_statistic: estimator.wu_hausman_statistic(),
+            wu_hausman_p_value: estimator.wu_hausman_p_value(),
+            wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),
+            wu_hausman_df_denom: estimator.wu_hausman_df().map(|(_, denom)| denom),
         };
         return Ok(build_result(&estimator, shared, specific));
     }

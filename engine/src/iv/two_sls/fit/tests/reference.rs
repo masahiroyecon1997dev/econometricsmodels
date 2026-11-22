@@ -8,6 +8,9 @@ use crate::linear::ols::CovType;
 use crate::linear::ols::OlsEstimator;
 use crate::linear::ols::OlsInput;
 use faer::Mat;
+use faer::Side;
+use faer::prelude::Solve;
+use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 
 #[allow(clippy::type_complexity)]
 fn nontrivial_x_exog_fitted_estimator() -> (
@@ -319,5 +322,178 @@ fn fit_computes_weak_instrument_f_statistic_matching_manual_nested_f_test() {
         "got={}, expected={}",
         got[0].1,
         expected_f
+    );
+}
+
+// ── Wu-Hausman内生性検定 ──────────────────────────────────────────
+
+/// Wu-Hausman統計量が、`TwoSlsEstimator::fit`（SUT）とは独立に手計算した拡張回帰
+/// （`y ~ const + x1 + x_endog + 第一段階残差`、`nontrivial_x_exog_columns()`を使う）の
+/// オラクルと数値一致することを確認する。`cov_type=Classical`なので、単一の追加列
+/// （`k_endog=1`）に対するWald F検定は`t²`（該当係数のt統計量の2乗）と代数的に一致する
+/// （`ols/wald.rs`の`wald_test_last_columns_matches_squared_t_statistic_for_single_column`と
+/// 同じ恒等式）。
+#[test]
+fn fit_computes_wu_hausman_statistic_matching_manual_augmented_regression() {
+    let (x1, x_endog, z1, z2, y) = nontrivial_x_exog_columns();
+    let n = x1.len();
+    let estimator =
+        TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Classical, 0.95).unwrap();
+
+    // 第一段階（オラクル側で独立に計算）: x_endog ~ const + x1 + z1 + z2。
+    let y_endog = Mat::from_fn(n, 1, |i, _| x_endog[i]);
+    let x_first_stage = Mat::from_fn(n, 4, |i, j| match j {
+        0 => 1.0,
+        1 => x1[i],
+        2 => z1[i],
+        _ => z2[i],
+    });
+    let beta_first_stage = manual_ols_beta(&x_first_stage, &y_endog);
+    let v_hat = &y_endog - &x_first_stage * &beta_first_stage;
+
+    // 拡張回帰: y ~ const + x1 + x_endog + v_hat（k=4）。
+    let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+    let x_aug = Mat::from_fn(n, 4, |i, j| match j {
+        0 => 1.0,
+        1 => x1[i],
+        2 => x_endog[i],
+        _ => *v_hat.get(i, 0),
+    });
+    let beta_aug = manual_ols_beta(&x_aug, &y_mat);
+    let e_aug = &y_mat - &x_aug * &beta_aug;
+    let se_last = manual_classical_std_errors(&x_aug, &e_aug, n, 4)[3];
+    let t_last = *beta_aug.get(3, 0) / se_last;
+    let expected_stat = t_last.powi(2);
+    let df_inference = (n - 4) as f64;
+    let f_dist = FisherSnedecor::new(1.0, df_inference).unwrap();
+    let expected_p_value = 1.0 - f_dist.cdf(expected_stat);
+
+    let stat = estimator.wu_hausman_statistic().unwrap();
+    let p_value = estimator.wu_hausman_p_value().unwrap();
+    assert!(
+        (stat - expected_stat).abs() < 1e-8,
+        "stat={stat}, expected={expected_stat}"
+    );
+    assert!(
+        (p_value - expected_p_value).abs() < 1e-8,
+        "p_value={p_value}, expected={expected_p_value}"
+    );
+}
+
+/// 内生変数が2個（`k_endog=2`）の場合の配線（各内生変数の第一段階残差を正しい順序で
+/// 拡張回帰の末尾に追加し、その2列に対するジョイントWald検定を行う）を確認する
+/// （`k_endog=1`のテストだけでは、複数残差列の組み立て・2変数同時検定の数式一般化の
+/// どちらも検証できない）。`TwoSlsEstimator::fit`とは
+/// 独立に、`OlsEstimator::wald_test_last_columns`と同型の2×2 Wald検定を手計算した
+/// オラクルと数値照合する。
+#[test]
+fn fit_computes_wu_hausman_statistic_with_two_endogenous_variables() {
+    let n = 12;
+    let x1: Vec<f64> = (0..n).map(|i| (i as f64) + 1.0).collect();
+    let z1: Vec<f64> = (0..n).map(|i| ((i as f64) * 0.9).sin() * 5.0).collect();
+    let z2: Vec<f64> = (0..n).map(|i| ((i as f64) * 1.3).cos() * 4.0).collect();
+    let z3: Vec<f64> = (0..n)
+        .map(|i| ((i as f64) * 0.6).sin() * 3.0 + (i as f64))
+        .collect();
+    let endog1: Vec<f64> = (0..n)
+        .map(|i| z1[i] + 0.5 * z2[i] + 0.2 * x1[i] + if i % 2 == 0 { 0.3 } else { -0.3 })
+        .collect();
+    let endog2: Vec<f64> = (0..n)
+        .map(|i| 0.7 * z2[i] + z3[i] - 0.3 * x1[i] + if i % 3 == 0 { 0.4 } else { -0.2 })
+        .collect();
+    // 末尾に加える小さな正弦波ノイズは、`[const, x1, endog1, endog2]`（4列）の張る
+    // 部分空間には（n=12点に対して一般には）厳密には収まらない摂動で、これが無いと
+    // 構造式の残差がほぼゼロになり（`endog1`/`endog2`が`z1..z3`/`x1`の完全な線形結合の
+    // ため）v_hatの係数が数値誤差だけで決まる不安定な推定になってしまう
+    // （この摂動を入れないと実際にこの不安定さが出る）。
+    let y: Vec<f64> = (0..n)
+        .map(|i| {
+            1.0 + 2.0 * endog1[i] - 1.5 * endog2[i] + 0.5 * x1[i] + ((i as f64) * 0.83).sin() * 0.6
+        })
+        .collect();
+
+    let input = IvInput::from_columns(
+        &y,
+        std::slice::from_ref(&x1),
+        vec!["x1".to_string()],
+        &[endog1.clone(), endog2.clone()],
+        vec!["endog1".to_string(), "endog2".to_string()],
+        &[z1.clone(), z2.clone(), z3.clone()],
+        vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+        true,
+        "y".to_string(),
+    )
+    .unwrap();
+    let first_stages = first_stage_estimators(&input, &CovType::Classical, 0.95);
+    let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+    // 第一段階（オラクル側で独立に計算）: endog[j] ~ const + x1 + z1 + z2 + z3。
+    let x_first_stage = Mat::from_fn(n, 5, |i, j| match j {
+        0 => 1.0,
+        1 => x1[i],
+        2 => z1[i],
+        3 => z2[i],
+        _ => z3[i],
+    });
+    let y_endog1 = Mat::from_fn(n, 1, |i, _| endog1[i]);
+    let y_endog2 = Mat::from_fn(n, 1, |i, _| endog2[i]);
+    let v_hat1 = &y_endog1 - &x_first_stage * manual_ols_beta(&x_first_stage, &y_endog1);
+    let v_hat2 = &y_endog2 - &x_first_stage * manual_ols_beta(&x_first_stage, &y_endog2);
+    // 手計算した第一段階残差が、SUTが使う`compute_first_stage`の結果と一致することを確認する
+    // （これが食い違うと以降のオラクル自体が無意味になるため、先に固定しておく）。
+    for (name, fs) in &first_stages {
+        let manual = if name == "endog1" { &v_hat1 } else { &v_hat2 };
+        for i in 0..n {
+            assert!(
+                (*fs.residuals().get(i, 0) - *manual.get(i, 0)).abs() < 1e-8,
+                "first-stage residual mismatch for {name} at row {i}"
+            );
+        }
+    }
+
+    // 拡張回帰: y ~ const + x1 + endog1 + endog2 + v_hat1 + v_hat2（k=6、q=2）。
+    let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+    let k = 6;
+    let x_aug = Mat::from_fn(n, k, |i, j| match j {
+        0 => 1.0,
+        1 => x1[i],
+        2 => endog1[i],
+        3 => endog2[i],
+        4 => *v_hat1.get(i, 0),
+        _ => *v_hat2.get(i, 0),
+    });
+    let beta_aug = manual_ols_beta(&x_aug, &y_mat);
+    let e_aug = &y_mat - &x_aug * &beta_aug;
+    let ssr: f64 = (0..n).map(|i| (*e_aug.get(i, 0)).powi(2)).sum();
+    let df_inference = n - k;
+    let sigma2 = ssr / (df_inference as f64);
+    let xtx_inv = manual_xtx_inverse(&x_aug, k);
+
+    // 末尾2列（v_hat1, v_hat2の係数）に対するジョイントWald検定を手計算する
+    // （`F = (β_slopes' Σ⁻¹ β_slopes) / q`、`Σ`は該当2列に対応する`cov_params`の
+    // 2×2部分行列。`shared/wald.rs`の`wald_f_test`と同じ式を、SUTとは独立に計算する）。
+    let q = 2;
+    let beta_slopes = Mat::from_fn(q, 1, |i, _| *beta_aug.get(i + 4, 0));
+    let cov_slopes = Mat::from_fn(q, q, |i, j| sigma2 * (*xtx_inv.get(i + 4, j + 4)));
+    let cov_slopes_inv = cov_slopes
+        .llt(Side::Lower)
+        .unwrap()
+        .solve(Mat::<f64>::identity(q, q));
+    let wald = (beta_slopes.transpose() * &cov_slopes_inv * &beta_slopes)
+        .get(0, 0)
+        .to_owned();
+    let expected_stat = wald / (q as f64);
+    let f_dist = FisherSnedecor::new(q as f64, df_inference as f64).unwrap();
+    let expected_p_value = 1.0 - f_dist.cdf(expected_stat);
+
+    let stat = estimator.wu_hausman_statistic().unwrap();
+    let p_value = estimator.wu_hausman_p_value().unwrap();
+    assert!(
+        (stat - expected_stat).abs() < 1e-6,
+        "stat={stat}, expected={expected_stat}"
+    );
+    assert!(
+        (p_value - expected_p_value).abs() < 1e-6,
+        "p_value={p_value}, expected={expected_p_value}"
     );
 }

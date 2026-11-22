@@ -302,7 +302,7 @@ def test_wu_hausman_is_none_when_only_the_augmented_regression_is_exact(
 ):
     """`y = 1 + 2*endog + 3*v`（`v`は第一段階残差）は、構造残差も第一段階も完全フィット
     ではないが、Wu-Hausmanの拡張回帰だけが厳密に成り立つ。`fit()`は成功し、
-    2SLSの検定統計量は無意味な値ではなく`None`になる。"""
+    検定統計量は無意味な値ではなく`None`になる。"""
     first_stage = (
         IV(
             df.with_columns(y=pl.col("x") + pl.col("noise")),

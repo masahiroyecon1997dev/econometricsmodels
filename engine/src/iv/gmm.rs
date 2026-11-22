@@ -105,6 +105,14 @@
 //! で検証、点推定の`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`と
 //! 対になる不変条件チェック）。
 //!
+//! ## Wu-Hausman内生性検定
+//!
+//! 2SLSと同じ回帰ベースの検定（`common/wu_hausman.rs`。`docs/spec/iv-spec.md`3.6節）。第一段階の残差を構造式
+//! `y ~ x_exog + x_endog`に足した最小二乗で、足した残差の係数を`cov_type`の共分散でWald検定する。GMMの点推定・
+//! 重み行列を使わないので、同じデータ・`cov_type`なら2SLSと同じ値になる（重みを使う内生性検定は事後診断の
+//! `c_stat()`）。点推定・共分散・Waldの後に回し、構造式のエラーを先に返す。補助回帰だけの問題（設計行列が特異・
+//! 観測数やクラスター数の不足・完全フィット・HC2/HC3のレバレッジ1）は`None`にして`fit()`は失敗させない。
+//!
 //! ## 標準誤差・検定統計量（`cov_type`対応）
 //!
 //! 2SLS・GMMともに`classical`/`hc0`〜`hc3`/`cluster`/`hac`でSEを計算できる。2SLS側は
@@ -190,7 +198,8 @@
 //!    （`GmmType`×`weight_type`の組み合わせ全体）を引きずるのは過剰設計になる。
 //! 3. 2SLSは第一段階回帰（`compute_first_stage_with`、`OlsEstimator`委譲）を
 //!    弱操作変数診断等の内部で使っている。GMMは第一段階回帰を必要とせず
-//!    （モーメント条件`Z'(y-Xβ)=0`を直接使うため）、この点でも構造が異なる。
+//!    （モーメント条件`Z'(y-Xβ)=0`を直接使うため）、この点でも構造が異なる（点推定に使わない第一段階を
+//!    回すのはWu-Hausman検定だけで、`fit`は構造式の推定の後で回すか、呼び出し側が回した残差を受け取る）。
 //!
 //! 以上より、**点推定の数値的一致は確認しつつ、推定量の`fit()`は独立のまま維持する**。
 //! 共分散・検定の中立な計算（外積の和・カーネル和・クラスターの蓄積と小標本補正・Waldの形・
@@ -272,6 +281,13 @@ pub struct GmmEstimator {
     hansen_j_p_value: Option<f64>,
     /// Hansen J検定のχ²分布の自由度`len(instruments) - len(x_endog)`。丁度識別なら`None`。
     hansen_j_df: Option<usize>,
+    /// Wu-Hausman内生性検定（回帰ベース、`docs/spec/iv-spec.md`3.6節）の統計量。`cov_type`に従い、
+    /// GMMの重みには依らない（同じデータ・`cov_type`なら2SLSと同じ値）。`x_endog=[]`、または補助回帰が
+    /// 想定内の理由で推定不能（設計行列が特異・観測数不足等、`common/wu_hausman.rs`）なら`None`。
+    wu_hausman_statistic: Option<f64>,
+    wu_hausman_p_value: Option<f64>,
+    /// Wu-Hausman検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic`と同じ条件で`None`。
+    wu_hausman_df: Option<(usize, usize)>,
 }
 
 impl GmmEstimator {
@@ -328,6 +344,37 @@ impl GmmEstimator {
             raise_on_non_convergence,
             cov_type,
             confidence_level,
+            None,
+        )
+    }
+
+    /// [`Self::fit`]と同じ推定を、呼び出し側が回した第一段階の残差でWu-Hausman検定を行う形で実行する
+    /// （`engine_pybind`は第一段階を診断のために先に回しているので、残差を渡して二重に回さない）。
+    ///
+    /// `first_stage_residuals`は内生変数ごとの第一段階のOLS残差`v̂`（`x_endog`の順、各`n`個）で、
+    /// 各列は`x_endog[j] ~ x_exog + instruments`（`input`が定数項を持つなら定数項つき）を最小二乗で当てはめた
+    /// 残差でなければならない（[`compute_first_stage_with`](crate::iv::common::compute_first_stage_with)の
+    /// 結果の`residuals()`。OLSの残差は`cov_type`に依らない）。検査するのは列の数と長さだけで、
+    /// 別の残差を渡すとWu-Hausmanの値が黙って誤る。点推定・重み・共分散には影響しない。
+    /// 内生変数の数・長さが合わない残差は`INTERNAL_ERROR`で拒否する。借用で受け取り、複製しない。
+    ///
+    /// # Errors
+    /// [`Self::fit`]と同じ。
+    pub fn fit_with_first_stage_residuals(
+        input: IvInput,
+        gmm_type: GmmType,
+        raise_on_non_convergence: bool,
+        cov_type: CovType,
+        confidence_level: f64,
+        first_stage_residuals: &[&[f64]],
+    ) -> Result<Self, IvError> {
+        fit::fit_gmm(
+            input,
+            gmm_type,
+            raise_on_non_convergence,
+            cov_type,
+            confidence_level,
+            Some(first_stage_residuals),
         )
     }
 
@@ -369,6 +416,23 @@ impl GmmEstimator {
     /// Hansen J検定のp値。`hansen_j_statistic()`と同じ条件で`None`。
     pub fn hansen_j_p_value(&self) -> Option<f64> {
         self.hansen_j_p_value
+    }
+
+    /// Wu-Hausman内生性検定（回帰ベース）の統計量。`cov_type`に従い、GMMの重みには依らない
+    /// （同じデータ・`cov_type`なら`TwoSlsEstimator::wu_hausman_statistic`と同じ値）。
+    /// `x_endog=[]`、または補助回帰が想定内の理由で推定不能なら`None`（`fit()`は失敗しない）。
+    pub fn wu_hausman_statistic(&self) -> Option<f64> {
+        self.wu_hausman_statistic
+    }
+
+    /// Wu-Hausman内生性検定のp値。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_p_value(&self) -> Option<f64> {
+        self.wu_hausman_p_value
+    }
+
+    /// Wu-Hausman内生性検定のF分布の自由度`(分子, 分母)`。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_df(&self) -> Option<(usize, usize)> {
+        self.wu_hausman_df
     }
 
     /// `wald_statistic()`の自由度（χ²）。傾き係数が無くNaNのときは`None`。分母の自由度は無い。

@@ -162,7 +162,7 @@ class IVResults:
       `weak_instrument_f_df_num`, `weak_instrument_f_df_denom`.
     - Overidentification (Sargan, or Hansen's J that follows `cov_type`
       for 2SLS): `overid_statistic`, `overid_p_value`, `overid_df`.
-    - Endogeneity (2SLS only): `wu_hausman_statistic`,
+    - Endogeneity (Wu-Hausman, both estimators): `wu_hausman_statistic`,
       `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`.
     - Fit: `r_squared`, `adj_r_squared`.
     - Estimator used: `estimator`, `gmm_type`, `gmm_weight_type`,
@@ -177,8 +177,9 @@ class IVResults:
       `cragg_donald()`, `kleibergen_paap()`, `effective_f()`.
     - Exogeneity of endogenous variables and orthogonality of excluded
       instruments, for either estimator (method, computed when called):
-      `c_stat()`. For GMM, which has no Wu-Hausman test, use it for the
-      exogeneity of endogenous variables.
+      `c_stat()`. Unlike the Wu-Hausman test, which follows `cov_type`,
+      it uses the GMM weight, and it can test a subset of the endogenous
+      variables or of the instruments.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -483,8 +484,11 @@ class IVResults:
         residuals, so the augmented regression fits perfectly; or
         there are too few observations or clusters for the extra
         residual columns) — this does not affect the validity of the
-        other results. **Always `None` for
-        `estimator="gmm"`** (not implemented for GMM).
+        other results. It is computed with both estimators and uses
+        neither the second-stage coefficients nor the GMM weight, so for
+        the same data and `cov_type` the value is the same with
+        `estimator="2sls"` and `estimator="gmm"`; use `c_stat()` for a
+        test that uses the GMM weight.
         """
         return self._raw.wu_hausman_statistic
 
@@ -492,23 +496,20 @@ class IVResults:
     def wu_hausman_df_num(self) -> int | None:
         """Numerator degrees of freedom of the Wu-Hausman F test (the
         number of endogenous variables). `None` under the same conditions
-        as `wu_hausman_statistic`, and always `None` for
-        `estimator="gmm"` (not implemented for GMM)."""
+        as `wu_hausman_statistic`."""
         return self._raw.wu_hausman_df_num
 
     @property
     def wu_hausman_df_denom(self) -> int | None:
         """Denominator degrees of freedom of the Wu-Hausman F test.
-        `None` under the same conditions as `wu_hausman_statistic`, and
-        always `None` for `estimator="gmm"` (not implemented for GMM)."""
+        `None` under the same conditions as `wu_hausman_statistic`."""
         return self._raw.wu_hausman_df_denom
 
     @property
     def wu_hausman_p_value(self) -> float | None:
         """P-value of the Wu-Hausman test.
 
-        `None` under the same conditions as `wu_hausman_statistic`, and
-        always `None` for `estimator="gmm"` (not implemented for GMM).
+        `None` under the same conditions as `wu_hausman_statistic`.
         """
         return self._raw.wu_hausman_p_value
 

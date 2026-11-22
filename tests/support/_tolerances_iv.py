@@ -149,5 +149,9 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         # GMM（2段階）のHansen J（`estimator="gmm"`）の一致。同じ`S`・同じ再推定を通る別の
         # 入口どうしの比較で、実測の最大相対差は4.1e-15。
         "rtol_overid_same_weight": 1e-10,
+        # Wu-Hausman検定（`cov_type`に従い、第二段階の推定量・GMMの重みに依らない補助回帰）の
+        # 2SLSとGMMの一致。同じ補助回帰を通る別の入口どうしの比較で、実測の最大相対差は0
+        # （同じ入力・同じ計算）。
+        "rtol_wu_hausman_across_estimators": 1e-10,
     },
 }

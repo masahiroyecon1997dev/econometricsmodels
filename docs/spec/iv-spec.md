@@ -97,7 +97,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **2SLSはGMMの特殊ケース**（`gmm_weight_type="classical"`、`gmm_type="one_step"`）として点推定は
   数値的に一致するが、実装（`TwoSlsEstimator`/`GmmEstimator`）は意図的に独立させている
   （`TwoSlsEstimator`は`cov_type`対応の推論統計量一式・Sargan・Wu-Hausmanを持つのに対し
-  `GmmEstimator`はそれらを持たないため、委譲すると過剰設計になる）。
+  `GmmEstimator`は点推定の重みと過剰識別検定（Hansen J）が別物のため、委譲すると過剰設計になる。
+  Wu-Hausmanの補助回帰だけは2SLSと共有する、3.6節）。
 - 欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。
 
 ## 2. 結果構造体
@@ -507,7 +508,15 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
   仕様のため。
 - `fit()`の結果本体に含める（内生変数全体のジョイント検定のみ、変数ごとのサブセット検定は
   v1スコープ外）。
-- **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
+- **`estimator="gmm"`でも計算する。同じデータ・`cov_type`なら2SLSと同じ値になる（検定分布もF分布のまま。GMMの係数のz・χ²とは違い、補助回帰の最小二乗のWald検定）**: 補助回帰は第一段階残差を
+  足した最小二乗で、第二段階の係数もGMMの重みも使わないため。そのため`cov_type`に従い、`gmm_weight_type`
+  には従わない（重みを使う内生性検定は事後診断の`c_stat()`、3.9節）。計算は`iv/common/wu_hausman.rs`
+  で2SLSと共有する（`fit`・`failure`の扱いも同じ）。GMMの`fit`は、点推定・共分散・Waldの後（構造式のエラーを
+  先に返す）に補助回帰を回す。第一段階の残差は、`GmmEstimator::fit`が自分で第一段階を回して求めるか、
+  `fit_with_first_stage_residuals`で呼び出し側から借用で受け取る（`engine_pybind`は診断のために第一段階を先
+  に回しているので、その`OLSResult`の残差を借りて、二重に回さず複製もしない。渡す残差は第一段階のOLS残差で、
+  engineは列の数と長さしか検査しない）。点推定に使った行列と重みは補助回帰の前に手放し、第一段階の
+  残差と同時に持つ時間を短くする。`fit`が回す側（`engine`の単体利用）の第一段階の失敗は`FirstStageFailed`。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
   `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は3つ:
   (1) 拡張回帰が完全フィット（`y`が第二段階の説明変数と第一段階残差で丸め誤差の範囲で
@@ -686,7 +695,6 @@ error.rs`）:
 ## 5. 未実装・未対応
 
 - Montiel Olea-Pflueger有効Fの複数内生変数への拡張（3.4.3節）
-- Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）
 
 ### 3.4.4 弱操作変数診断のPython公開
@@ -696,7 +704,7 @@ error.rs`）:
 `IvInput`を作り直して`compute_*`を呼ぶ（2SLSでもGMMでも同じ）。判断:
 
 - **事後診断のメソッドにする**: `alpha`・`cov_type`の選択が利用者のものになる、`fit()`の計算量（IVの性能比較）を増やさない、
-  C統計量（`source_data`を保持して2回GMMを推定し直す）と同じ仕組みを共有できる。Sargan・Wu-Hausman・部分Fは従来どおり`fit()`のプロパティ。
+  C統計量（`source_data`を保持して2回GMMを推定し直す）と同じ仕組みを共有できる。Sargan・Wu-Hausman（2SLSとGMM）・部分Fは従来どおり`fit()`のプロパティ。
 - **`cov_type`は`fit()`のものを使う**（メソッドの引数にしない）。`cluster`・`hac_lags`・`hac_time`の列も`fit()`のオプションから。
   CDは等分散で`cov_type`に依存しない。
 - **戻り値は診断ごとの専用のfrozen dataclass**（`DiagnosticResult`を継承しない。CDと有効Fにp値が無いため）。臨界値は

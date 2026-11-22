@@ -29,10 +29,12 @@ Note:
       （`run_gmm()`のモジュールdocコメント参照）。
     - `hansen_j_statistic`/`hansen_j_p_value`はGMMの過剰識別検定（Hansen J）。
       2SLSのSargan検定に対応し、丁度識別のときは`None`。
-    - `wu_hausman_statistic`相当のキーはフィクスチャに存在しない
-      （`GmmEstimator`はWu-Hausman検定を実装しないため、`IVResults.
-      wu_hausman_statistic`は`estimator="gmm"`で常に`None`。`test_iv_api.py`の
-      `test_wu_hausman_is_none_for_gmm`で構造確認済み）。
+    - `iv_gmm.json`に`wu_hausman_statistic`相当のキーは無い（`wooldridge_regression`は
+      linearmodelsの2SLSの結果（`IVResults`）にだけあり、`IVGMMResults`には無い）。
+      Wu-Hausmanは第二段階の係数もGMMの重みも使わず`cov_type`に従うので、同じデータ・
+      `cov_type`のGMMの値は2SLSの`iv.json`（`wooldridge_regression`）と一致するはずで、
+      `test_wu_hausman_matches_the_2sls_reference`がGMM（重みは`robust`）の値をそれと
+      照合する。
     - `include_intercept=False`（切片なし）は`iv_gmm.json`の`synthetic.no_intercept`
       （`NO_INTERCEPT_SCENARIOS`の4シナリオ、`gmm_weight_type="classical"`固定×
       classical/hc0/hc1/hac）と比較する（`test_no_intercept_matches_linearmodels`）。
@@ -112,6 +114,8 @@ FIXTURE_PATH = (
     / "iv_gmm.json"
 )
 
+IV_2SLS_FIXTURE_PATH = FIXTURE_PATH.with_name("iv.json")
+
 RTOL = TOLERANCES["iv_gmm_reference"]["rtol"]
 ATOL = TOLERANCES["iv_gmm_reference"]["atol"]
 
@@ -122,6 +126,11 @@ ATOL = TOLERANCES["iv_gmm_reference"]["atol"]
 @pytest.fixture(scope="module")
 def fixtures() -> dict:
     return load_fixtures_with_cov(FIXTURE_PATH)
+
+
+@pytest.fixture(scope="module")
+def two_sls_fixtures() -> dict:
+    return load_fixtures_with_cov(IV_2SLS_FIXTURE_PATH)
 
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
@@ -185,8 +194,6 @@ def _check_result(
                 rtol=RTOL,
             )
 
-    assert res.wu_hausman_statistic is None, f"{label}/wu_hausman_statistic"
-
     _assert_dict_close(
         res.weak_instrument_f_statistics,
         ref["weak_instrument_f_independent"],
@@ -222,6 +229,81 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
         res,
         fixtures["synthetic"][scenario]["classical"][cov_type],
         f"{scenario}/classical/{cov_type}",
+    )
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_wu_hausman_matches_the_2sls_reference(
+    two_sls_fixtures, scenario, cov_type
+):
+    """GMMのWu-Hausmanを、2SLSの`wooldridge_regression`（`iv.json`）と照合する。
+    補助回帰は第二段階の係数・GMMの重みに依らず`cov_type`に従うので、重みを
+    `robust`にしても同じデータ・`cov_type`の2SLSの参照値と一致する。参照値が`None`
+    （df1: 補助回帰が飽和し残差自由度が0）のときは比較しない。
+    """
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="robust",
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=scenario_x_exog(scenario),
+        x_endog=["endog1"],
+        instruments=scenario_instruments(scenario),
+        options=options,
+    ).fit()
+
+    ref = two_sls_fixtures["synthetic"][scenario][cov_type]
+    label = f"{scenario}/{cov_type}"
+    if ref["wu_hausman_statistic"] is None:
+        return
+    _assert_close(
+        res.wu_hausman_statistic,
+        ref["wu_hausman_statistic"],
+        f"{label}/wu_hausman_statistic",
+    )
+    assert_p_value_close(
+        res.wu_hausman_p_value,
+        ref["wu_hausman_p_value"],
+        f"{label}/wu_hausman_p_value",
+        rtol=RTOL,
+    )
+
+
+def test_wu_hausman_with_cluster_matches_the_2sls_reference(two_sls_fixtures):
+    """クラスター共分散（`G - 1`自由度のF）のWu-Hausmanも、2SLSの参照値と一致する。"""
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="robust",
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    ref = two_sls_fixtures["synthetic"]["baseline"]["cluster"]
+    _assert_close(
+        res.wu_hausman_statistic,
+        ref["wu_hausman_statistic"],
+        "cluster/wu_hausman_statistic",
+    )
+    assert_p_value_close(
+        res.wu_hausman_p_value,
+        ref["wu_hausman_p_value"],
+        "cluster/wu_hausman_p_value",
+        rtol=RTOL,
     )
 
 

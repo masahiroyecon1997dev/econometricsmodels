@@ -450,7 +450,7 @@ def test_multi_endog_overid_df_and_wu_hausman_df(scenario, estimator):
     """複数内生変数（`k_endog=2`）の過剰識別検定とWu-Hausman検定の自由度。
     過剰識別検定の自由度は`len(instruments) - len(x_endog)`（丁度識別の
     `just_identified`は`None`）、Wu-Hausman検定はF(n_endog, df_resid - n_endog)
-    （2SLSのみ、GMMは`None`）。内生変数1本の小データだけを見る
+    （2SLS・GMMとも同じ）。内生変数1本の小データだけを見る
     `tests/cross_method/test_test_dfs.py`では`df_num=2`・`overid_df=l-2`が
     検証されない。
     """
@@ -468,18 +468,14 @@ def test_multi_endog_overid_df_and_wu_hausman_df(scenario, estimator):
         assert res.overid_df is None
     else:
         assert res.overid_df == len(instruments) - n_endog
-    if estimator == "2sls":
-        assert res.wu_hausman_df_num == n_endog
-        assert res.wu_hausman_df_denom == res.df_resid - n_endog
-    else:
-        assert res.wu_hausman_df_num is None
-        assert res.wu_hausman_df_denom is None
+    assert res.wu_hausman_df_num == n_endog
+    assert res.wu_hausman_df_denom == res.df_resid - n_endog
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 def test_three_endog_overid_df_and_wu_hausman_df(estimator):
     """内生変数3本・操作変数4本（過剰識別度1）の自由度。過剰識別検定は
-    `len(instruments) - len(x_endog) = 1`、Wu-Hausman検定（2SLSのみ）は
+    `len(instruments) - len(x_endog) = 1`、Wu-Hausman検定（2SLS・GMMとも）は
     F(3, df_resid - 3)。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
@@ -491,23 +487,112 @@ def test_three_endog_overid_df_and_wu_hausman_df(estimator):
     )
 
     assert res.overid_df == 1
-    if estimator == "2sls":
-        assert res.wu_hausman_df_num == 3
-        assert res.wu_hausman_df_denom == res.df_resid - 3
-    else:
-        assert res.wu_hausman_df_num is None
-        assert res.wu_hausman_df_denom is None
+    assert res.wu_hausman_df_num == 3
+    assert res.wu_hausman_df_denom == res.df_resid - 3
 
 
-def test_wu_hausman_is_none_for_gmm(iv_dataset):
-    """`wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="gmm"`では常に
-    `None`（`GmmEstimator`はWu-Hausman検定を実装しない、
-    `engine_pybind/src/iv/CLAUDE.md`参照）。
+def _wu_hausman_cases(iv_dataset):
+    """`cov_type`ごとの（データ・2SLSのオプション・GMMのオプションの一覧）。
+    GMMの重み・方式は`cov_type`と独立で、組み合わせても値が変わらない。
     """
-    options = IVOptions(estimator="gmm")
-    res = our_fit(iv_dataset, options=options)
+    clustered = with_cluster_groups(iv_dataset, 10)
+    cov_options = {
+        "classical": (iv_dataset, {}),
+        "hc0": (iv_dataset, {}),
+        "hc1": (iv_dataset, {}),
+        "hc2": (iv_dataset, {}),
+        "hc3": (iv_dataset, {}),
+        "cluster": (clustered, {"cluster": "cluster_group"}),
+        "hac": (iv_dataset, hac_time_for("hac")),
+    }
+    gmm_options = [
+        {"gmm_type": "one_step"},
+        {"gmm_type": "two_step", "gmm_weight_type": "classical"},
+        {"gmm_type": "two_step", "gmm_weight_type": "robust"},
+        {
+            "gmm_type": "iterated",
+            "gmm_weight_type": "robust",
+            "gmm_max_iter": 10,
+        },
+    ]
+    return [
+        (cov_type, df, extra, gmm)
+        for cov_type, (df, extra) in cov_options.items()
+        for gmm in gmm_options
+    ]
+
+
+def test_wu_hausman_of_gmm_equals_2sls_of_the_same_cov_type(iv_dataset):
+    """`estimator="gmm"`のWu-Hausmanは、同じデータ・`cov_type`の2SLSと同じ値になる
+    （補助回帰は第一段階残差を足した最小二乗で、第二段階の係数もGMMの重みも使わない）。
+    GMMの方式（1段階・2段階・反復）・重みの種類によらない。
+    """
+    tolerance = TOLERANCES["iv_api"]["rtol_wu_hausman_across_estimators"]
+    for cov_type, df, extra, gmm_kwargs in _wu_hausman_cases(iv_dataset):
+        label = f"{cov_type}/{gmm_kwargs}"
+        two_sls = our_fit(df, options=IVOptions(cov_type=cov_type, **extra))
+        gmm = our_fit(
+            df,
+            options=IVOptions(
+                estimator="gmm", cov_type=cov_type, **extra, **gmm_kwargs
+            ),
+        )
+        _assert_valid_test_statistic(
+            gmm.wu_hausman_statistic, gmm.wu_hausman_p_value
+        )
+        assert_close(
+            gmm.wu_hausman_statistic,
+            two_sls.wu_hausman_statistic,
+            f"{label}/wu_hausman_statistic",
+            rtol=tolerance,
+            atol=0.0,
+        )
+        assert_close(
+            gmm.wu_hausman_p_value,
+            two_sls.wu_hausman_p_value,
+            f"{label}/wu_hausman_p_value",
+            rtol=tolerance,
+            atol=0.0,
+        )
+        assert gmm.wu_hausman_df_num == two_sls.wu_hausman_df_num, label
+        assert gmm.wu_hausman_df_denom == two_sls.wu_hausman_df_denom, label
+
+
+def test_wu_hausman_of_gmm_follows_cov_type_not_the_weight(iv_dataset):
+    """`cov_type`を変えると値が変わり、`gmm_weight_type`を変えても変わらない
+    （GMMの重みは使わない）。
+    """
+    classical = our_fit(iv_dataset, options=IVOptions(estimator="gmm"))
+    hc1 = our_fit(
+        iv_dataset, options=IVOptions(estimator="gmm", cov_type="hc1")
+    )
+    robust_weight = our_fit(
+        iv_dataset,
+        options=IVOptions(estimator="gmm", gmm_weight_type="robust"),
+    )
+    assert classical.wu_hausman_statistic != hc1.wu_hausman_statistic
+    assert classical.wu_hausman_statistic == robust_weight.wu_hausman_statistic
+    assert classical.wu_hausman_p_value == robust_weight.wu_hausman_p_value
+
+
+def test_gmm_wu_hausman_degrades_to_none_with_few_clusters(
+    iv_dataset,
+):
+    """GMMでも、`cov_type="cluster"`で構造方程式は`G > q`でも補助回帰は
+    `G <= q_aug`（`q_aug = q + k_endog`）になる入力では、`wu_hausman_*`だけが`None`
+    になり、`fit()`は成功する（2SLSと同じ。`G=3`、`q=2`、`q_aug=3`）。
+    """
+    df = with_cluster_groups(iv_dataset, 3)
+    options = IVOptions(
+        estimator="gmm", cov_type="cluster", cluster="cluster_group"
+    )
+    res = our_fit(df, instruments=["z1"], options=options)
+
     assert res.wu_hausman_statistic is None
     assert res.wu_hausman_p_value is None
+    assert res.wu_hausman_df_num is None
+    assert res.wu_hausman_df_denom is None
+    assert res.params["endog1"] is not None
 
 
 def test_wu_hausman_is_not_none_for_2sls(iv_dataset):

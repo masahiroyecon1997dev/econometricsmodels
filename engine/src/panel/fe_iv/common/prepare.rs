@@ -10,8 +10,8 @@ use faer::Mat;
 
 use super::input::FeIvInput;
 use crate::panel::common::{
-    ColumnRole, PanelError, absorbed_parameters, ensure_no_singleton_groups,
-    ensure_no_zero_variance_columns, validate_confidence_level,
+    ColumnRole, PanelError, absorbed_parameters, ensure_no_constant_columns,
+    ensure_no_singleton_groups, ensure_no_zero_variance_columns, validate_confidence_level,
 };
 use crate::panel::fe::{FeAbsorption, FeEffects, FeInput, WithinColumns, within_transform_columns};
 use crate::shared::error::{CommonError, ErrorInfo};
@@ -105,14 +105,7 @@ pub(in crate::panel::fe_iv) fn prepare_within<'a>(
         ),
     ];
     for (role, names, columns) in roles {
-        for (name, column) in names.iter().zip(columns) {
-            if has_no_variation(column) {
-                return Err(PanelError::RegressorConstant {
-                    role,
-                    column: name.clone(),
-                });
-            }
-        }
+        ensure_no_constant_columns(role, names, columns)?;
     }
     if has_no_variation(input.y()) {
         return Err(CommonError::OutcomeConstant.into());

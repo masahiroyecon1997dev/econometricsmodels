@@ -71,7 +71,7 @@
 - リリース済みの`code`は変えない・再利用しない。追加は後方互換。削除・意味変更・`params`キーの削除や型変更は破壊的変更。`params`キーの追加は非破壊。
 - `params`のキー名は利用者が見る名前に揃える（`argument`/`option`/`column`/`value`/`n_obs`/`n_params`/`n_clusters`/`n_slopes`/`row`）。内部記号（`g`/`q`/`l`/`t`）は使わない。行番号は0始まり（メッセージに`(0-based)`と明記する）。
 - 文字列値は、利用者のデータ（列名・値）、APIの識別子（引数名・オプション値・列挙値）、式（`condition`）に限る。英語の句は入れない（`INTERNAL_ERROR`の`detail`だけ例外）。
-- `params`は5個まで（`stage`とその補助値は数えない）。超えそうなら`code`を分ける。
+- `params`は6個まで（`stage`とその補助値は数えない）。超えそうなら`code`を分ける。6個にしているのは、`COLUMN_NON_FINITE`が列の特定（`column`・`argument`・`data_argument`）に最初の位置と値（`row`・`value`）と全件数（`count`）を持つため。
 - しきい値は計算済みの値で渡し、条件で文が増減するテンプレートは作らない。
 
 ## 5. 入れ子の回帰（`stage`）
@@ -110,6 +110,16 @@
 - `max_iter`は全手法で`i64`のままengineに渡し、負値もengineが範囲違反にする（pybindで`usize`へ変換しない）。GMMの`gmm_max_iter`もMLEの`max_iter`と同じ。
 - Tobitの打ち切り境界は`TobitInput::from_columns`ではなく、`fit()`が上の順で呼ぶ`validate_censoring_bounds`で検査する（`from_columns`は次元だけ）。
 - 行数が足りない入力と範囲外の`confidence_level`が重なる場合の順序は、`tests/cross_method/test_validation_order.py`の`test_confidence_level_is_reported_before_the_observation_count`が全手法で固定する。故障の組合せ（`FAULTS`の段階7）が`confidence_level` → `max_iter` → `tol` → `gmm_max_iter` → `gmm_tol` → `y`の値・境界の順位を固定する。
+
+## 5.3 同じ`code`の該当列を全て報告する（`REGRESSOR_CONSTANT`・`REGRESSOR_NO_WITHIN_VARIATION`）
+
+利用者が1回の実行で全ての該当列を直せるよう、`params["columns"]`（`ColumnList`）に**同じ`role`の該当列を全て**、引数の並び順で入れる。
+
+- 対象は、1つの`code`の中で、入力の列を走査するだけで分かる検査（数値ルーチンを使わない）に限る。別の`code`を1つのエラーにまとめない。列名のリストの長さは利用者が渡した列数で有界なので、件数の上限も`count`も持たない（`count`は`len(columns)`と同じ）。
+- 役割（`role`）は`role`が1つの文字列なので横断しない。FE-IVは`x_exog`・`x_endog`・`instruments`の順に調べ、最初に該当列がある役割だけを報告する（直すと次の役割が出る）。`REGRESSOR_CONSTANT`（生の値が定数）は`REGRESSOR_NO_WITHIN_VARIATION`（固定効果を除いた後）より先に、重い変換の前に調べる。
+- `column`（単数）は`columns`に置き換えた（リリース前の破壊的変更）。同じ事実を2つのキーに持たせない。
+- 位置を持つ検査は列を横断しない。`COLUMN_NON_FINITE`・`COLUMN_CONTAINS_NULL`は1列のままで、その列の全件数`count`を持つ。`COLUMN_NON_FINITE`の`row`・`value`は最初の1件で、`count`が1より大きいとき「最初の」と文面で示す。列を横断すると、`row`がどの列の位置か分からなくなり、`argument`も1つに決まらない。
+- 全列の走査は、すでに終わっているwithin変換と同じ次数の費用で、失敗経路でだけ走る。
 
 ## 6. 実装
 

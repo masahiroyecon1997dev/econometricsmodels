@@ -307,10 +307,8 @@ pub(super) fn validate_no_singleton_groups_multi_way(input: &FeInput) -> Result<
 /// 列が発生しうるため不可）。
 ///
 /// # Errors
-/// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`（該当列名を含む）。
-/// `noise`は変換が残す誤差の相対的な大きさ（[`WithinOutput::noise`]）。
-/// 複数列が該当する場合は`x_names`の順で最初に見つかった列のみを報告する（OLSの特異性
-/// 検出等、他のバリデーションも「最初の1件を報告」で統一している）。
+/// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`。該当する列を全て
+/// `x_names`の順に報告する。`noise`は変換が残す誤差の相対的な大きさ（[`WithinOutput::noise`]）。
 pub(super) fn validate_no_zero_variance_regressors(
     input: &FeInput,
     x_transformed: &[Vec<f64>],

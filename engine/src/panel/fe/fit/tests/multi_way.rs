@@ -752,7 +752,7 @@ fn a_regressor_absorbed_by_the_third_effect_is_rejected() {
         data.fit(FeCovType::Classical).unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "x1".to_string()
+            columns: vec!["x1".to_string()]
         }
     );
 }

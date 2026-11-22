@@ -17,7 +17,7 @@ use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     ColumnRole, PanelCov, PanelCovInput, PanelError, PanelStructure, absorbed_parameters,
-    overall_f_test, panel_cov_params, validate_confidence_level,
+    ensure_no_constant_columns, overall_f_test, panel_cov_params, validate_confidence_level,
 };
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
@@ -62,14 +62,7 @@ pub(super) fn fit_fe(
 
     // 生の値が全ての行で同じ列は、固定効果を除く前に分かる。固定効果を除いた後で分散がなくなる
     // 場合（時間不変の列など）とは、エラーを分ける。重い変換や自由度の検証より先に調べる。
-    for (name, col) in input.x_names().iter().zip(input.x()) {
-        if has_no_variation(col) {
-            return Err(PanelError::RegressorConstant {
-                role: ColumnRole::X,
-                column: name.clone(),
-            });
-        }
-    }
+    ensure_no_constant_columns(ColumnRole::X, input.x_names(), input.x())?;
     if has_no_variation(input.y()) {
         return Err(CommonError::OutcomeConstant.into());
     }

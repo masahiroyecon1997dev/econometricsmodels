@@ -158,7 +158,7 @@ fn fe_estimator_fit_propagates_zero_variance_error() {
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "female".to_string(),
+            columns: vec!["female".to_string()],
         }
     );
 }
@@ -278,7 +278,7 @@ fn fe_estimator_fit_two_way_propagates_zero_variance_error() {
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
             role: ColumnRole::X,
-            column: "year_dummy".to_string(),
+            columns: vec!["year_dummy".to_string()],
         }
     );
 }
@@ -891,7 +891,7 @@ fn fe_estimator_fit_rejects_a_regressor_with_the_same_value_in_every_row() {
         result.unwrap_err(),
         PanelError::RegressorConstant {
             role: ColumnRole::X,
-            column: "x".to_string()
+            columns: vec!["x".to_string()]
         }
     );
 }

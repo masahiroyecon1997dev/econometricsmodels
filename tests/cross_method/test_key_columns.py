@@ -432,6 +432,28 @@ def test_non_finite_float_key_raises_for_every_method(
             fit(df)
 
 
+def test_non_finite_float_key_error_counts_every_bad_value(frame):
+    """キー列でも`count`は列内の全件数で、`row`・`value`は最初の1件（行2のNaN）。"""
+    bad = (
+        frame["cluster"]
+        .cast(pl.Float64)
+        .scatter([2, 5, 7], [float("nan"), float("inf"), float("-inf")])
+    )
+    df = frame.with_columns(bad.alias("cluster"))
+
+    for method, fit in CLUSTER_FITS.items():
+        with raises_error(
+            ErrorCode.COLUMN_NON_FINITE,
+            column="cluster",
+            value=pytest.approx(float("nan"), nan_ok=True),
+            row=2,
+            count=3,
+            argument=_key_argument("cluster", method),
+            data_argument="data",
+        ):
+            fit(df)
+
+
 # 許可するdtype（役割ごと）× 役割 × 手法。nullの検査はdtypeに依らない共通の経路だが、
 # dtypeごとの抽出（文字列・カテゴリ・日時などの因子化）の前に確実に走ることを、
 # 許可するdtypeすべてで確かめる。手法ごとに別のテストにして、落ちた手法が分かるようにする。

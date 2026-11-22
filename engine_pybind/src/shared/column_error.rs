@@ -129,11 +129,12 @@ pub(crate) enum ColumnExtractionError {
         source: SourceNames,
     },
 
-    /// NaN・無限大を含む。`row`は最初に見つかった行（0始まり）。
+    /// NaN・無限大を含む。`row`・`value`は最初に見つかった1件（行は0始まり）、`count`はその列の全件数。
     NonFinite {
         name: String,
         row: usize,
         value: f64,
+        count: usize,
         source: SourceNames,
     },
 
@@ -207,11 +208,18 @@ impl ColumnExtractionError {
         }
     }
 
-    pub(crate) fn non_finite(name: &str, row: usize, value: f64, source: ColumnSource<'_>) -> Self {
+    pub(crate) fn non_finite(
+        name: &str,
+        row: usize,
+        value: f64,
+        count: usize,
+        source: ColumnSource<'_>,
+    ) -> Self {
         Self::NonFinite {
             name: name.to_string(),
             row,
             value,
+            count,
             source: source.into(),
         }
     }
@@ -291,10 +299,12 @@ impl ErrorInfo for ColumnExtractionError {
                 name,
                 row,
                 value,
+                count,
                 source,
             } => located(ErrorCode::ColumnNonFinite, name, source)
                 .param("row", *row)
-                .param("value", *value),
+                .param("value", *value)
+                .param("count", *count),
             Self::UnsupportedDtype {
                 name,
                 dtype,
@@ -412,16 +422,16 @@ mod tests {
 
     #[test]
     fn non_finite_has_value_and_zero_based_row() {
-        let err = ColumnExtractionError::non_finite("wage", 4, f64::NAN, SRC);
+        let err = ColumnExtractionError::non_finite("wage", 4, f64::NAN, 3, SRC);
         assert_eq!(err.report().code(), ErrorCode::ColumnNonFinite);
         assert_eq!(
             full(&err),
-            "Column 'wage' (given as x) in data contains a non-finite value (NaN) at row 4 \
-             (0-based), and non-finite values are never dropped automatically. Remove or replace \
-             the NaN and infinite values first."
+            "Column 'wage' (given as x) in data contains 3 non-finite value(s), the first being NaN \
+             at row 4 (0-based), and non-finite values are never dropped automatically. Remove \
+             or replace the NaN and infinite values first."
         );
-        let negative = ColumnExtractionError::non_finite("wage", 0, f64::NEG_INFINITY, SRC);
-        assert!(full(&negative).contains("(-inf) at row 0"));
+        let negative = ColumnExtractionError::non_finite("wage", 0, f64::NEG_INFINITY, 1, SRC);
+        assert!(full(&negative).contains("-inf at row 0"));
     }
 
     #[test]
@@ -497,7 +507,7 @@ mod tests {
             ColumnExtractionError::not_found("c", SRC),
             ColumnExtractionError::contains_null("c", 1, SRC),
             ColumnExtractionError::blank_label("c", 1, 0, SRC),
-            ColumnExtractionError::non_finite("c", 0, 1.0, SRC),
+            ColumnExtractionError::non_finite("c", 0, 1.0, 1, SRC),
             ColumnExtractionError::unsupported_dtype("c", "String".into(), ColumnRole::Time, SRC),
             ColumnExtractionError::time_zone_not_supported("c", "UTC", SRC),
             ColumnExtractionError::tied_values("c", 0, 1, SRC),

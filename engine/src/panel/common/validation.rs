@@ -5,7 +5,9 @@ use super::index::EffectNames;
 use super::transform::WithinTransform;
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::validation::{column_is_zero_variance, column_is_zero_variance_with_noise};
+use crate::shared::validation::{
+    column_is_zero_variance, column_is_zero_variance_with_noise, has_no_variation,
+};
 
 /// `confidence_level`が`(0, 1)`の範囲外（NaNを含む）ならエラーにする。FE・RE・FEIVの`fit`が、他のどの
 /// 検査より先（`tol`・`max_iter`より前。吸収する次元の解決は除く）に呼ぶ。回帰の失敗を包む[`PanelError::WithinRegressionFailed`]で返す
@@ -132,8 +134,8 @@ pub(crate) fn ensure_no_singleton_groups(
 /// 事態を避けるため`debug_assert_eq!`ではなく`assert_eq!`で守る）。
 ///
 /// # Errors
-/// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`（該当列名を含む）。
-/// 複数列が該当する場合は`names`の順で最初に見つかった列のみを報告する。`noise`は変換が残す誤差の相対的な大きさ
+/// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`。該当する列を全て
+/// `names`の順に`columns`へ入れる（全列を走査する）。`noise`は変換が残す誤差の相対的な大きさ
 /// （閉形式の変換は0。`column_is_zero_variance_with_noise`参照）。
 pub(crate) fn ensure_no_zero_variance_columns(
     role: ColumnRole,
@@ -152,6 +154,7 @@ pub(crate) fn ensure_no_zero_variance_columns(
         transformed.len(),
         "transformed must have the same number of columns as the original columns"
     );
+    let mut columns = Vec::new();
     for ((name, original), transformed) in names.iter().zip(originals).zip(transformed) {
         assert_eq!(
             original.len(),
@@ -159,18 +162,50 @@ pub(crate) fn ensure_no_zero_variance_columns(
             "transformed column '{name}' must have the same length as the original column"
         );
         if column_is_zero_variance_with_noise(original, transformed, noise) {
-            return Err(PanelError::ZeroVarianceAfterDemeaning {
-                role,
-                column: name.clone(),
-            });
+            columns.push(name.clone());
         }
     }
-    Ok(())
+    if columns.is_empty() {
+        Ok(())
+    } else {
+        Err(PanelError::ZeroVarianceAfterDemeaning { role, columns })
+    }
+}
+
+/// `columns`に、生の値が全ての行で（丸め誤差を除いて）同じ列がないことを検証する（`has_no_variation`）。
+/// 固定効果を除く前に調べるので、within変換後の分散ゼロ（[`ensure_no_zero_variance_columns`]）とは
+/// 別のエラーにする。`names`と`columns`は同じ列数（`engine`内の内部契約のため`assert_eq!`で守る）。
+///
+/// # Errors
+/// 該当する列があれば`PanelError::RegressorConstant`。該当する列を全て`names`の順に`columns`へ入れる。
+pub(crate) fn ensure_no_constant_columns<C: AsRef<[f64]>>(
+    role: ColumnRole,
+    names: &[String],
+    columns: &[C],
+) -> Result<(), PanelError> {
+    assert_eq!(
+        names.len(),
+        columns.len(),
+        "names must have one entry per column"
+    );
+    let constant: Vec<String> = names
+        .iter()
+        .zip(columns)
+        .filter(|(_, column)| has_no_variation(column.as_ref()))
+        .map(|(name, _)| name.clone())
+        .collect();
+    if constant.is_empty() {
+        Ok(())
+    } else {
+        Err(PanelError::RegressorConstant {
+            role,
+            columns: constant,
+        })
+    }
 }
 
 /// `ids`（`entity`または`time`の列）で、観測順に最初に現れる観測数1のグループ
-/// （次元・列名・グループのID）。複数あれば最初の1つだけを返す（`validate_no_zero_variance_regressors`の
-/// 「最初の1件を報告」方針と統一）。観測数は`FeInput`の構築時に作ったコード
+/// （次元・列名・グループのID）。複数あれば最初の1つだけを返す。観測数は`FeInput`の構築時に作ったコード
 /// （`GroupCodes::counts`）をそのまま使う。
 fn first_singleton_group(
     dimension: PanelDimension,
@@ -432,6 +467,101 @@ mod tests {
             &originals,
             &transformed,
             0.0,
+        );
+    }
+
+    #[test]
+    fn ensure_no_zero_variance_columns_reports_every_offending_column_in_name_order() {
+        let names = ["a", "b", "c", "d"].map(String::from);
+        let originals = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![5.0, 5.0, 5.0],
+            vec![7.0, 8.0, 9.0],
+            vec![2.0, 2.0, 2.0],
+        ];
+        // 変換後の列。`b`と`d`だけが全行で同じ値になる。
+        let transformed = vec![
+            vec![-1.0, 0.0, 1.0],
+            vec![0.0, 0.0, 0.0],
+            vec![-1.0, 0.0, 1.0],
+            vec![0.0, 0.0, 0.0],
+        ];
+        assert_eq!(
+            ensure_no_zero_variance_columns(ColumnRole::X, &names, &originals, &transformed, 0.0),
+            Err(PanelError::ZeroVarianceAfterDemeaning {
+                role: ColumnRole::X,
+                columns: vec!["b".to_string(), "d".to_string()],
+            })
+        );
+        assert_eq!(
+            ensure_no_zero_variance_columns(
+                ColumnRole::X,
+                &names[..1],
+                &originals[..1],
+                &transformed[..1],
+                0.0
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn ensure_no_constant_columns_reports_every_constant_column_in_name_order() {
+        let names = ["a", "b", "c", "d"].map(String::from);
+        let columns = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![5.0, 5.0, 5.0],
+            vec![7.0, 8.0, 9.0],
+            vec![2.0, 2.0, 2.0],
+        ];
+        assert_eq!(
+            ensure_no_constant_columns(ColumnRole::XEndog, &names, &columns),
+            Err(PanelError::RegressorConstant {
+                role: ColumnRole::XEndog,
+                columns: vec!["b".to_string(), "d".to_string()],
+            })
+        );
+        assert_eq!(
+            ensure_no_constant_columns(ColumnRole::X, &names[..1], &columns[..1]),
+            Ok(())
+        );
+        assert_eq!(
+            ensure_no_constant_columns::<Vec<f64>>(ColumnRole::X, &[], &[]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "names must have one entry per column")]
+    fn ensure_no_constant_columns_panics_when_names_are_fewer_than_columns() {
+        let columns = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let _ = ensure_no_constant_columns(ColumnRole::X, &["x1".to_string()], &columns);
+    }
+
+    #[test]
+    #[should_panic(expected = "names must have one entry per column")]
+    fn ensure_no_constant_columns_panics_when_names_are_more_than_columns() {
+        let columns = vec![vec![1.0, 2.0, 3.0]];
+        let names = ["x1", "x2"].map(String::from);
+        let _ = ensure_no_constant_columns(ColumnRole::X, &names, &columns);
+    }
+
+    #[test]
+    fn ensure_no_zero_variance_columns_reports_all_columns_and_accepts_no_columns() {
+        let names = ["b", "a"].map(String::from);
+        let originals = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let transformed = vec![vec![0.0; 3], vec![0.0; 3]];
+        // 全列が該当するときは、渡した順（名前の昇順ではない）で全て返す。
+        assert_eq!(
+            ensure_no_zero_variance_columns(ColumnRole::X, &names, &originals, &transformed, 0.0),
+            Err(PanelError::ZeroVarianceAfterDemeaning {
+                role: ColumnRole::X,
+                columns: vec!["b".to_string(), "a".to_string()],
+            })
+        );
+        assert_eq!(
+            ensure_no_zero_variance_columns(ColumnRole::X, &[], &[], &[], 0.0),
+            Ok(())
         );
     }
 }

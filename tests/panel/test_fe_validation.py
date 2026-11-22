@@ -544,8 +544,48 @@ def test_regressor_with_the_same_value_in_every_row_raises(fe_dataset):
     """生の値が全て同じ説明変数は、固定効果を除く前に`REGRESSOR_CONSTANT`
     （固定効果を除いた後の分散ゼロ`REGRESSOR_NO_WITHIN_VARIATION`とは別）。"""
     df = fe_dataset.with_columns(x2=pl.lit(1.5))
-    with raises_error(ErrorCode.REGRESSOR_CONSTANT, role="x", column="x2"):
+    with raises_error(ErrorCode.REGRESSOR_CONSTANT, role="x", columns=["x2"]):
         our_fit(df)
+
+
+def test_every_constant_regressor_is_reported_in_the_order_of_x(fe_dataset):
+    """定数の説明変数が複数あれば、最初の1列で止めず`x`の並び順（名前順ではない）で全て報告する。"""
+    df = fe_dataset.with_columns(x1=pl.lit(1.5), x3=pl.lit(2.5))
+    with raises_error(
+        ErrorCode.REGRESSOR_CONSTANT, role="x", columns=["x3", "x1"]
+    ):
+        FE(df, y="y", x=["x3", "x2", "x1"], effects=["entity"]).fit()
+
+
+def test_every_regressor_constant_within_entities_is_reported(fe_dataset):
+    """固定効果を除くと一定の説明変数も、`x`の並び順で全て報告する。"""
+    level = pl.col("entity").rank("dense").cast(pl.Float64)
+    df = fe_dataset.with_columns(x1=level, x3=level**2)
+    with raises_error(
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
+        role="x",
+        columns=["x3", "x1"],
+    ):
+        FE(df, y="y", x=["x3", "x2", "x1"], effects=["entity"]).fit()
+
+
+def test_constant_regressors_exclude_those_that_only_lack_within_variation(
+    fe_dataset,
+):
+    """個体ごとに一定の列は生の値が定数ではないので、`REGRESSOR_CONSTANT`の列に入らない。"""
+    level = pl.col("entity").rank("dense").cast(pl.Float64)
+    df = fe_dataset.with_columns(x1=level, x3=pl.lit(2.5))
+    with raises_error(ErrorCode.REGRESSOR_CONSTANT, role="x", columns=["x3"]):
+        FE(df, y="y", x=["x1", "x2", "x3"], effects=["entity"]).fit()
+
+
+def test_every_regressor_can_be_reported_at_once(fe_dataset):
+    """全ての説明変数が該当するときは、全列を報告する。"""
+    df = fe_dataset.with_columns(x1=pl.lit(1.5), x2=pl.lit(2.5))
+    with raises_error(
+        ErrorCode.REGRESSOR_CONSTANT, role="x", columns=["x2", "x1"]
+    ):
+        FE(df, y="y", x=["x2", "x1"], effects=["entity"]).fit()
 
 
 def test_singleton_error_reports_how_many_rows_repeated_removal_would_drop():
@@ -575,7 +615,9 @@ def test_zero_variance_after_demeaning_raises():
     """
     df = pl.read_csv(DATA_DIR / "fe_zero_variance_regressor.csv")
     with raises_error(
-        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, role="x", column="x_invariant"
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
+        role="x",
+        columns=["x_invariant"],
     ):
         FE(df, y="y", x=["x1", "x2", "x_invariant"], effects=["entity"]).fit()
 

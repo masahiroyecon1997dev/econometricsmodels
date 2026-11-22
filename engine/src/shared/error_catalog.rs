@@ -7,7 +7,7 @@
 //! テンプレートの`{`・`}`は置換の記号なので、文中にそのまま書けない（エスケープは無い）。
 //!
 //! 新しいエラーを足すときは、[`ErrorCode`]・[`CATALOG`]に追加し（順序を一致させる）、`cargo test`のカタログ検査を通す。
-//! 文面の規則（引用符・用語・1文の`hint`・`params`は5個まで等）はテンプレートに対する検査（`tests`）で強制される。
+//! 文面の規則（引用符・用語・1文の`hint`・`params`は6個まで等）はテンプレートに対する検査（`tests`）で強制される。
 
 use std::fmt::Write as _;
 
@@ -891,8 +891,13 @@ pub static CATALOG: &[ErrorSpec] = &[
                 ty: ParamType::Float,
                 in_text: true,
             },
+            ParamSpec {
+                name: "count",
+                ty: ParamType::Int,
+                in_text: true,
+            },
         ],
-        message: r#"Column '{column}' (given as {argument}) in {data_argument} contains a non-finite value ({value}) at row {row} (0-based), and non-finite values are never dropped automatically."#,
+        message: r#"Column '{column}' (given as {argument}) in {data_argument} contains {count} non-finite value(s), the first being {value} at row {row} (0-based), and non-finite values are never dropped automatically."#,
         hint: Some(r#"Remove or replace the NaN and infinite values first."#),
         stage_allowed: false,
     },
@@ -2221,13 +2226,13 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
             ParamSpec {
-                name: "column",
-                ty: ParamType::Str,
+                name: "columns",
+                ty: ParamType::ColumnList,
                 in_text: true,
             },
         ],
-        message: r#"Column '{column}' of {role} has the same value in every row up to rounding, so it is collinear with the fixed effects."#,
-        hint: Some(r#"Remove the column from {role}."#),
+        message: r#"These columns of {role} have the same value in every row up to rounding, so they are collinear with the fixed effects: {columns}."#,
+        hint: Some(r#"Remove these columns from {role}."#),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -2240,13 +2245,13 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
             ParamSpec {
-                name: "column",
-                ty: ParamType::Str,
+                name: "columns",
+                ty: ParamType::ColumnList,
                 in_text: true,
             },
         ],
-        message: r#"Column '{column}' of {role} has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects."#,
-        hint: Some(r#"Remove the column from {role}."#),
+        message: r#"These columns of {role} have no variation left after the within transformation, because each is time-invariant or collinear with the fixed effects: {columns}."#,
+        hint: Some(r#"Remove these columns from {role}."#),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -2611,10 +2616,10 @@ mod tests {
                     ));
                 }
             }
-            // 5個までの目安は、文に出す`params`の数（`stage`とその補助値、文に出さない補助値は数えない）。
+            // 6個までの目安は、文に出す`params`の数（`stage`とその補助値、文に出さない補助値は数えない）。
             let counted = spec.params.iter().filter(|p| p.in_text).count();
-            if counted > 5 {
-                problems.push(format!("{code}: {counted} params exceed the limit of 5"));
+            if counted > 6 {
+                problems.push(format!("{code}: {counted} params exceed the limit of 6"));
             }
             let len = spec.message.len() + spec.hint.map_or(0, str::len);
             if len > MAX_TEXT_LEN {

@@ -17,7 +17,7 @@ use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::linear_algebra::{COLLINEARITY_TOLERANCE, independent_columns_in_order};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
-use crate::shared::wald::wald_f_test;
+use crate::shared::wald::{name_unit_leverage_cause, wald_f_test};
 
 /// ハウスマン補助回帰で`x̃_j`が識別できない列か（`x*_j - x̃_j`が全観測で一定か）。
 ///
@@ -42,24 +42,40 @@ fn hausman_aux_wald_f(
     k: usize,
     confidence_level: f64,
 ) -> Result<f64, LeastSquaresError> {
-    AuxiliaryFit::fit(aux_input, &cov_type, confidence_level, false)?
-        .wald_f_last_columns(&cov_type, k)
+    let aux = AuxiliaryFit::fit(aux_input, &cov_type, confidence_level, false)?;
+    aux.wald_f_last_columns(&cov_type, k)
+        .map_err(|err| match err {
+            // 共分散が特異な原因がレバレッジ1の行なら、その行を名指しする（補助回帰のHC2/HC3と同じ
+            // レバレッジ）。失敗したときだけ求める。
+            LeastSquaresError::Common(err) => {
+                LeastSquaresError::Common(name_unit_leverage_cause(err, || {
+                    Some(aux.design().row_leverages())
+                }))
+            }
+            other => other,
+        })
 }
 
 /// 補助回帰の直交座標（`b̃`・`M̃`）で、末尾`k`列（`X̃`の係数）が同時にゼロというWald検定のF統計量を
 /// 返す。`M̃`が数値的に特異などで検定できないときは`HausmanTestFailed`（`fit()`全体を失敗させる。
 /// Wu-Hausmanと違い、REのHausmanは検定そのものがREの診断の中心のため`None`にしない）。
 /// 切り出してあるのは、この契約を手組みの特異な`M̃`で決定的にテストするため。
+///
+/// `leverage`は失敗したときだけ呼ぶ、補助回帰のレバレッジ。特異な原因がレバレッジ1の行なら、その行を
+/// 名指しする（[`name_unit_leverage_cause`]）。
 fn hausman_wald_f(
     coordinates: &Mat<f64>,
     meat: &Mat<f64>,
     k_aux: usize,
     k: usize,
     df_inference: usize,
+    leverage: impl FnOnce() -> Option<Vec<f64>>,
 ) -> Result<f64, PanelError> {
     wald_f_test(coordinates, meat, k_aux - k, k, df_inference)
         .map(|(f_statistic, _)| f_statistic)
-        .map_err(|e| PanelError::HausmanTestFailed { source: e.into() })
+        .map_err(|e| PanelError::HausmanTestFailed {
+            source: name_unit_leverage_cause(e, leverage).into(),
+        })
 }
 
 /// ハウスマン検定（`re-spec.md`3.7節、`re.rs`のモジュールdoc「ハウスマン検定」参照）。
@@ -223,7 +239,9 @@ pub(super) fn re_hausman_test(
                 cluster_codes,
                 k_aux,
             );
-            hausman_wald_f(coordinates, &meat, k_aux, k, g - 1)?
+            hausman_wald_f(coordinates, &meat, k_aux, k, g - 1, || {
+                Some(design.row_leverages())
+            })?
         }
         ReCovType::Dk { bandwidth, time } => {
             let aux = AuxiliaryFit::fit(aux_input, &CovType::Classical, confidence_level, false)
@@ -250,7 +268,9 @@ pub(super) fn re_hausman_test(
                 k_aux,
                 bw,
             );
-            hausman_wald_f(coordinates, &meat, k_aux, k, t_periods - 1)?
+            hausman_wald_f(coordinates, &meat, k_aux, k, t_periods - 1, || {
+                Some(design.row_leverages())
+            })?
         }
     };
 

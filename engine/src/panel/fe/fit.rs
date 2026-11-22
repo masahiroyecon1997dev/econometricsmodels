@@ -17,7 +17,8 @@ use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     ColumnRole, PanelCov, PanelCovInput, PanelError, PanelStructure, absorbed_parameters,
-    ensure_no_constant_columns, overall_f_test, panel_cov_params, validate_confidence_level,
+    ensure_no_constant_columns, leverage_full, overall_f_test, panel_cov_params,
+    validate_confidence_level,
 };
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
@@ -224,8 +225,24 @@ pub(in crate::panel) fn fit_fe_from_within(
         },
     )?;
     let cov_params = design.coefficient_covariance(&meat);
-    drop(design);
     let wald = (k > 0).then_some(WaldCoordinates { coordinates, meat });
+
+    // 全体F検定（`fe.rs`のモジュールdoc「自由度とF統計量」）。傾きの共分散が特異で失敗したときだけ、
+    // 原因がレバレッジ1の行かを調べる（HC2/HC3と同じ、吸収した効果込みのレバレッジ）ので、`Q`を
+    // 手放す前に試す。成功する推定はレバレッジを求めない。
+    let f_test = match &wald {
+        Some(wald) if tests_overall_f => Some(overall_f_test(
+            &wald.coordinates,
+            &wald.meat,
+            k,
+            df_inference,
+            || leverage_full(&design.row_leverages(), &levels, n).ok(),
+        )?),
+        // 説明変数が無いモデル、またはF検定をしない呼び出し。検定対象が存在しないため
+        // `OlsEstimator::fit`同様定義なし（`None`）。
+        _ => None,
+    };
+    drop(design);
 
     // `StudentsT::new`は自由度が正でない場合に失敗するが、`df_inference`は
     // `df_resid >= 1`（関数冒頭の`n <= df_model`検証）・`n_groups - 1 >= 1`
@@ -260,23 +277,6 @@ pub(in crate::panel) fn fit_fe_from_within(
     let log_likelihood = fit_stats.log_likelihood;
     let aic = -2.0 * log_likelihood + 2.0 * (df_model as f64);
     let bic = -2.0 * log_likelihood + (n as f64).ln() * (df_model as f64);
-
-    // F統計量（`fe.rs`のモジュールdoc「自由度とF統計量」）: 傾き係数`k`個の
-    // 同時Wald検定。FEの`cov_params`（`cov_type`別、上で計算済み）・`df_inference`
-    // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`shared::wald::wald_f_test`の
-    // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
-    // `OlsInput::from_columns`呼び出しと同じ理由）。
-    let f_test = match &wald {
-        Some(wald) if tests_overall_f => Some(overall_f_test(
-            &wald.coordinates,
-            &wald.meat,
-            k,
-            df_inference,
-        )?),
-        // 説明変数が無いモデル、またはF検定をしない呼び出し。検定対象が存在しないため
-        // `OlsEstimator::fit`同様定義なし（`None`）。
-        _ => None,
-    };
 
     Ok(FeEstimator {
         input,

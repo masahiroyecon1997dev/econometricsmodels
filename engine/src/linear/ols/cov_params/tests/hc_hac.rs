@@ -326,3 +326,51 @@ fn fit_rejects_hc2_and_hc3_when_a_dummy_is_nonzero_in_one_row() {
         assert!(fit(cov_type).is_ok());
     }
 }
+
+/// 切片が無いと、1行だけ非ゼロのダミー列そのものが傾きの空間に入る。その行は残差が0でスコアも0なので、
+/// ダミーのロバスト分散は0になり全体Fが定義できない。原因を`UnitLeverageSlopeCovariance`で名指しする。
+/// 切片があれば（上のテスト）行を選ぶ方向が切片を含み、傾きのブロックは特異にならないので推定できる。
+/// 古典的な共分散は残差を行ごとに使わないので、どちらでも推定できる。
+#[test]
+fn fit_names_the_unit_leverage_row_when_the_slope_block_of_a_robust_covariance_is_singular() {
+    let y = vec![1.0, 3.0, 2.5, 4.0, 3.5, 6.0, 5.0, 7.5];
+    let x1 = vec![0.3, 1.1, 1.9, 3.2, 3.9, 5.2, 6.1, 6.8];
+    let dummy = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    let fit = |cov_type, has_intercept| {
+        let input = OlsInput::from_columns(
+            &y,
+            &[x1.clone(), dummy.clone()],
+            vec!["x1".to_string(), "d".to_string()],
+            has_intercept,
+            "y".to_string(),
+        )
+        .unwrap();
+        OlsEstimator::fit(input, cov_type, 0.95)
+    };
+
+    let hac = CovType::Hac {
+        lags: Some(1),
+        time_order: row_time_order(8),
+    };
+    for cov_type in [CovType::Hc0, CovType::Hc1, hac] {
+        assert!(
+            matches!(
+                fit(cov_type.clone(), false),
+                Err(LeastSquaresError::Common(
+                    CommonError::UnitLeverageSlopeCovariance {
+                        n_affected: 1,
+                        first_row: 3
+                    }
+                ))
+            ),
+            "{cov_type:?}"
+        );
+        assert!(fit(cov_type, true).is_ok());
+    }
+    assert!(fit(CovType::Classical, false).is_ok());
+    // HC2・HC3は行スケール自体が定義できないので、従来どおり`UnitLeverage`が先に止める。
+    assert!(matches!(
+        fit(CovType::Hc2, false),
+        Err(LeastSquaresError::Common(CommonError::UnitLeverage { .. }))
+    ));
+}

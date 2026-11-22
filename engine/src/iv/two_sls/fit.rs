@@ -17,7 +17,7 @@ use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::instrumental_variables::{TwoSlsPointEstimate, two_sls_point_estimate};
 use crate::shared::orthonormal::OrthonormalDesign;
 use crate::shared::validation::validate_has_regressors;
-use crate::shared::wald::wald_f_test;
+use crate::shared::wald::{name_unit_leverage_cause, wald_f_test};
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
@@ -129,6 +129,19 @@ pub(super) fn fit_two_sls(
         df_resid,
     )?;
     let cov_params = design.coefficient_covariance(&meat);
+
+    // 全体Wald/F検定。傾きの共分散が特異で失敗したときだけ、原因がレバレッジ1の行かを`Q`から調べるので、
+    // `Q`を手放す前に試す（成功する推定はレバレッジを求めない）。
+    let k_constant = usize::from(input.has_intercept());
+    let df_model = k - k_constant;
+    let (wald_statistic, wald_p_value) = if df_model == 0 {
+        // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
+        // OLSと同様NaNを返す（0除算を避ける）。
+        (f64::NAN, f64::NAN)
+    } else {
+        wald_f_test(&coordinates, &meat, k_constant, df_model, df_inference)
+            .map_err(|err| name_unit_leverage_cause(err, || Some(design.row_leverages())))?
+    };
     drop(design);
     let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
         .map_err(|e| CommonError::internal(e.to_string()))?;
@@ -140,18 +153,8 @@ pub(super) fn fit_two_sls(
         conf_upper,
     } = inference_table(&beta, &cov_params, &t_dist, confidence_level);
 
-    let k_constant = usize::from(input.has_intercept());
     let r_squared = 1.0 - ssr / sst;
     let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
-
-    let df_model = k - k_constant;
-    let (wald_statistic, wald_p_value) = if df_model == 0 {
-        // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
-        // OLSと同様NaNを返す（0除算を避ける）。
-        (f64::NAN, f64::NAN)
-    } else {
-        wald_f_test(&coordinates, &meat, k_constant, df_model, df_inference)?
-    };
 
     let residual_columns: Vec<&[f64]> = first_stage_residuals.iter().map(Vec::as_slice).collect();
     let wu_hausman = wu_hausman_test(&input, &residual_columns, &cov_type, confidence_level)?;

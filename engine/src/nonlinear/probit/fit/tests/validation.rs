@@ -480,6 +480,10 @@ fn fit_reports_the_non_binary_outcome_before_the_constant_outcome() {
     );
     assert_eq!(
         result.unwrap_err(),
-        MleError::InvalidBinaryY { row: 0, value: 5.0 }
+        MleError::InvalidBinaryY {
+            column: "y".to_string(),
+            row: 0,
+            value: 5.0
+        }
     );
 }

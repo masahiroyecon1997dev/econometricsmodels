@@ -84,7 +84,12 @@ fn fe_estimator_fit_returns_outcome_constant_within_entity_for_an_entity_level_o
 
     let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
 
-    assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
+    assert_eq!(
+        result.unwrap_err(),
+        PanelError::OutcomeConstantWithinEntity {
+            column: "y".to_string()
+        }
+    );
 }
 
 #[test]
@@ -108,7 +113,12 @@ fn fe_estimator_fit_returns_outcome_constant_within_entity_when_effects_explain_
 
     let result = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95);
 
-    assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
+    assert_eq!(
+        result.unwrap_err(),
+        PanelError::OutcomeConstantWithinEntity {
+            column: "y".to_string()
+        }
+    );
 }
 
 #[test]
@@ -914,6 +924,8 @@ fn fe_estimator_fit_rejects_an_outcome_with_the_same_value_in_every_row() {
 
     assert_eq!(
         result.unwrap_err(),
-        PanelError::Common(CommonError::OutcomeConstant)
+        PanelError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
 }

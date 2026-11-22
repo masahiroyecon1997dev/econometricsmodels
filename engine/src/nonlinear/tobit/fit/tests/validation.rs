@@ -659,7 +659,9 @@ fn fit_returns_outcome_constant_error_for_a_constant_uncensored_outcome_with_an_
             );
             assert_eq!(
                 result.unwrap_err(),
-                MleError::Common(CommonError::OutcomeConstant),
+                MleError::Common(CommonError::OutcomeConstant {
+                    column: "y".to_string()
+                }),
                 "lower={lower:?}, upper={upper:?}, solver={solver:?}"
             );
         }
@@ -697,7 +699,9 @@ fn fit_does_not_report_a_constant_outcome_when_some_rows_are_censored() {
     let result = TobitEstimator::fit(tobit_input(&y, true, Some(0.0), None), tobit_options());
     assert_ne!(
         result.err(),
-        Some(MleError::Common(CommonError::OutcomeConstant))
+        Some(MleError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        }))
     );
 }
 

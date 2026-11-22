@@ -33,7 +33,9 @@ fn fit_returns_outcome_constant_when_the_outcome_is_the_same_in_every_row() {
 
     assert_eq!(
         result.unwrap_err(),
-        LeastSquaresError::Common(CommonError::OutcomeConstant)
+        LeastSquaresError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
 }
 
@@ -54,7 +56,9 @@ fn fit_treats_an_outcome_that_differs_by_one_ulp_as_constant() {
 
     assert_eq!(
         result.unwrap_err(),
-        LeastSquaresError::Common(CommonError::OutcomeConstant)
+        LeastSquaresError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
 }
 
@@ -111,7 +115,9 @@ fn fit_reports_an_invalid_confidence_level_before_the_regressor_and_observation_
     };
     assert_eq!(
         OlsEstimator::fit(constant_outcome(), CovType::Classical, 0.95).unwrap_err(),
-        LeastSquaresError::Common(CommonError::OutcomeConstant)
+        LeastSquaresError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
     assert_eq!(invalid(constant_outcome()), expected);
 }

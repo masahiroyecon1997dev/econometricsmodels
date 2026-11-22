@@ -459,7 +459,9 @@ fn an_outcome_explained_by_the_fixed_effects_is_rejected() {
         .collect();
     assert_eq!(
         data.fit(FeCovType::Classical).unwrap_err(),
-        PanelError::OutcomeConstantWithinEntity
+        PanelError::OutcomeConstantWithinEntity {
+            column: "y".to_string()
+        }
     );
 }
 

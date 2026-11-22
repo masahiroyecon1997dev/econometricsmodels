@@ -48,7 +48,7 @@ pub(super) fn fit_tobit(
     validate_has_uncensored_observations(input.y(), input.lower(), input.upper())?;
     // 非打ち切り観測がある（全行が境界に一致する場合は上で`NoUncensoredObservations`になる）うえで、
     // 切片ありなのに`y`が全行で同じ値だと`σ→0`に退化して`NOT_CONVERGED`になるため、先に弾く。
-    validate_outcome_not_constant(input.y(), input.has_intercept())?;
+    validate_outcome_not_constant(input.y(), input.dep_var_name(), input.has_intercept())?;
 
     // `x`（切片ありなら列を平均センタリング＋スケーリング、切片なしはスケーリング
     // のみ）と`y`（と打ち切り境界、`y`の母集団標準偏差を2の冪に丸めた値で一律

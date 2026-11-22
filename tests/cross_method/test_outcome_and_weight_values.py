@@ -1,6 +1,7 @@
 """被説明変数の値と重みの不正値のエラーが、列を正しく特定することを確かめる。
 
-`OUTCOME_NOT_BINARY`・`OUTCOME_OUTSIDE_CENSORING_BOUNDS`・`WEIGHT_NOT_POSITIVE`は、
+`OUTCOME_NOT_BINARY`・`OUTCOME_OUTSIDE_CENSORING_BOUNDS`・`OUTCOME_CONSTANT`・
+`OUTCOME_CONSTANT_WITHIN_ENTITY`・`WEIGHT_NOT_POSITIVE`は、
 `column`（データの列名）と`argument`（その列を渡した引数名）を別のキーで持つ。
 列名が引数名と同じ文字列（`"y"`・`"weight"`）だと取り違えを検出できないので、
 `make_frame`の別名の列（`y01`・`yc`・`w`）を使う。重みの非有限値は、`test_numeric_column_values.py`
@@ -14,6 +15,11 @@ import pytest
 from _dtype_helpers import make_frame
 from _errors import approx_param, raises_error
 from econometricsmodels import (
+    FE,
+    FEIV,
+    IV,
+    OLS,
+    RE,
     WLS,
     ErrorCode,
     Logit,
@@ -156,3 +162,85 @@ def test_outcome_above_the_upper_bound_names_the_outcome_column(
             ["x1", "x2"],
             options=TobitOptions(lower=None, upper=10.0),
         ).fit()
+
+
+# ── OUTCOME_CONSTANT ─────────────────────────────────────────────────
+
+# 手法 → (`y`の列名、定数にした`y`で`fit()`する関数)。列名は引数名`y`と違う名前にする。
+_X = ["x1", "x2"]
+CONSTANT_OUTCOME_FITS = {
+    "OLS": ("yc", lambda d: OLS(d, "yc", _X).fit()),
+    "WLS": ("yc", lambda d: WLS(d, "yc", _X, "w").fit()),
+    "Logit": ("y01", lambda d: Logit(d, "y01", _X).fit()),
+    "Probit": ("y01", lambda d: Probit(d, "y01", _X).fit()),
+    "Tobit": (
+        "yc",
+        lambda d: Tobit(d, "yc", _X, options=TobitOptions(lower=0.0)).fit(),
+    ),
+    "IV": ("yc", lambda d: IV(d, "yc", ["x2"], ["x1"], ["z", "z2"]).fit()),
+    "FE": ("yc", lambda d: FE(d, "yc", _X, ["entity"]).fit()),
+    "FEIV": (
+        "yc",
+        lambda d: FEIV(d, "yc", ["x2"], ["x1"], ["z", "z2"], ["entity"]).fit(),
+    ),
+    "RE": ("yc", lambda d: RE(d, "yc", _X, ["entity"]).fit()),
+}
+
+
+@pytest.mark.parametrize("method", list(CONSTANT_OUTCOME_FITS))
+def test_constant_outcome_names_the_outcome_column(
+    frame: pl.DataFrame, method: str
+) -> None:
+    column, fit = CONSTANT_OUTCOME_FITS[method]
+    data = frame.with_columns(
+        pl.lit(1.0 if column == "y01" else 3.0).alias(column)
+    )
+    with raises_error(
+        ErrorCode.OUTCOME_CONSTANT,
+        column=column,
+        argument="y",
+        data_argument="data",
+    ):
+        fit(data)
+
+
+def test_constant_endogenous_variable_names_x_endog_in_the_first_stage(
+    frame: pl.DataFrame,
+) -> None:
+    """第一段階の被説明変数は内生変数なので、`argument`は`y`ではなく`x_endog`。"""
+    data = frame.with_columns(pl.lit(2.0).alias("x1"))
+    with raises_error(
+        ErrorCode.OUTCOME_CONSTANT,
+        stage="FIRST_STAGE",
+        endog_name="x1",
+        column="x1",
+        argument="x_endog",
+        data_argument="data",
+    ):
+        IV(data, "y", ["x2"], ["x1"], ["z", "z2"]).fit()
+
+
+# ── OUTCOME_CONSTANT_WITHIN_ENTITY ───────────────────────────────────
+
+WITHIN_ENTITY_FITS = {
+    "FE": lambda d: FE(d, "yc", _X, ["entity"]).fit(),
+    "FEIV": lambda d: FEIV(
+        d, "yc", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    ).fit(),
+    "RE": lambda d: RE(d, "yc", _X, ["entity"]).fit(),
+}
+
+
+@pytest.mark.parametrize("method", list(WITHIN_ENTITY_FITS))
+def test_outcome_constant_within_entity_names_the_outcome_column(
+    frame: pl.DataFrame, method: str
+) -> None:
+    """個体内で定数の`y`（個体ごとに値は違う）は、固定効果を除くと分散が残らない。"""
+    data = frame.with_columns(pl.col("entity").cast(pl.Float64).alias("yc"))
+    with raises_error(
+        ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY,
+        column="yc",
+        argument="y",
+        data_argument="data",
+    ):
+        WITHIN_ENTITY_FITS[method](data)

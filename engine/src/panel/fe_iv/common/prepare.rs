@@ -108,7 +108,10 @@ pub(in crate::panel::fe_iv) fn prepare_within<'a>(
         ensure_no_constant_columns(role, names, columns)?;
     }
     if has_no_variation(input.y()) {
-        return Err(CommonError::OutcomeConstant.into());
+        return Err(CommonError::OutcomeConstant {
+            column: input.dep_var_name().to_string(),
+        }
+        .into());
     }
 
     // 全ての列を1回だけ変換する。列の順は`y`、`x_exog`、`x_endog`、`instruments`。
@@ -179,7 +182,9 @@ pub(in crate::panel::fe_iv) fn prepare_within<'a>(
         ensure_no_zero_variance_columns(role, names, raw, transformed, noise)?;
     }
     if column_is_zero_variance_with_noise(input.y(), &tilde[0], noise) {
-        return Err(PanelError::OutcomeConstantWithinEntity);
+        return Err(PanelError::OutcomeConstantWithinEntity {
+            column: input.dep_var_name().to_string(),
+        });
     }
 
     Ok(WithinPrepared {

@@ -79,7 +79,9 @@ pub(super) fn validate_structural_cluster_count(
 fn validate_outcome_not_constant(input: &IvInput) -> Result<(), CommonError> {
     let y = input.y();
     if input.has_intercept() && has_no_variation(&mat_column_to_vec(y, 0)) {
-        return Err(CommonError::OutcomeConstant);
+        return Err(CommonError::OutcomeConstant {
+            column: input.dep_var_name().to_string(),
+        });
     }
     Ok(())
 }

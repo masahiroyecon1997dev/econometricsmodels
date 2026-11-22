@@ -96,7 +96,10 @@ fn fit_returns_outcome_constant_for_a_constant_endogenous_regressor_in_its_first
         result.unwrap_err(),
         IvError::FirstStageFailed {
             endog_name: "x_endog".to_string(),
-            source: CommonError::OutcomeConstant.into(),
+            source: CommonError::OutcomeConstant {
+                column: "x_endog".to_string()
+            }
+            .into(),
         }
     );
 }
@@ -121,7 +124,9 @@ fn fit_returns_outcome_constant_before_the_first_stage() {
 
     assert_eq!(
         result.unwrap_err(),
-        IvError::Common(CommonError::OutcomeConstant)
+        IvError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
 }
 

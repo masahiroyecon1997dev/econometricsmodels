@@ -535,5 +535,10 @@ fn re_estimator_fit_passes_outcome_constant_within_entity_through_without_a_stag
 
     let result = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95);
 
-    assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
+    assert_eq!(
+        result.unwrap_err(),
+        PanelError::OutcomeConstantWithinEntity {
+            column: "y".to_string()
+        }
+    );
 }

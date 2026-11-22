@@ -65,7 +65,10 @@ pub(super) fn fit_fe(
     // 場合（時間不変の列など）とは、エラーを分ける。重い変換や自由度の検証より先に調べる。
     ensure_no_constant_columns(ColumnRole::X, input.x_names(), input.x())?;
     if has_no_variation(input.y()) {
-        return Err(CommonError::OutcomeConstant.into());
+        return Err(CommonError::OutcomeConstant {
+            column: input.dep_var_name().to_string(),
+        }
+        .into());
     }
 
     // HC2/HC3は固定効果ダミーのレバレッジが要る。組合せが欠ける2-wayと3次元以上は、最大の次元を除いた
@@ -136,7 +139,9 @@ pub(in crate::panel) fn fit_fe_from_within(
     // （個体内で定数、2-wayなら個体効果と時点効果だけで説明される）。説明変数と同じ
     // 相対閾値で判定する。
     if column_is_zero_variance_with_noise(input.y(), &y, noise) {
-        return Err(PanelError::OutcomeConstantWithinEntity);
+        return Err(PanelError::OutcomeConstantWithinEntity {
+            column: input.dep_var_name().to_string(),
+        });
     }
 
     // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は

@@ -365,7 +365,12 @@ fn only_the_first_role_with_a_constant_column_is_reported() {
 fn a_constant_outcome_is_reported_before_the_transformation() {
     let (_, x1, x2, z1, z2) = columns();
     let err = error_of(fit_one_way(custom(&vec![1.0; 40], &[x1], &[x2], &[z1, z2])));
-    assert_eq!(err, PanelError::Common(CommonError::OutcomeConstant));
+    assert_eq!(
+        err,
+        PanelError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
+    );
 }
 
 #[test]
@@ -453,7 +458,12 @@ fn an_outcome_that_is_constant_within_entities_is_rejected() {
     let (_, x1, x2, z1, z2) = columns();
     let y = entity_constant(|i| i as f64 * 0.7);
     let err = error_of(fit_one_way(custom(&y, &[x1], &[x2], &[z1, z2])));
-    assert_eq!(err, PanelError::OutcomeConstantWithinEntity);
+    assert_eq!(
+        err,
+        PanelError::OutcomeConstantWithinEntity {
+            column: "y".to_string()
+        }
+    );
 }
 
 // ── 自由度 ────────────────────────────────────────────────────────

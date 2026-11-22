@@ -464,8 +464,14 @@ def test_a_constant_endogenous_regressor_is_reported_in_its_first_stage(df):
     data = df.with_columns(
         endog=pl.lit(2.0), y=1.0 + pl.col("x") + pl.col("noise")
     )
+    # 第一段階の被説明変数は内生変数なので、`argument`は`y`ではなく`x_endog`。
     with raises_error(
-        ErrorCode.OUTCOME_CONSTANT, stage="FIRST_STAGE", endog_name="endog"
+        ErrorCode.OUTCOME_CONSTANT,
+        stage="FIRST_STAGE",
+        endog_name="endog",
+        column="endog",
+        argument="x_endog",
+        data_argument="data",
     ):
         IV(data, "y", ["x"], ["endog"], ["z", "z2"], options=IVOptions()).fit()
 

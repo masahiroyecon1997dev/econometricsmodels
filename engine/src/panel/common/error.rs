@@ -215,7 +215,10 @@ pub enum PanelError {
     /// 説明変数の`ZeroVarianceAfterDemeaning`と同じ相対閾値で判定する
     /// （[`crate::shared::validation::column_is_zero_variance`]）。
     #[error("{}", self.catalog_message())]
-    OutcomeConstantWithinEntity,
+    OutcomeConstantWithinEntity {
+        /// 被説明変数の列名。
+        column: String,
+    },
 
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
     ///
@@ -578,8 +581,11 @@ impl ErrorInfo for PanelError {
                     .param("data_argument", "data")
                     .param("columns", columns.clone())
             }
-            Self::OutcomeConstantWithinEntity => {
+            Self::OutcomeConstantWithinEntity { column } => {
                 ErrorReport::new(ErrorCode::OutcomeConstantWithinEntity)
+                    .param("column", column.as_str())
+                    .param("argument", "y")
+                    .param("data_argument", "data")
             }
             Self::InvalidDkBandwidth { bandwidth, t } => {
                 ErrorReport::new(ErrorCode::DkBandwidthOutOfRange)
@@ -803,9 +809,11 @@ mod tests {
                 "These columns of x_exog in data have the same value in every row up to rounding, so they are collinear with the fixed effects: 'x2', 'x1'.",
             ),
             (
-                PanelError::OutcomeConstantWithinEntity,
+                PanelError::OutcomeConstantWithinEntity {
+                    column: "y".to_string(),
+                },
                 ErrorCode::OutcomeConstantWithinEntity,
-                "The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the effects together.",
+                "The outcome in column 'y' (given as y) in data has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the effects together.",
             ),
             (
                 PanelError::InsufficientDkPeriods { t_periods: 1 },

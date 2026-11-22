@@ -47,7 +47,9 @@ fn fit_returns_outcome_constant_for_a_constant_outcome_under_any_weights() {
 
     assert_eq!(
         result.unwrap_err(),
-        LeastSquaresError::Common(CommonError::OutcomeConstant)
+        LeastSquaresError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
 }
 

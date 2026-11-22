@@ -43,6 +43,7 @@ pub fn validate_binary_y(y: &Mat<f64>, dep_var_name: &str) -> Result<(), MleErro
 /// `NoUncensoredObservations`が先に返る。
 pub(crate) fn validate_outcome_not_constant(
     y: &Mat<f64>,
+    dep_var_name: &str,
     has_intercept: bool,
 ) -> Result<(), MleError> {
     if !has_intercept {
@@ -50,7 +51,10 @@ pub(crate) fn validate_outcome_not_constant(
     }
     let values: Vec<f64> = (0..y.nrows()).map(|i| *y.get(i, 0)).collect();
     if has_no_variation(&values) {
-        return Err(CommonError::OutcomeConstant.into());
+        return Err(CommonError::OutcomeConstant {
+            column: dep_var_name.to_string(),
+        }
+        .into());
     }
     Ok(())
 }
@@ -204,7 +208,7 @@ pub(crate) fn validate_fit_preconditions(
     validate_has_regressors(n, k)?;
     validate_sufficient_observations(n, k)?;
     validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))?;
-    validate_outcome_not_constant(y, has_intercept)
+    validate_outcome_not_constant(y, dep_var_name, has_intercept)
 }
 
 #[cfg(test)]
@@ -429,10 +433,13 @@ mod tests {
     fn validate_outcome_not_constant_rejects_a_constant_outcome_only_with_an_intercept() {
         let y = Mat::from_fn(4, 1, |_, _| 5.0);
         assert_eq!(
-            validate_outcome_not_constant(&y, true),
-            Err(CommonError::OutcomeConstant.into())
+            validate_outcome_not_constant(&y, "y", true),
+            Err(CommonError::OutcomeConstant {
+                column: "y".to_string()
+            }
+            .into())
         );
-        assert_eq!(validate_outcome_not_constant(&y, false), Ok(()));
+        assert_eq!(validate_outcome_not_constant(&y, "y", false), Ok(()));
     }
 
     #[test]
@@ -440,10 +447,13 @@ mod tests {
         // 1 ulpの違いは定数とみなし、相対的に十分な変動は定数としない。
         let ulp = Mat::from_fn(3, 1, |i, _| [0.1 + 0.2, 0.3, 0.3][i]);
         assert_eq!(
-            validate_outcome_not_constant(&ulp, true),
-            Err(CommonError::OutcomeConstant.into())
+            validate_outcome_not_constant(&ulp, "y", true),
+            Err(CommonError::OutcomeConstant {
+                column: "y".to_string()
+            }
+            .into())
         );
         let varying = Mat::from_fn(3, 1, |i, _| [0.0, 1.0, 0.0][i]);
-        assert_eq!(validate_outcome_not_constant(&varying, true), Ok(()));
+        assert_eq!(validate_outcome_not_constant(&varying, "y", true), Ok(()));
     }
 }

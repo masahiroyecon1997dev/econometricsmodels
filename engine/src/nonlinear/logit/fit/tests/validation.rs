@@ -428,7 +428,9 @@ fn fit_returns_outcome_constant_error_for_a_constant_outcome_with_an_intercept()
             );
             assert_eq!(
                 result.unwrap_err(),
-                MleError::Common(CommonError::OutcomeConstant),
+                MleError::Common(CommonError::OutcomeConstant {
+                    column: "y".to_string()
+                }),
                 "constant={constant}, solver={solver:?}"
             );
         }

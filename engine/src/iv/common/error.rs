@@ -112,12 +112,19 @@ impl ErrorInfo for IvError {
     fn report(&self) -> ErrorReport {
         match self {
             Self::Common(common) => common.report(),
-            Self::FirstStageFailed { endog_name, source } => staged_report(
-                source.report(),
-                Stage::FirstStage {
-                    endog_name: endog_name.clone(),
-                },
-            ),
+            Self::FirstStageFailed { endog_name, source } => {
+                let mut report = source.report();
+                // 第一段階の被説明変数は、構造式の`y`ではなく内生変数（`x_endog`の列）。
+                if report.code() == ErrorCode::OutcomeConstant {
+                    report = report.set_param("argument", "x_endog");
+                }
+                staged_report(
+                    report,
+                    Stage::FirstStage {
+                        endog_name: endog_name.clone(),
+                    },
+                )
+            }
             Self::SecondStageFailed { source } => {
                 staged_report(source.report(), Stage::SecondStage)
             }
@@ -195,6 +202,20 @@ mod tests {
             Some(&Stage::FirstStage {
                 endog_name: "x".to_string()
             })
+        );
+        // 第一段階の被説明変数は内生変数なので、`OUTCOME_CONSTANT`の`argument`は`x_endog`になる。
+        let constant = IvError::FirstStageFailed {
+            endog_name: "endog".to_string(),
+            source: CommonError::OutcomeConstant {
+                column: "endog".to_string(),
+            }
+            .into(),
+        }
+        .report();
+        assert_eq!(constant.code(), ErrorCode::OutcomeConstant);
+        assert_eq!(
+            constant.message(),
+            "In the first stage regression for 'endog': The outcome in column 'endog' (given as x_endog) in data has the same value in every row up to rounding, so a model with an intercept has nothing to explain."
         );
         let hausman = IvError::HausmanRegressionFailed {
             source: LeastSquaresError::SingularMatrix {

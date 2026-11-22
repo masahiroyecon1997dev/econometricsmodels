@@ -230,7 +230,10 @@ pub enum CommonError {
     /// [`crate::shared::validation::has_no_variation`]。推定を走らせずに入力だけから分かるため`ValidationError`。
     /// 切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。
     #[error("{}", self.catalog_message())]
-    OutcomeConstant,
+    OutcomeConstant {
+        /// 被説明変数の列名。
+        column: String,
+    },
 
     /// 残差が丸め誤差の範囲で0（`SSR <= k * epsilon * SST`）で、標準誤差と検定統計量が
     /// 定義できない。判定は[`crate::shared::goodness_of_fit::is_perfect_fit`]の1か所。
@@ -351,7 +354,10 @@ impl ErrorInfo for CommonError {
             Self::NearSingularMatrix { matrix } => {
                 ErrorReport::new(ErrorCode::MatrixNearSingular).param("matrix", matrix.as_str())
             }
-            Self::OutcomeConstant => ErrorReport::new(ErrorCode::OutcomeConstant),
+            Self::OutcomeConstant { column } => ErrorReport::new(ErrorCode::OutcomeConstant)
+                .param("column", column.as_str())
+                .param("argument", "y")
+                .param("data_argument", "data"),
             Self::PerfectFit => ErrorReport::new(ErrorCode::PerfectFit),
             Self::UnitLeverage {
                 n_affected,

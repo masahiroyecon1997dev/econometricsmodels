@@ -75,7 +75,9 @@ fn fit_returns_outcome_constant_for_a_constant_outcome() {
 
     assert_eq!(
         result.unwrap_err(),
-        IvError::Common(CommonError::OutcomeConstant)
+        IvError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
 }
 
@@ -298,7 +300,9 @@ fn fit_reports_options_before_the_identification_and_constant_outcome_checks() {
     ));
     assert_eq!(
         fit(constant_outcome(), iterated(10, 1e-6), 0.95),
-        IvError::Common(CommonError::OutcomeConstant)
+        IvError::Common(CommonError::OutcomeConstant {
+            column: "y".to_string()
+        })
     );
     for build in [under_identified, constant_outcome] {
         assert!(matches!(

@@ -575,6 +575,18 @@ impl ErrorReport {
         self
     }
 
+    /// `params`の1項目の値を置き換える（無ければ足す）。入れ子の回帰の中で、同じ`code`でも
+    /// どの引数の列かが変わる場合（IVの第一段階では被説明変数が`x_endog`の列）に使う。
+    #[must_use]
+    pub fn set_param(mut self, name: &'static str, value: impl Into<ParamValue>) -> Self {
+        let value = value.into();
+        match self.params.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, v)) => *v = value,
+            None => self.params.push((name, value)),
+        }
+        self
+    }
+
     /// 入れ子の回帰の文脈を付ける。
     #[must_use]
     pub fn with_stage(mut self, stage: Stage) -> Self {
@@ -1942,8 +1954,24 @@ pub static CATALOG: &[ErrorSpec] = &[
     ErrorSpec {
         code: ErrorCode::OutcomeConstant,
         class: ErrorClass::Validation,
-        params: &[],
-        message: r#"The outcome has the same value in every row up to rounding, so a model with an intercept has nothing to explain."#,
+        params: &[
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"The outcome in column '{column}' (given as {argument}) in {data_argument} has the same value in every row up to rounding, so a model with an intercept has nothing to explain."#,
         hint: Some(r#"Use an outcome that varies across observations."#),
         stage_allowed: true,
     },
@@ -2360,8 +2388,24 @@ pub static CATALOG: &[ErrorSpec] = &[
     ErrorSpec {
         code: ErrorCode::OutcomeConstantWithinEntity,
         class: ErrorClass::Validation,
-        params: &[],
-        message: r#"The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the effects together."#,
+        params: &[
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"The outcome in column '{column}' (given as {argument}) in {data_argument} has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the effects together."#,
         hint: Some(r#"Use an outcome that varies within entities."#),
         stage_allowed: false,
     },
@@ -2719,6 +2763,14 @@ mod tests {
             }
             if has("column") && has("columns") {
                 problems.push(format!("{code}: has both column and columns"));
+            }
+            // 被説明変数の値の問題（`OUTCOME_*`）は、`y`の列を特定する。
+            if code.starts_with("OUTCOME_")
+                && !(has("column") && has("argument") && has("data_argument"))
+            {
+                problems.push(format!(
+                    "{code}: an outcome code needs column, argument, data_argument"
+                ));
             }
             // `data_argument`は、どの引数の列かを示す`argument`と組で使う。
             if has("data_argument") && !has("argument") {

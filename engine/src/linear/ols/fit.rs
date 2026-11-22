@@ -63,7 +63,10 @@ pub(super) fn preflight(
 
     // 入力だけから分かる被説明変数の検証も、QR分解より前に行う。
     if check_outcome && input.has_intercept() && input.outcome_constant() {
-        return Err(CommonError::OutcomeConstant.into());
+        return Err(CommonError::OutcomeConstant {
+            column: input.dep_var_name().to_string(),
+        }
+        .into());
     }
     Ok(f_test_defined)
 }

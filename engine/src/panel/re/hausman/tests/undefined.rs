@@ -244,9 +244,29 @@ fn hausman_wald_f_fails_with_hausman_test_failed_when_the_covariance_is_singular
     let coordinates = faer::Mat::from_fn(3, 1, |i, _| 1.0 + i as f64);
     let meat = faer::Mat::<f64>::zeros(3, 3);
     assert!(matches!(
-        hausman_wald_f(&coordinates, &meat, 3, 2, 10),
+        hausman_wald_f(&coordinates, &meat, 3, 2, 10, || None),
         Err(PanelError::HausmanTestFailed { .. })
     ));
+}
+
+#[test]
+fn hausman_wald_f_names_a_unit_leverage_row_as_the_cause_of_a_singular_covariance() {
+    let coordinates = faer::Mat::from_fn(3, 1, |i, _| 1.0 + i as f64);
+    let meat = faer::Mat::<f64>::zeros(3, 3);
+    let err = hausman_wald_f(&coordinates, &meat, 3, 2, 10, || {
+        Some(vec![0.4, 1.0 - 1e-13, 0.6, 1.0])
+    })
+    .unwrap_err();
+    assert_eq!(
+        err,
+        PanelError::HausmanTestFailed {
+            source: CommonError::UnitLeverageSlopeCovariance {
+                n_affected: 2,
+                first_row: 1
+            }
+            .into()
+        }
+    );
 }
 
 #[test]
@@ -254,6 +274,6 @@ fn hausman_wald_f_returns_the_f_statistic_of_the_last_coefficients() {
     // 末尾2個の係数（`b̃ = (2, 3)`、`M̃ = I`）の`W = 13`、`F = W / 2`。
     let coordinates = faer::Mat::from_fn(3, 1, |i, _| 1.0 + i as f64);
     let meat = faer::Mat::<f64>::identity(3, 3);
-    let f_statistic = hausman_wald_f(&coordinates, &meat, 3, 2, 10).unwrap();
+    let f_statistic = hausman_wald_f(&coordinates, &meat, 3, 2, 10, || None).unwrap();
     assert!((f_statistic - 6.5).abs() < 1e-12);
 }

@@ -55,6 +55,7 @@ pub enum ErrorCode {
     MatrixNearSingular,
     PerfectFit,
     UnitLeverageObservation,
+    UnitLeverageSlopeCovariance,
     NotConverged,
     AbsorptionNotConverged,
     LineSearchFailed,
@@ -142,6 +143,7 @@ impl ErrorCode {
         Self::MatrixNearSingular,
         Self::PerfectFit,
         Self::UnitLeverageObservation,
+        Self::UnitLeverageSlopeCovariance,
         Self::NotConverged,
         Self::AbsorptionNotConverged,
         Self::LineSearchFailed,
@@ -230,6 +232,7 @@ impl ErrorCode {
             Self::MatrixNearSingular => "MATRIX_NEAR_SINGULAR",
             Self::PerfectFit => "PERFECT_FIT",
             Self::UnitLeverageObservation => "UNIT_LEVERAGE_OBSERVATION",
+            Self::UnitLeverageSlopeCovariance => "UNIT_LEVERAGE_SLOPE_COVARIANCE",
             Self::NotConverged => "NOT_CONVERGED",
             Self::AbsorptionNotConverged => "ABSORPTION_NOT_CONVERGED",
             Self::LineSearchFailed => "LINE_SEARCH_FAILED",
@@ -1633,6 +1636,27 @@ pub static CATALOG: &[ErrorSpec] = &[
         message: r#"cov_type="hc2" and "hc3" are not defined: {n_affected} observation(s) have leverage 1 up to rounding, the first at row {first_row} (0-based), so the model fits them exactly."#,
         hint: Some(
             r#"Check for a regressor or instrument that takes a distinct value in only one observation, or set a different cov_type."#,
+        ),
+        stage_allowed: true,
+    },
+    ErrorSpec {
+        code: ErrorCode::UnitLeverageSlopeCovariance,
+        class: ErrorClass::Computation,
+        params: &[
+            ParamSpec {
+                name: "n_affected",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "first_row",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+        ],
+        message: r#"A combination of the slope coefficients has a covariance of zero: {n_affected} observation(s) have leverage 1 up to rounding, the first at row {first_row} (0-based), so the model fits them exactly."#,
+        hint: Some(
+            r#"Remove a regressor or instrument that takes a distinct value in only one observation, or set cov_type="classical"."#,
         ),
         stage_allowed: true,
     },

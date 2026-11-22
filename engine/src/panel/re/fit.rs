@@ -25,7 +25,7 @@ use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::orthonormal::OrthonormalDesign;
-use crate::shared::wald::wald_f_test;
+use crate::shared::wald::{name_unit_leverage_cause, wald_f_test};
 
 /// [`ReEstimator::fit_with_variance_method`]の本体。契約（エラー条件を含む）は`fit_with_variance_method`と
 /// `fit`のdocコメント参照。
@@ -178,6 +178,35 @@ pub(super) fn fit_re(
         },
     )?;
     let cov_params = design.coefficient_covariance(&meat);
+
+    // F統計量（2.1節）: 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという
+    // 帰無仮説のWald F検定（`β'V⁻¹β/q`、`plm::pwaldtest(test="F", vcov=...)`と同じ二次形式）。
+    // FEの`FeEstimator::fit`と同じく、`cov_type`別に計算し直した`cov_params`
+    // （上で計算済み）・`df_inference`（`Cluster`のとき`G-1`、`Dk`のとき`t_periods-1`、
+    // それ以外は`df_resid`）を`wald_f_test`に渡す（サンドイッチ計算を複製しない）。
+    // `estimator().f_statistic()`/`wald_test_last_columns`は`CovType::Classical`の
+    // 内部OLSの共分散・`df_resid`ベースのため、RE自身の`cov_type`を反映できず使わない。
+    // 先頭列が変換済み定数項なので`k_constant=1`、検定対象は傾き`df_model - 1`個。
+    // Wald二次形式（`V`が正定値）のため負値にならない
+    // （`linearmodels`のSST/SSR方式は極端な不均衡パネルで負値になる、`re.rs`のモジュールdoc
+    // 「F統計量」参照）。
+    let f_test = if df_model == 1 {
+        // 傾き係数が無い（定数項のみ）モデル。検定対象が存在しないため`OlsEstimator::fit`
+        // 自身の`df_model==0`分岐と同様定義なし（`None`）。
+        None
+    } else {
+        // 傾きの共分散が特異で失敗したときだけ、原因がレバレッジ1の行かを調べる（HC2/HC3と同じ素の
+        // レバレッジ）ので、`Q`を手放す前に試す。成功する推定はレバレッジを求めない。
+        Some(
+            wald_f_test(&coordinates, &meat, 1, df_model - 1, df_inference).map_err(|source| {
+                PanelError::FTestFailed {
+                    source: name_unit_leverage_cause(source, || Some(design.row_leverages()))
+                        .into(),
+                }
+            })?,
+        )
+    };
+
     drop(design);
 
     // `StudentsT::new`は自由度が正でない場合に失敗するが、`df_inference`は
@@ -196,31 +225,6 @@ pub(super) fn fit_re(
         conf_lower,
         conf_upper,
     } = inference_table(estimator.params(), &cov_params, &t_dist, confidence_level);
-
-    // F統計量（2.1節）: 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという
-    // 帰無仮説のWald F検定（`β'V⁻¹β/q`、`plm::pwaldtest(test="F", vcov=...)`と同じ二次形式）。
-    // FEの`FeEstimator::fit`と同じく、`cov_type`別に計算し直した`cov_params`
-    // （上で計算済み）・`df_inference`（`Cluster`のとき`G-1`、`Dk`のとき`t_periods-1`、
-    // それ以外は`df_resid`）を`wald_f_test`に渡す（サンドイッチ計算を複製しない）。
-    // `estimator().f_statistic()`/`wald_test_last_columns`は`CovType::Classical`の
-    // 内部OLSの共分散・`df_resid`ベースのため、RE自身の`cov_type`を反映できず使わない。
-    // 先頭列が変換済み定数項なので`k_constant=1`、検定対象は傾き`df_model - 1`個。
-    // Wald二次形式（`V`が正定値）のため負値にならない
-    // （`linearmodels`のSST/SSR方式は極端な不均衡パネルで負値になる、`re.rs`のモジュールdoc
-    // 「F統計量」参照）。
-    let f_test = if df_model == 1 {
-        // 傾き係数が無い（定数項のみ）モデル。検定対象が存在しないため`OlsEstimator::fit`
-        // 自身の`df_model==0`分岐と同様定義なし（`None`）。
-        None
-    } else {
-        Some(
-            wald_f_test(&coordinates, &meat, 1, df_model - 1, df_inference).map_err(|source| {
-                PanelError::FTestFailed {
-                    source: source.into(),
-                }
-            })?,
-        )
-    };
 
     // パネル固有R²（2.3節）。`input`はこの後`Self`に格納するため、
     // ムーブ前にここで計算する。

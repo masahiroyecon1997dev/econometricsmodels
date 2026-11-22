@@ -133,8 +133,10 @@ pub(crate) fn hc_scales(
     })
 }
 
-/// 全行で`1 - h_ii > UNIT_LEVERAGE_TOLERANCE`（NaN・無限大は不可）であることを確かめる。
-fn ensure_leverage_below_one(leverage: &[f64]) -> Result<(), CommonError> {
+/// `1 - h_ii <= UNIT_LEVERAGE_TOLERANCE`または`h_ii`が非有限の行の数と最初の行（0始まり）。
+/// 該当する行が無ければ`None`。HC2/HC3の行スケールの検査と、全体Wald/Fが特異で失敗したときの
+/// 原因の特定（[`crate::shared::wald::name_unit_leverage_cause`]）が共有する1か所の判定。
+pub(crate) fn unit_leverage_rows(leverage: &[f64]) -> Option<(usize, usize)> {
     let mut n_affected = 0;
     let mut first_row = None;
     for (i, &h) in leverage.iter().enumerate() {
@@ -143,8 +145,13 @@ fn ensure_leverage_below_one(leverage: &[f64]) -> Result<(), CommonError> {
             first_row.get_or_insert(i);
         }
     }
-    match first_row {
-        Some(first_row) => Err(CommonError::UnitLeverage {
+    first_row.map(|first_row| (n_affected, first_row))
+}
+
+/// 全行で`1 - h_ii > UNIT_LEVERAGE_TOLERANCE`（NaN・無限大は不可）であることを確かめる。
+fn ensure_leverage_below_one(leverage: &[f64]) -> Result<(), CommonError> {
+    match unit_leverage_rows(leverage) {
+        Some((n_affected, first_row)) => Err(CommonError::UnitLeverage {
             n_affected,
             first_row,
         }),

@@ -5,6 +5,7 @@ use faer::Side;
 use faer::prelude::Solve;
 use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor};
 
+use crate::shared::covariance::unit_leverage_rows;
 use crate::shared::error::{CommonError, MatrixKind};
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
@@ -171,6 +172,42 @@ pub(crate) fn wald_chi2_test(
     let p_value = chi2.sf(wald);
 
     Ok((wald, p_value))
+}
+
+/// 全体Wald/F（または`k_constant`・`df_model`で選んだ部分集合のWald）が傾きの共分散の特異性
+/// （`NearSingularMatrix`の`CoefficientCovariance`）で失敗したとき、原因がレバレッジ1の行なら
+/// `CommonError::UnitLeverageSlopeCovariance`に置き換えて名指しする。それ以外のエラー、レバレッジ1の
+/// 行が無い特異性（準共線・クラスターのスコアが従属など）は、そのまま返す。
+///
+/// レバレッジ`h_ii`が丸め誤差の範囲で1の行は残差が0で、その行にだけ値がある傾きの方向（切片なしの
+/// FEの単一行ダミー、2期間の個体の中でだけ動く列など）はスコア`e_i x_i`が0になるので、残差に基づく
+/// ロバスト共分散（HC0・HC1・クラスター・DK・HAC）の分散が0になる。切片のあるOLSでレバレッジ1の行が1行だけのときは、行を選ぶ方向が
+/// 切片を含み傾きの空間の外なので、傾きのブロックは特異にならず、この関数は呼ばれない
+/// （失敗しない推定は変えない）。同時に失敗した共分散にレバレッジ1の行があれば、原因として名指しする
+/// （失敗の方向がその行にだけ値を持つかまでは確かめない）。
+///
+/// `leverage`は失敗したときだけ呼ぶ（レバレッジを求める費用を成功する推定に負わせない）。呼び出し側の
+/// 手法のHC2/HC3と同じレバレッジを返すこと（同じデータなら同じ行が報告される）。レバレッジが求められない
+/// ときは`None`を返し、元のエラーを残す。
+pub(crate) fn name_unit_leverage_cause(
+    err: CommonError,
+    leverage: impl FnOnce() -> Option<Vec<f64>>,
+) -> CommonError {
+    if !matches!(
+        err,
+        CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance
+        }
+    ) {
+        return err;
+    }
+    match leverage().as_deref().and_then(unit_leverage_rows) {
+        Some((n_affected, first_row)) => CommonError::UnitLeverageSlopeCovariance {
+            n_affected,
+            first_row,
+        },
+        None => err,
+    }
 }
 
 #[cfg(test)]
@@ -411,5 +448,45 @@ mod tests {
             wald_chi2_test(&params, &collinear, 0, 2),
             Err(CommonError::NearSingularMatrix { .. })
         ));
+    }
+
+    #[test]
+    fn a_singular_slope_covariance_with_a_unit_leverage_row_is_named() {
+        let singular = || CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        };
+        let leverage = || Some(vec![0.3, 1.0 - 1e-14, 0.5, 1.0]);
+        assert_eq!(
+            name_unit_leverage_cause(singular(), leverage),
+            CommonError::UnitLeverageSlopeCovariance {
+                n_affected: 2,
+                first_row: 1
+            }
+        );
+    }
+
+    #[test]
+    fn other_causes_keep_the_original_error() {
+        let singular = || CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        };
+        // レバレッジ1の行が無い、レバレッジが求められない。
+        assert_eq!(
+            name_unit_leverage_cause(singular(), || Some(vec![0.3, 0.9, 0.5])),
+            singular()
+        );
+        assert_eq!(name_unit_leverage_cause(singular(), || None), singular());
+        // 別の行列の特異性・別のエラーは、レバレッジを求めもしない。
+        let other = || CommonError::NearSingularMatrix {
+            matrix: MatrixKind::DesignGram,
+        };
+        assert_eq!(
+            name_unit_leverage_cause(other(), || panic!("not evaluated")),
+            other()
+        );
+        assert_eq!(
+            name_unit_leverage_cause(CommonError::PerfectFit, || panic!("not evaluated")),
+            CommonError::PerfectFit
+        );
     }
 }

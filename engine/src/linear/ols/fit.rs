@@ -19,7 +19,7 @@ use crate::shared::inference;
 use crate::shared::least_squares::residual_sum_of_squares;
 use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::validate_has_regressors;
-use crate::shared::wald::wald_f_test;
+use crate::shared::wald::{name_unit_leverage_cause, wald_f_test};
 
 /// QR分解より前に、入力だけから判定できる検査を行う（信頼水準・回帰変数の有無・観測数・クラスター数・
 /// 被説明変数の順）。`fit_ols`と`AuxiliaryFit::fit`が同じ検査を同じ順序で行うための共通部分で、
@@ -141,8 +141,30 @@ pub(super) fn fit_ols(
         df_resid,
     )?;
     let cov_params = design.coefficient_covariance(&meat);
-    drop(design);
     let wald = WaldCoordinates { coordinates, meat };
+
+    // 全体F検定。傾きの共分散が特異で失敗したときだけ、原因がレバレッジ1の行かを`Q`から調べるので、
+    // `Q`を手放す前に試す（成功する推定はレバレッジを求めない）。
+    let k_constant = usize::from(input.has_intercept());
+    let df_model = k - k_constant;
+    let f_test = if df_model == 0 || !f_test_defined {
+        // 説明変数が定数項のみ（傾き係数が無い）モデルは検定対象が存在しない。
+        // クラスター数が傾き係数の数以下（`fit_with_optional_f_test`のみ）では
+        // `q×q`部分行列が構造的に特異で検定できない。どちらも定義なし（`None`）。
+        None
+    } else {
+        Some(
+            wald_f_test(
+                &wald.coordinates,
+                &wald.meat,
+                k_constant,
+                df_model,
+                df_inference,
+            )
+            .map_err(|err| name_unit_leverage_cause(err, || Some(design.row_leverages())))?,
+        )
+    };
+    drop(design);
 
     let mut std_errors = Mat::zeros(k, 1);
     for j in 0..k {
@@ -169,7 +191,6 @@ pub(super) fn fit_ols(
         *conf_upper.get_mut(j, 0) = stat.conf_high;
     }
 
-    let k_constant = usize::from(input.has_intercept());
     let GaussianGoodnessOfFit {
         r_squared,
         adj_r_squared,
@@ -177,22 +198,6 @@ pub(super) fn fit_ols(
         aic,
         bic,
     } = gaussian_goodness_of_fit(input.y(), ssr, k, input.has_intercept());
-
-    let df_model = k - k_constant;
-    let f_test = if df_model == 0 || !f_test_defined {
-        // 説明変数が定数項のみ（傾き係数が無い）モデルは検定対象が存在しない。
-        // クラスター数が傾き係数の数以下（`fit_with_optional_f_test`のみ）では
-        // `q×q`部分行列が構造的に特異で検定できない。どちらも定義なし（`None`）。
-        None
-    } else {
-        Some(wald_f_test(
-            &wald.coordinates,
-            &wald.meat,
-            k_constant,
-            df_model,
-            df_inference,
-        )?)
-    };
 
     Ok(OlsEstimator {
         input,

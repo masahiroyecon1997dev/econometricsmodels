@@ -117,6 +117,7 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY,
         ErrorCode.PERFECT_FIT,
         ErrorCode.UNIT_LEVERAGE_OBSERVATION,
+        ErrorCode.UNIT_LEVERAGE_SLOPE_COVARIANCE,
         ErrorCode.PICKLE_FORMAT_MISMATCH,
         ErrorCode.INTERNAL_ERROR,
     }

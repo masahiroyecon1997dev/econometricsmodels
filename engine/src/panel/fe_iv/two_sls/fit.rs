@@ -13,7 +13,8 @@ use super::FeTwoSlsEstimator;
 use super::sargan::fe_sargan_test;
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
-    PanelCov, PanelCovInput, PanelError, PanelStructure, overall_f_test, panel_cov_params,
+    PanelCov, PanelCovInput, PanelError, PanelStructure, leverage_full, overall_f_test,
+    panel_cov_params,
 };
 use crate::panel::fe::{
     FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, fe_r_squared_between,
@@ -189,9 +190,23 @@ pub(super) fn fit_fe_two_sls<T>(
         },
     )?;
     let cov_params = design.coefficient_covariance(&meat);
+
+    // 全体F検定。傾きの共分散が特異で失敗したときだけ、原因がレバレッジ1の行かを調べる（HC2/HC3と同じ、
+    // `X̂`の`Q`と吸収した効果込みのレバレッジ）ので、`Q`を手放す前に試す。成功する推定は求めない。
+    let f_test = if k > 0 {
+        Some(overall_f_test(
+            &coordinates,
+            &meat,
+            k,
+            df_inference,
+            || leverage_full(&design.row_leverages(), &levels, n).ok(),
+        )?)
+    } else {
+        None
+    };
     drop(design);
     drop(residuals);
-    let wald = (k > 0).then_some((coordinates, meat));
+    drop((coordinates, meat));
 
     let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
         .map_err(|e| CommonError::internal(e.to_string()))?;
@@ -202,11 +217,6 @@ pub(super) fn fit_fe_two_sls<T>(
         conf_lower,
         conf_upper,
     } = inference_table(&estimate.params, &cov_params, &t_dist, confidence_level);
-
-    let f_test = match &wald {
-        None => None,
-        Some((coordinates, meat)) => Some(overall_f_test(coordinates, meat, k, df_inference)?),
-    };
 
     // 構造式の共分散・F検定が計算できた後に、補助回帰を回す（構造式のエラーを先に返す）。
     let wu_hausman = fe_wu_hausman_test(WuHausmanContext {

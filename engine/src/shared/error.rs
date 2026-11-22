@@ -244,6 +244,15 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     UnitLeverage { n_affected: usize, first_row: usize },
 
+    /// 傾き係数のある組み合わせの（残差に基づく）ロバスト共分散が0になり、全体のF/Wald検定
+    /// （とREのHausman補助回帰）が定義できない: `n_affected`行のレバレッジが丸め誤差の範囲で1で、その行は
+    /// モデルに完全にあてはまり残差が0のため、その行にだけ値がある方向の分散が0になる。
+    /// `UnitLeverage`と同じ行の検出（`crate::shared::covariance::unit_leverage_rows`）で、
+    /// `crate::shared::wald::name_unit_leverage_cause`が`NearSingularMatrix`を置き換える
+    /// （全体検定が特異で失敗したときだけ。係数・標準誤差が計算できる推定は止めない）。
+    #[error("{}", self.catalog_message())]
+    UnitLeverageSlopeCovariance { n_affected: usize, first_row: usize },
+
     /// 実装の誤りでだけ起きるはずの状態（不変条件の破れ）。`detail`は開発者向けの英語。
     #[error("{}", self.catalog_message())]
     Internal { detail: String },
@@ -348,6 +357,12 @@ impl ErrorInfo for CommonError {
                 n_affected,
                 first_row,
             } => ErrorReport::new(ErrorCode::UnitLeverageObservation)
+                .param("n_affected", *n_affected)
+                .param("first_row", *first_row),
+            Self::UnitLeverageSlopeCovariance {
+                n_affected,
+                first_row,
+            } => ErrorReport::new(ErrorCode::UnitLeverageSlopeCovariance)
                 .param("n_affected", *n_affected)
                 .param("first_row", *first_row),
             Self::Internal { detail } => internal(detail.clone()),

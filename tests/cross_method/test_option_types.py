@@ -464,13 +464,14 @@ class TestMleOptionValues:
     [
         (float("nan"), float("nan")),
         (float("inf"), float("inf")),
+        (float("-inf"), float("-inf")),
         (2**70, float(2**70)),
         (-(2**70), -float(2**70)),
         (10**400, float("inf")),
         (0, 0.0),
         (1, 1.0),
     ],
-    ids=["nan", "inf", "2^70", "-2^70", "huge_int", "zero", "one"],
+    ids=["nan", "inf", "-inf", "2^70", "-2^70", "huge_int", "zero", "one"],
 )
 @pytest.mark.parametrize(
     "cls", ALL_OPTION_CLASSES, ids=[c.__name__ for c in ALL_OPTION_CLASSES]
@@ -494,8 +495,8 @@ def test_invalid_confidence_level_is_validation_error_for_every_method(
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize(
     "bad",
-    [float("nan"), float("inf"), 10**400],
-    ids=["nan", "inf", "huge_int"],
+    [float("nan"), float("inf"), float("-inf"), 10**400],
+    ids=["nan", "inf", "-inf", "huge_int"],
 )
 @pytest.mark.parametrize("field", ["lower", "upper"])
 def test_invalid_tobit_bound_is_validation_error(df, field, bad, how):
@@ -571,8 +572,8 @@ def test_gmm_max_iter_limits_are_accepted(df, cls, limit, how):
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize(
     "tol",
-    [float("nan"), float("inf"), -1.0],
-    ids=["nan", "inf", "negative"],
+    [float("nan"), float("inf"), float("-inf"), -1.0],
+    ids=["nan", "inf", "-inf", "negative"],
 )
 @pytest.mark.parametrize("cls", [IVOptions, FEIVOptions])
 def test_invalid_gmm_tol_is_validation_error(df, cls, tol, how):

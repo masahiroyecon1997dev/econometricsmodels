@@ -21,6 +21,7 @@ from _errors import (
     MIGRATED_CODES,
     RAISED_CODES,
     UNREACHABLE_CODES,
+    approx_param,
     raises_error,
 )
 from econometricsmodels import (
@@ -75,6 +76,25 @@ SAMPLE_SETS = [
         "str": "",
         "str_list": ["a"],
         "column_list": ["a", "b", "c"],
+        "bool": False,
+    },
+    # `float`の`inf`・`-inf`と、`float_or_none`の`nan`（上の組には出ない）。
+    {
+        "int": 1,
+        "float": float("inf"),
+        "float_or_none": float("nan"),
+        "str": "y",
+        "str_list": ["a", "b"],
+        "column_list": ["a"],
+        "bool": True,
+    },
+    {
+        "int": 2,
+        "float": float("-inf"),
+        "float_or_none": 0.25,
+        "str": "z",
+        "str_list": ["a"],
+        "column_list": ["b", "a"],
         "bool": False,
     },
 ]
@@ -392,6 +412,43 @@ class TestRaisesErrorHelper:
             raises_error(ErrorCode.COLUMN_NOT_FOUND),
         ):
             raise ValidationError("COLUMN_NOT_FOUND", "m", None, dict(params))
+
+    @pytest.mark.parametrize(
+        ("value", "label"),
+        [
+            (float("nan"), "nan"),
+            (float("inf"), "inf"),
+            (float("-inf"), "-inf"),
+        ],
+    )
+    def test_accepts_a_non_finite_float_param_as_its_string(
+        self, value: float, label: str
+    ) -> None:
+        entry = BY_CODE["COLUMN_NON_FINITE"]
+        params = _sample_params(entry, SAMPLE_SETS[0])
+        params["value"] = value
+        assert approx_param(value) == label
+        with raises_error(ErrorCode.COLUMN_NON_FINITE, value=label):
+            _lib.raise_error_for_test("COLUMN_NON_FINITE", params)
+        with raises_error(
+            ErrorCode.COLUMN_NON_FINITE, value=approx_param(value)
+        ):
+            _lib.raise_error_for_test("COLUMN_NON_FINITE", params)
+
+    def test_approx_param_compares_a_finite_value_with_a_tolerance(
+        self,
+    ) -> None:
+        assert approx_param(0.5) == pytest.approx(0.5)
+        assert approx_param(0.5) != "nan"
+
+    def test_fails_when_a_non_finite_float_param_is_a_float(self) -> None:
+        params = _sample_params(BY_CODE["COLUMN_NON_FINITE"], SAMPLE_SETS[0])
+        params["value"] = float("nan")
+        with (
+            pytest.raises(AssertionError, match="should be float"),
+            raises_error(ErrorCode.COLUMN_NON_FINITE),
+        ):
+            raise ValidationError("COLUMN_NON_FINITE", "m", None, dict(params))
 
     def test_accepts_pytest_approx_for_a_float_param(self) -> None:
         entry = BY_CODE["COLUMN_NON_FINITE"]

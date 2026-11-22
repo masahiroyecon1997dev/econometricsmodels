@@ -23,7 +23,7 @@ import polars as pl
 import pytest
 from _assertions import assert_close
 from _constants import DATA_DIR
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import with_cluster_groups
 from _tolerances import TOLERANCES
 from econometricsmodels import (
@@ -423,12 +423,15 @@ def test_diagnostics_run_under_every_covariance_setting(data, setting) -> None:
 # ── ValidationError ──────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("alpha", [0.0, 1.0, -0.1, 1.5, float("nan")])
+@pytest.mark.parametrize(
+    "alpha",
+    [0.0, 1.0, -0.1, 1.5, float("nan"), float("inf"), float("-inf")],
+)
 def test_effective_f_rejects_alpha_outside_the_open_unit_interval(
     data, alpha
 ) -> None:
     res = _fit(data)
-    with raises_error("ALPHA_OUT_OF_RANGE"):
+    with raises_error("ALPHA_OUT_OF_RANGE", value=approx_param(alpha)):
         res.effective_f(alpha=alpha)
 
 

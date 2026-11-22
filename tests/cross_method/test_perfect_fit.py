@@ -533,7 +533,10 @@ def test_the_regressor_check_comes_before_the_outcome_check_in_fe(df):
         y=0.1 * (pl.col("entity") + 1), x2=pl.col("entity") * 1.0
     )
     with raises_error(
-        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, argument="x", columns=["x2"]
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
+        argument="x",
+        data_argument="data",
+        columns=["x2"],
     ):
         _fit("FE", data)
 

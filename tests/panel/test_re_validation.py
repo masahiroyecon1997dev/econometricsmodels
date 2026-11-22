@@ -377,6 +377,7 @@ def test_singleton_entity_raises():
     with raises_error(
         ErrorCode.SINGLETON_GROUP,
         argument="effects",
+        data_argument="data",
         column="entity",
         group="e00",
     ):

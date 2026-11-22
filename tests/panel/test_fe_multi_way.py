@@ -157,7 +157,11 @@ def test_a_singleton_in_the_third_column_is_reported_with_its_column():
         .otherwise(pl.col("industry"))
     )
     with raises_error(
-        "SINGLETON_GROUP", argument="effects", column="industry", group="only"
+        "SINGLETON_GROUP",
+        argument="effects",
+        data_argument="data",
+        column="industry",
+        group="only",
     ):
         _fit(df, ["firm", "year", "industry"])
 
@@ -181,7 +185,10 @@ def test_a_regressor_absorbed_by_the_third_effect_is_rejected():
         x2=pl.col("industry").str.slice(1).cast(pl.Float64)
     )
     with raises_error(
-        "REGRESSOR_NO_WITHIN_VARIATION", argument="x", columns=["x2"]
+        "REGRESSOR_NO_WITHIN_VARIATION",
+        argument="x",
+        data_argument="data",
+        columns=["x2"],
     ):
         _fit(df, ["firm", "year", "industry"])
 

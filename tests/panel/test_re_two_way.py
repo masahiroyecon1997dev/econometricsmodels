@@ -865,7 +865,11 @@ def test_singleton_time_raises(panel):
     """最後の時点を1観測だけ残すと、時点のsingletonで`ValidationError`。"""
     keep = (pl.col("time") != 4) | (pl.int_range(pl.len()).over("time") == 0)
     with raises_error(
-        ErrorCode.SINGLETON_GROUP, argument="effects", column="time", group="4"
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        data_argument="data",
+        column="time",
+        group="4",
     ):
         _fit(panel.filter(keep), REOptions(), x=("x1",))
 

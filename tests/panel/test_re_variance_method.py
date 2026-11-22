@@ -815,6 +815,7 @@ def test_singleton_entity_is_a_validation_error_for_every_method(method):
     with raises_error(
         ErrorCode.SINGLETON_GROUP,
         argument="effects",
+        data_argument="data",
         column="entity",
         group="e00",
     ):

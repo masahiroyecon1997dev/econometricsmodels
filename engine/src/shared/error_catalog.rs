@@ -2720,6 +2720,29 @@ mod tests {
             if has("column") && has("columns") {
                 problems.push(format!("{code}: has both column and columns"));
             }
+            // `data_argument`は、どの引数の列かを示す`argument`と組で使う。
+            if has("data_argument") && !has("argument") {
+                problems.push(format!("{code}: data_argument without argument"));
+            }
+            // 列の特定のキーは、全`code`で同じ型を持つ（`column`・`argument`・`data_argument`は`Str`、
+            // `columns`は`ColumnList`）。型が違うと、アプリが同じ処理で列を扱えない。
+            for p in spec.params {
+                let expected = match p.name {
+                    "column" | "argument" | "data_argument" => Some(ParamType::Str),
+                    "columns" => Some(ParamType::ColumnList),
+                    _ => None,
+                };
+                if let Some(ty) = expected
+                    && p.ty != ty
+                {
+                    problems.push(format!("{code}: {} should be {ty:?}", p.name));
+                }
+                if matches!(p.name, "column" | "columns" | "argument" | "data_argument")
+                    && !p.in_text
+                {
+                    problems.push(format!("{code}: {} should appear in the text", p.name));
+                }
+            }
             if has("role") && !has("argument") {
                 // `role`は`C_STATISTIC_UNKNOWN_VARIABLE`のように引数名とは別の概念にだけ使う。
                 problems.push(format!("{code}: role without argument"));

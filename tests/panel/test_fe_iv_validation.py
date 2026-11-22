@@ -18,7 +18,7 @@ import numpy as np
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import assert_unit_change_invariant
 from econometricsmodels import (
     FEIV,
@@ -218,9 +218,12 @@ _WITH_EXTRA_COLUMN = {
 
 @pytest.mark.parametrize("role", list(_WITH_EXTRA_COLUMN))
 def test_a_column_with_one_value_in_every_row_raises(df, role):
-    """生の値が全て同じ列は、固定効果を除く前に`REGRESSOR_CONSTANT`（`role`付き）。"""
+    """生の値が全て同じ列は、固定効果を除く前に`REGRESSOR_CONSTANT`（`argument`付き）。"""
     with raises_error(
-        ErrorCode.REGRESSOR_CONSTANT, argument=role, columns=["extra"]
+        ErrorCode.REGRESSOR_CONSTANT,
+        argument=role,
+        data_argument="data",
+        columns=["extra"],
     ):
         _fit(df.with_columns(extra=pl.lit(1.5)), **_WITH_EXTRA_COLUMN[role])
 
@@ -233,6 +236,7 @@ def test_a_column_constant_within_entities_raises(df, role):
     with raises_error(
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
         argument=role,
+        data_argument="data",
         columns=["extra"],
     ):
         _fit(data, **_WITH_EXTRA_COLUMN[role])
@@ -267,6 +271,7 @@ def test_every_constant_column_of_a_role_is_reported(df, role):
     with raises_error(
         ErrorCode.REGRESSOR_CONSTANT,
         argument=role,
+        data_argument="data",
         columns=["extra2", "extra"],
     ):
         _fit(_with_extra_columns(df), **_WITH_TWO_EXTRA_COLUMNS[role])
@@ -281,6 +286,7 @@ def test_every_column_constant_within_entities_is_reported(df, role):
     with raises_error(
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
         argument=role,
+        data_argument="data",
         columns=["extra2", "extra"],
     ):
         _fit(data, **_WITH_TWO_EXTRA_COLUMNS[role])
@@ -289,7 +295,10 @@ def test_every_column_constant_within_entities_is_reported(df, role):
 def test_the_constant_columns_are_only_those_with_one_value_in_every_row(df):
     """個体ごとに一定の列は、生の値が定数ではないので`REGRESSOR_CONSTANT`の列に入らない。"""
     with raises_error(
-        ErrorCode.REGRESSOR_CONSTANT, argument="x_exog", columns=["extra"]
+        ErrorCode.REGRESSOR_CONSTANT,
+        argument="x_exog",
+        data_argument="data",
+        columns=["extra"],
     ):
         _fit(_with_extra_columns(df), x_exog=["inv", "extra", "x1"])
 
@@ -299,6 +308,7 @@ def test_every_regressor_of_a_role_can_be_reported(df):
     with raises_error(
         ErrorCode.REGRESSOR_CONSTANT,
         argument="x_exog",
+        data_argument="data",
         columns=["extra2", "extra"],
     ):
         _fit(_with_extra_columns(df), x_exog=["extra2", "extra"])
@@ -344,7 +354,9 @@ def test_only_the_first_role_with_an_offending_column_is_reported(
     df, kwargs, expected
 ):
     code, role, columns = expected
-    with raises_error(code, argument=role, columns=columns):
+    with raises_error(
+        code, argument=role, data_argument="data", columns=columns
+    ):
         _fit(_with_extra_columns(df), **kwargs)
 
 
@@ -374,7 +386,10 @@ def test_an_outcome_constant_within_entities_raises(df):
 def test_a_singleton_entity_raises(df):
     data = df.filter((pl.col("entity") != 0) | (pl.col("time") == 0))
     with raises_error(
-        ErrorCode.SINGLETON_GROUP, argument="effects", column="entity"
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        data_argument="data",
+        column="entity",
     ):
         _fit(data)
 
@@ -612,9 +627,15 @@ def test_confidence_level_must_be_inside_zero_and_one(df, confidence_level):
         _fit(df, confidence_level=confidence_level)
 
 
-@pytest.mark.parametrize("tol", [0.0, -1e-9, float("inf"), float("nan")])
+@pytest.mark.parametrize(
+    "tol", [0.0, -1e-9, float("inf"), float("-inf"), float("nan")]
+)
 def test_absorption_tol_must_be_positive_and_finite(df, tol):
-    with raises_error(ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE, option="tol"):
+    with raises_error(
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+        option="tol",
+        value=approx_param(tol),
+    ):
         _fit(df, tol=tol)
 
 
@@ -634,8 +655,11 @@ def test_effective_f_needs_one_endogenous_variable_and_a_valid_alpha(df):
     with raises_error(ErrorCode.EFFECTIVE_F_ENDOGENOUS_COUNT, n_endog=2):
         res.effective_f()
     one = _fit(df)
-    with raises_error(ErrorCode.ALPHA_OUT_OF_RANGE, value=2.0):
-        one.effective_f(alpha=2.0)
+    for alpha in (2.0, float("nan"), float("inf"), float("-inf")):
+        with raises_error(
+            ErrorCode.ALPHA_OUT_OF_RANGE, value=approx_param(alpha)
+        ):
+            one.effective_f(alpha=alpha)
     assert one.effective_f(alpha=0.10).alpha == 0.10
 
 

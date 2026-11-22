@@ -646,6 +646,11 @@ FAULTS = {
             "non_binary_y",
             (7, 5),
             code=ErrorCode.OUTCOME_NOT_BINARY,
+            params={
+                "column": "yc",
+                "argument": "y",
+                "data_argument": "data",
+            },
         ),
         Fault(
             "bad_censoring_bounds",
@@ -781,7 +786,9 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "bad_gmm_tol":
             return {}, {"gmm_type": "iterated", "gmm_tol": -1.0}
         case "non_binary_y":
-            return {"y": "y"}, {}
+            # 連続の`yc`を二値の被説明変数として渡す（列名が引数名`y`と違うので、
+            # `column`と`argument`の取り違えも見つかる）。
+            return {"y": "yc"}, {}
         case "bad_censoring_bounds":
             return {}, {"lower": 1.0, "upper": 0.0}
     raise AssertionError(fault_id)

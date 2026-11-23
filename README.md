@@ -324,31 +324,32 @@ classical standard errors:
 
 | Method | `fit()` time |
 |---|---|
-| OLS | 0.058 s |
-| WLS | 0.11 s |
-| Logit | 0.49 s |
-| Probit | 1.5 s |
-| Tobit | 2.2 s |
-| IV (2SLS) | 0.48 s |
-| FE | 0.30 s |
-| RE | 0.31 s |
+| OLS | 0.13 s |
+| WLS | 0.12 s |
+| Logit | 0.86 s |
+| Probit | 1.1 s |
+| Tobit | 2.5 s |
+| IV (2SLS) | 0.73 s |
+| FE | 0.24 s |
+| FEIV | 0.54 s |
+| RE | 0.94 s |
 
 Execution time and memory are compared against statsmodels and linearmodels
 wherever a comparable Python implementation exists. Some examples at the
 same sample size (reference time divided by ours):
 
-- OLS: about 2.5x faster than statsmodels.
-- IV (2SLS): about 26x faster than linearmodels.
+- OLS: about 2.1x faster than statsmodels.
+- IV (2SLS): about 15x faster than linearmodels.
 - FE: about 13x faster than linearmodels.
-- Logit: about on par with statsmodels (1.0x) at 1,000,000 observations,
-  and slightly slower (0.85x to 0.91x) at 100,000 observations for every
-  standard-error type, including clustered ones.
+- Logit: about 1.3x faster than statsmodels at 1,000,000 observations,
+  and about 1.2x faster at 100,000 observations for every standard-error
+  type, including clustered ones.
 - Tobit has no Python implementation to compare against, so only its own
   time is shown.
 
 Peak memory is lower in the largest cases measured too: IV (2SLS) peaks at
-about 1.1 GB against about 4.0 GB for linearmodels, and OLS at about 0.32 GB
-against about 0.57 GB for statsmodels (whole-process peak, including the
+about 0.71 GB against about 4.8 GB for linearmodels, and OLS at about 0.35 GB
+against about 0.76 GB for statsmodels (whole-process peak, including the
 Python interpreter).
 
 Times are end-to-end measurements from CI on shared runners, so absolute

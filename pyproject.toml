@@ -73,7 +73,7 @@ test = [
     # MOP有効F統計量のオラクル（`benchmark/iv/references/mop_oracle.py`）が使う
     # `ncx2`の分位点。statsmodels/linearmodelsの間接依存としても入るが、オラクルが
     # 直接importするため明示し、数値が変わらないよう`==`で固定する。
-    "scipy==1.18.0",
+    "scipy==1.18.1",
     "ruff==0.17.4",
     # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
     # wooldridge_loader）。標準CIで確実に実行されるよう

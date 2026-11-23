@@ -205,11 +205,9 @@ For 2SLS with a `cov_type` other than `"classical"`, let \(\tilde\varepsilon = y
 
 Three details:
 
-- **It is not \((Z'\tilde\varepsilon)' S^{-1} (Z'\tilde\varepsilon)\), the quadratic form at the 2SLS residuals.** 2SLS does not use \(S^{-1}\) as its weight. When the errors are not homoskedastic, \(Z'\tilde\varepsilon\) has a singular asymptotic variance of rank \(l - k\) that is not \(S\), and \(S^{-1}\) is not its generalized inverse, so that statistic is not chi-squared in large samples. Evaluating \(J\) at \(\hat\beta_S\) restores the chi-squared limit with \(l - k\) degrees of freedom. With the heteroskedasticity-robust \(S\) it is the robust score test of Wooldridge (1995).
+- **It is not \((Z'\tilde\varepsilon)' S^{-1} (Z'\tilde\varepsilon)\), the quadratic form at the 2SLS residuals.** 2SLS does not use \(S^{-1}\) as its weight. When the errors are not homoskedastic, \(Z'\tilde\varepsilon\) has a singular asymptotic variance of rank \(l - k\) that is not \(S\), and \(S^{-1}\) is not its generalized inverse, so that statistic is not chi-squared in large samples. Evaluating \(J\) at \(\hat\beta_S\) restores the chi-squared limit with \(l - k\) degrees of freedom.
 - **`"hc0"`, `"hc1"`, `"hc2"` and `"hc3"` give the same value.** \(S\) has no small-sample factor and no leverage adjustment, as with `gmm_weight_type="robust"`; the statistic depends on the scale of \(S\), so a factor such as \(n/(n-k)\) would change it. The same holds for the cluster factor \((G/(G-1))((n-1)/(n-k))\).
 - **The statistic is `None` when \(S\) is singular.** With `cov_type="cluster"` this always happens when there are fewer clusters \(G\) than columns \(l\) of \(Z\) (the exogenous regressors, including the constant, and the excluded instruments): \(S\) is a sum of \(G\) rank-one matrices. With any covariance it can also happen because \(S\), or the matrix \(Z'X\) weighted by it, is numerically close to singular, for example with nearly collinear regressors; this is rare. The fit itself still succeeds and the other results are reported. `gmm_weight_type="cluster"` with too few clusters raises an error instead, because the weight is needed for the point estimate.
-
-Reference: Wooldridge (1995), "Score diagnostics for linear models estimated by two stage least squares", in Maddala, Phillips and Srinivasan (eds.), *Advances in Econometrics and Quantitative Economics*.
 
 ### Endogeneity: `wu_hausman_statistic`
 

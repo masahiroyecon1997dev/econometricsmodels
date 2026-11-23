@@ -30,7 +30,7 @@ How close the solvers stop to the exact maximum. Every solver stops at a converg
 
 ### Separation
 
-If some combination of the regressors perfectly predicts the outcome, for all observations (complete separation) or for a subset (quasi-complete separation, for example a dummy variable that equals 1 only when \(y = 1\)), no finite maximum-likelihood estimate exists and the coefficients would diverge. This is detected exactly after the optimizer stops, whatever the sample size, and raises an error. With `raise_on_non_convergence=False` the result is returned with `converged=False` instead. Data that are close to, but not at, separation have a finite estimate and are estimated without an error, although the standard errors can be very large.
+If some combination of the regressors perfectly predicts the outcome, for all observations (complete separation) or for a subset (quasi-complete separation, for example a dummy variable that equals 1 only when \(y = 1\)), no finite maximum-likelihood estimate exists and the coefficients would diverge. This is detected exactly after the optimizer stops, whatever the sample size, and raises an error. A \(y\) that has the same value in every row is not treated as separation: with an intercept it is rejected before the optimizer runs as a `ValidationError` (`OUTCOME_CONSTANT`), also with `raise_on_non_convergence=False`, and without an intercept it is estimated. With `raise_on_non_convergence=False` the result is returned with `converged=False` instead. Data that are close to, but not at, separation have a finite estimate and are estimated without an error, although the standard errors can be very large.
 
 ## Covariance of the coefficients: `cov_type`
 

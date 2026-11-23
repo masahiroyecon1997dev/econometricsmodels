@@ -29,7 +29,7 @@ Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\s
 
 ### What `fit()` rejects
 
-`fit()` raises an error if both bounds are `None`, if `lower >= upper`, if any \(y_i\) lies outside the bounds, and if no observation lies strictly inside the bounds (the model is then not identified).
+`fit()` raises an error if both bounds are `None`, if `lower >= upper`, if any \(y_i\) lies outside the bounds, and if no observation lies strictly inside the bounds (the model is then not identified). With an intercept it also raises an error when \(y\) has the same value in every row (up to rounding), because there is nothing to explain (`OUTCOME_CONSTANT`); a \(y\) that equals a bound in every row is reported as having no observation inside the bounds instead. Without an intercept a constant \(y\) is estimated.
 
 ## Covariance of the coefficients: `cov_type`
 

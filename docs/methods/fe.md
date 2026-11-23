@@ -65,8 +65,7 @@ following `fixest`'s default `ssc()`. The effective number of parameters \(K\) d
 
 | Fixed effects | \(K\) |
 |---|---|
-| All columns nested in the clusters (the default: one-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the number of groups of the nested columns, plus the number of columns |
-| Some columns nested (typically two-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the groups of the nested columns, plus the number of nested columns |
+| At least one column nested (the default one-way model, clustered by entity, has all its columns nested; in a two-way model typically the first column is) | \(\mathrm{df}_{\text{model}}\) minus the number of groups of the nested columns, plus the number of nested columns |
 | No column nested | \(\mathrm{df}_{\text{model}}\) |
 
 and \(K\) is never allowed to be below \(k+1\).

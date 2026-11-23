@@ -40,12 +40,13 @@ pub struct FEIVOptions {
     pub estimator: String,
 
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
-    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported. With `estimator="2sls"`
-    /// the first-stage regressions and the diagnostics that depend on a covariance
-    /// (`kleibergen_paap()` and `effective_f()`) follow it. With `estimator="gmm"` it is
-    /// independent of `gmm_weight_type` (the weight matrix of the point estimate): the sandwich
-    /// covariance is built from the weight matrix actually used and the moment variance of this
-    /// type, and "hc2" and "hc3" have not been compared with another implementation.
+    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported. With both estimators
+    /// the first-stage regressions, the Wu-Hausman test and the diagnostics that depend on a
+    /// covariance (`kleibergen_paap()` and `effective_f()`) follow it. With `estimator="2sls"`
+    /// it also sets the weight of `c_stat()`. With `estimator="gmm"` it is independent of
+    /// `gmm_weight_type` (the weight matrix of the point estimate): the sandwich covariance is
+    /// built from the weight matrix actually used and the moment variance of this type, and "hc2"
+    /// and "hc3" have not been compared with another implementation.
     #[pyo3(get)]
     pub cov_type: String,
 

@@ -248,17 +248,17 @@ model tests — for each supported covariance type.
 
 | Method | Primary reference | Independent cross-check | Relative tolerance (primary / cross-check) |
 |---|---|---|---|
-| OLS | statsmodels `OLS` | R `lm` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
-| WLS | statsmodels `WLS` | R `lm(weights=)` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 5e-2) |
-| Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 1e-6 |
-| Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 1e-6 |
-| Tobit<sup>2</sup> | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 |
-| IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
+| OLS | statsmodels `OLS` | R `lm` + `sandwich`/`lmtest` | 1e-8 / 1e-8 |
+| WLS | statsmodels `WLS` | R `lm(weights=)` + `sandwich`/`lmtest` | 1e-8 / 1e-8 |
+| Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-7 |
+| Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-7 |
+| Tobit<sup>2</sup> | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 (exceptions on the verification page) |
+| IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 |
 | IV (GMM) | linearmodels `IVGMM` | R `momentfit` | 1e-8 / 1e-8 |
 | FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
 | FEIV<sup>3</sup> | R `fixest` (`feols` with instruments) | linearmodels `IV2SLS` with dummy variables, R `plm`, R `ivDiag` | 1e-8 / 1e-8 |
 | FEIV (`estimator="gmm"`)<sup>4</sup> | linearmodels `IVGMM` on within-transformed data | R `momentfit` on within-transformed data, FE-2SLS references (`fixest`, `plm`) | 1e-8 / 1e-8 |
-| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
+| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 |
 
 <sup>1</sup> For FE and RE, linearmodels covers only classical and HC1
 standard errors. Its cluster and Driscoll-Kraay standard errors use
@@ -288,13 +288,10 @@ covers.
   reference is 1e-8 (with a tiny absolute floor for values near zero); for
   closed-form estimators the measured agreement is about 1e-14. Where
   implementations legitimately differ, looser documented values are used
-  instead: the figures in parentheses and the Logit/Probit cross-check, as
-  well as some solver options and real-data cases listed on the
-  verification page. Typical reasons are HAC small-sample conventions, both
-  sides being iterative optimizers, or plm and linearmodels estimating the
-  Swamy-Arora variance components slightly differently on unbalanced
-  panels. The full list of tolerances and the reasons are on the
-  verification page.
+  instead: the Logit/Probit cross-check (both sides are iterative
+  optimizers), the Tobit exceptions, and some solver options and real-data
+  cases listed on the verification page. The full list of tolerances and
+  the reasons are on the verification page.
 - **Single-reference cases.** Some statistics have only one reference. For
   example, IV (2SLS) with HC2/HC3 standard errors is checked against `ivreg`
   only, because linearmodels has no equivalent. These cases are listed on the

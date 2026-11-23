@@ -47,7 +47,7 @@ Every field and method is available with both estimators; there is no result tha
 | `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | yes, the same values |
 | `weak_instrument_f_statistics` and its degrees of freedom, `wu_hausman_*` | yes | yes, the same values |
 | `overid_*` | Sargan | Hansen J |
-| `c_stat()` weight | follows `cov_type` (`"dk"` raises a `ValidationError`) | follows `gmm_weight_type` |
+| `c_stat()` weight | follows `cov_type` (`"dk"` raises a `ValidationError`) | follows `gmm_weight_type` (classical for `gmm_type="one_step"`) |
 | `stat_dist`, `wald_dist` | `"t"`, `"f"` | `"normal"`, `"chi2"` |
 
 The first stage, the weak-instrument diagnostics and the Wu-Hausman test depend only on the first stage, so for the same data and `cov_type` they do not depend on the estimator; `fixed_effects()` uses the coefficients of the estimator used.

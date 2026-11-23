@@ -90,7 +90,7 @@ impl crate::shared::pickle::PickleField for Vec<(String, FEResult)> {
 /// from an auxiliary regression with the first-stage residuals added, so they do not depend on
 /// the estimator: for the same data and `cov_type`, `estimator="2sls"` and `estimator="gmm"` give
 /// the same values. The Wu-Hausman test follows `cov_type`, not the GMM weight; `c_stat()` is the
-/// endogeneity test that uses the weight. The first-stage regressions and the Cragg-Donald,
+/// endogeneity test based on Hansen J statistics. The first-stage regressions and the Cragg-Donald,
 /// Kleibergen-Paap and effective F diagnostics are not fields: they are the methods
 /// `first_stage()`, `cragg_donald()`, `kleibergen_paap()` and `effective_f()`, available with both
 /// estimators. The fixed effects themselves are the method `fixed_effects()` and the C statistic

@@ -4,13 +4,11 @@ FEIV（FE-2SLS・FE-GMM。`estimator`で切り替え）の実装・テスト・�
 （CLAUDE.md 13章）。このファイルには、**実装されていないもの・見送ったもの・判断が未決のもの**だけを残す。各項目は、Issueにするか・やらないと決めるか・
 既存Issueに追記するかを利用者が決める（5章。承認後に英語でIssueへ起票。関連する項目は1つにまとめる）。決まった項目は削除し、全て片付いたらこのファイルを削除する。
 
-状態（2026-11-15）: `release/v0.10.0`。#370〜#389はすべてclose済み（#388は2026-11-15。#389は#380に統合）。FE-GMMの性能計測（`compare_fe_iv.py`のmethod軸にGMMを足す件）は
-#663で追う。PR #635は未マージ。CHANGELOGにFEIVは未記載（リリース時にまとめる）。
+状態（2026-11-23）: `release/v0.10.0`。#370〜#389はすべてclose済み（#388は2026-11-15。#389は#380に統合）。FE-GMMの性能計測（`compare_fe_iv.py`のmethod軸にGMMを足す件）は
+#663で追う。PR #635のCIは通過済み。CHANGELOGにFEIVは未記載（リリース時にまとめる）。
 
 ## A. 実装されていない機能（後続Issueの候補）
 
-- **IVの`estimator="gmm"`でも`wu_hausman_*`を計算する**（FEIVはGMMでも計算するようになったので、IVだけが`None`で残る差。#679）。
-- **FEIVへの頑健な過剰識別検定**（IV本体の2SLSへの頑健なHansen J（#636）にFE-2SLSを含めるか）。FEIVのSarganは等分散前提で`cov_type`に依らない。
 - 公開docsの`docs/guide/performance*.md`・`README.md`「Performance」へのFE-IV・FE-GMMの行（リリース準備時にCIの計測値から再生成。`compare_fe_iv.py`の`extra_methods`にGMMを足す件は#663に起票済み）。
 
 ## B. 判断が未決の設計上の論点

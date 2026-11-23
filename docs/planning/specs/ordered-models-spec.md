@@ -1,0 +1,171 @@
+# OrderedLogit / OrderedProbit 設計ノート（実装途中）
+
+順序ロジット・順序プロビット（潜在変数＋閾値モデル、最尤推定）の仕様を詰めるための設計ノート。
+実装完了後は`docs/spec/`へ集約する（共通部分を`nonlinear-common.md`へ、リンク固有部分を
+`ordered-logit-spec.md`・`ordered-probit-spec.md`へ。経緯は削除し理由のみ残す）。
+
+状態の凡例: **未決**（ユーザー確認待ち）／**確定**。推奨案は調査に基づく提案であり、確定ではない
+（CLAUDE.md 14章）。
+
+## 0. モデルの定義（前提・確定）
+
+`y*_i = x_i'β + ε_i`、`y_i = j ⇔ τ_{j-1} < y*_i ≤ τ_j`（`τ_0=-∞`、`τ_K=+∞`、`τ_1<…<τ_{K-1}`）。
+`P(y_i=j|x_i) = F(τ_j - x_i'β) - F(τ_{j-1} - x_i'β)`。`F`はロジスティックCDF（OrderedLogit）または
+標準正規CDF（OrderedProbit）。切片は閾値と同時に識別できないので`include_intercept`は提供しない。
+閾値の数は`K-1`で、`y`のカテゴリ数`K`から自動導出する（オプション化しない）。
+対数尤度は`(β, τ)`について大域的に凹（`τ`が単調増加の領域上）。
+
+## 1. 論点一覧
+
+### A. スコープ・依存関係・進め方
+
+| # | 論点 | 選択肢 | 推奨案 | 状態 |
+|---|---|---|---|---|
+| A1 | 共通基盤が前提とする`validate_categorical_y`（多項ロジット向け）は**未実装**（多項ロジットは未着手） | (a) 順序モデル側で先に実装し、パラメータ化（最小/最大カテゴリ数）して多項ロジットが後から再利用する／(b) 多項ロジットを先に実装する | (a)。順序モデルを先行させる。上限が多項ロジット10・順序30と異なるので、上限を引数にした形で作る | **確定**: `nonlinear/common/validation.rs`（`validate_binary_y`・`validate_outcome_not_constant`と同じ場所）に置く。engineには`y`が`f64`で届くので整数性もここで検査する |
+| A2 | 多項ロジットを同じリリース（v0.11.0）に含めるか | 含める／含めない | 本ノートの範囲外（順序モデルのみ） | 未決 |
+| A3 | 実装順序 | OrderedLogit→OrderedProbit（Issueの推奨）／共通エンジンを先に作り両方を同時に通す | OrderedLogitを先に通し、共通化できる部分を抽出してからProbit（Issueどおり） | 未決 |
+| A4 | リンク関数の共通化の単位 | (a) `Link`トレイト（または関数対）を取る1つの汎用エンジン＋薄い`ordered_logit.rs`/`ordered_probit.rs`ファサード／(b) Logit/Probitと同様に完全に別ディレクトリ（`ordered_logit/`・`ordered_probit/`）で、共通部分だけ`nonlinear/common/`へ | 既存のLogit/Probitは別ディレクトリだが、順序モデルは閾値の扱い・分離検出・限界効果が重く重複が大きい。**確定**: Logit/Probit式の別ディレクトリ（`ordered_logit/`・`ordered_probit/`）。Logit/Probitの汎用化は順序モデルと独立したリファクタとして別Issueで扱い、先行させない（二値モデルの`Fitted`・`fit`の骨格は順序モデルが再利用できない）。リンク非依存の部分（閾値のパラメータ化・確率からの尤度の骨格）は、OrderedLogitを通した後、Probitを書く段階で重複を見て`common/`へ抽出する |
+| A5 | Pythonの公開形 | 別クラス`OrderedLogit`/`OrderedProbit`（Logit/Probitと同じ）／1クラス`OrderedModel(link=...)`（「系統内の手法ファミリは1クラス」の前例＝`estimator`オプション） | 別クラス。Logit/Probitが別クラスの前例であり、リンクの違いは「推定量の違い」ではなくモデルの違いなので | **確定**: 別クラス`OrderedLogit`/`OrderedProbit` |
+| A6 | 設計ノート・仕様書の単位 | 1ファイル（本ノート）／手法ごとに2ファイル | 計画中は本ノート1ファイル。集約時に共通→`nonlinear-common.md`、固有→2ファイル | 未決 |
+| A7 | ブランチ | `release/v0.11.0`を`release/v0.10.0`のHEADから作成済み（worktree: `/workspaces/econometricsmodels-v0.11.0`）。`release/v0.10.0`のリリース作業で`main`/`dev`に入る変更の取り込み方 | v0.10.0のリリース完了後に`git merge`で取り込む（リベースしない） | 未決 |
+
+### B. 入力（`y`・`x`）と検証
+
+| # | 論点 | 選択肢 | 推奨案 | 状態 |
+|---|---|---|---|---|
+| B1 | `y`で受け付けるdtypeと順序の与え方 | (a) 数値（整数・浮動小数点・`Boolean`は不可）で、値が整数のもの。順序は整数コードの大小／(b) さらに`Enum`・`Categorical`の順序をそのまま使う | (a)。`accepted-data.md`の「数値の役割」の表と整合し、Issueの「連続整数コード」とも一致。`Enum`対応は将来拡張。`Boolean`は2値なので`K<3`で弾かれる | 未決 |
+| B2 | コードの開始値 | 任意の開始値を許す（`1..K`も`0..K-1`も可）／`0`始まり固定 | 任意。連続（欠番なし）だけを要求する。結果にコードの一覧を持つ | 未決 |
+| B3 | カテゴリ数`K`の範囲 | 3以上30以下（Issue）。`K=2`は`Logit`/`Probit`へ誘導するエラー | Issueどおり。上限30の根拠（閾値が増えると計算量・識別の悪化）を仕様に書く。`K<3`・`K>30`は別の`code`にするか1つの`code`（`params`に`min`/`max`）か | 未決 |
+| B4 | 値が整数でない`y`（`1.5`等）・欠番の扱いとエラー | 新しい`code`を足す。既存の`OUTCOME_NOT_BINARY`は流用しない（文面・`hint`が異なる）。候補: `OUTCOME_NOT_INTEGER_CODES`・`OUTCOME_CODES_NOT_CONSECUTIVE`・`OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE`。`column`・`row`・`value`の三つ組（直近の`OUTCOME_CONSTANT`の変更と同じ規則）を付ける | `docs/spec/error-style-guide.md`に沿って`code`の名前と`params`を決める | 未決 |
+| B5 | 観測が少ないカテゴリの扱い | 観測0（欠番）はエラー。観測1件のカテゴリ等を警告・エラーにするか | 欠番のみエラー。少数セルは弾かない（分離・非収束の問題として扱う。C5参照） | 未決 |
+| B6 | `x`の定数列 | 閾値と識別できないので、定数列を含む`x`は明示的にエラーにする（statsmodelsも拒否する）。`"const"`列衝突検証は不要 | 専用の`code`を足すか既存の定数列/共線性の`code`で足りるか確認。ランクチェックは中心化後の設計行列で行うため、定数列は「ゼロ列」として見えることに注意 | 未決 |
+| B7 | `x`が空（`x=[]`）のモデル（閾値のみ） | 許す／`NoRegressors`で弾く（Logit/Probitの`k==0`と同じ） | 許す案: 帰無モデルそのもので、閉形式（周辺累積比率）で解ける。ただし`df_model=0`でLR検定・擬似R²が定義できず、結果の組み立て・限界効果が特殊になる。**弾く**案が実装は単純 | **確定**: 弾く。Logit/Probit/OLSは既に`x=[]`を`ValidationError`で弾いており（`x must contain at least one column name`）、それに揃える。帰無モデルの対数尤度は内部で閉形式で使う |
+| B8 | 検証の順序 | `fit()`冒頭の検証順（y型→カテゴリ→観測数→クラスター等）。`tests/cross_method/test_validation_order.py`に足す | 既存の順序（`validate_fit_preconditions`）に合わせて決める | 未決 |
+| B9 | 観測数の下限 | `n <= k_x + (K-1)`（総パラメータ数）で`InsufficientObservations` | 総パラメータ数。`k`の意味をdocコメントに明記 | 未決 |
+| B10 | `y`の定数 | `K<3`の検査が先に効くため`OUTCOME_CONSTANT`の対象外になる | 確認のみ（検査順の回帰テストを足す） | 未決 |
+
+### C. 推定（尤度・パラメータ化・最適化）
+
+| # | 論点 | 選択肢 | 推奨案 | 状態 |
+|---|---|---|---|---|
+| C1 | 最適化のパラメータ化 | (a) 直接`τ`で最適化し、単調性は実行可能領域の外を`cost=+∞`で棄却／(b) 無制約化: `τ_1`と`log(τ_j-τ_{j-1})`（statsmodelsと同じ）／(c) 初期値を直接`τ`にしてLM付きNewtonで進める | **最重要の論点**。(b)は`bfgs`/`lbfgs`のline searchが素直だが、尤度が非凹になり、Tobitで踏んだ「鞍点での停滞収束」の罠が出る。(a)は大域凹性が使えるがline searchが棄却に弱い。**実験済み（4章）。推奨は(a)直接`τ`で最適化**: Newtonは棄却ではなく「境界までの割合」で`τ`の順序を保つ。`log`増分は非凹になり悪い初期値で失敗が増える（`log`増分は尤度の曲率が壊れ、Hessianが不定になる） | 推奨案を確認待ち |
+| C2 | 標準化 | 切片が無いので、平均を引く標準化は`β̃=s⊙β`・`τ̃=τ+x̄'β`と閾値の平行移動で**厳密に表せる**。引くか、スケールだけにするか | 平均も引く（切片ありのLogit/Probitと同じ理由で条件数が下がる）。逆変換と共分散のヤコビアンを`common/standardize.rs`に足す | 未決 |
+| C3 | 初期値 | `β=0`、`τ_j=F⁻¹(累積比率)`（周辺分布からの閉形式。nullモデルの厳密解） | 左のとおり。`ols_based_initial_params`のランクチェック（切片前提）は流用できないので、ランク落ちの検出を別途どこで行うか（中心化した`x_std`の列ピボットQR）を決める | 未決 |
+| C4 | 確率の数値安定化 | `P_j=F(a)-F(b)`は裾でほぼ等しい2項の引き算になり桁落ちし、深い裾では`P_j`がアンダーフローする。(A)対数空間＋対称性による反転／(B)反転のみで倍精度領域の差を取り、アンダーフローは`cost=+∞`で棄却／(C)Probitの`U_CLAMP`型クランプ | **推奨は(A)**。(C)は`a`・`b`が同じ裾で両方クランプされると`F(a)-F(b)=0`になるので使えない。式・実測・Rustに足す部品は5章 | **確定**: (A)。`shared::normal`への`ln_normal_cdf`の追加も含む |
+| C5 | 完全分離・準完全分離（MLEが存在しない場合） | (a) v1は非収束（`NOT_CONVERGED`）や巨大な閾値に任せる／(b) 既存のLP（`separation/lp.rs`）を拡張: 全`i`に`c_{y_i-1} ≤ d'x_i ≤ c_{y_i}`（`d≠0`）を満たす`(d,c)`が存在するかを判定 | 標準化ノルムの閾値方式は廃止済み（偽陽性・偽陰性がある）なので(a)で黙って誤った結果を返さないことが条件。(b)のLPは変数が`K-1`個増える程度で拡張可能に見えるが、v1に含めるか別タスクにするか判断が要る | 未決 |
+| C6 | ソルバー | `newton`/`bfgs`/`lbfgs`の3種（既存の`run_solver`を共有）。`tol`の既定値（`newton`: `1e-6`、`bfgs`/`lbfgs`: `1e-8`）も共通 | 既存と同じ。C1の結果次第で`newton`の扱いを再検討 | 未決 |
+| C7 | 直交座標（Tobitの`DesignCoordinates`）の採用 | Tobitは相関の高い傾きでのHessianの桁落ちを避けるために直交座標で最適化。順序モデルでも必要か | 標準化＋ウォームスタートで足りるかを実験で確認してから判断（最初は採用しない） | 未決 |
+| C8 | `fit()`冒頭の共通処理 | `ensure_serial()`、`py.detach`、`guard`、`BudgetedProblem`（評価回数の枠）、`OutcomeConstant`相当 | 既存手法と同じ。`test_gil_release.py`の`FITS`・`CASES`・`ROWS`に足す | 確定 |
+
+### D. 標準誤差・検定・適合度
+
+| # | 論点 | 選択肢 | 推奨案 | 状態 |
+|---|---|---|---|---|
+| D1 | `cov_type` | `classical`（観測情報）・`opg`・`hc0`・`hc1`・`cluster`（Logit/Probitと同じ集合） | 同じ。スコアは最適化のパラメータ化に依らず、サンドイッチは再パラメータ化で不変（デルタ法で戻す）。`hc1`の補正`n/(n-k)`の`k`は総パラメータ数（`k_x+K-1`） | 未決 |
+| D2 | クラスター数の条件 | Logit/Probitは`G <= q`（`q`は傾きの数）でエラー。順序モデルの`q`は`k_x`（閾値は傾きではないが、`β`ブロックの`q×q`部分行列が退化する条件は同じ） | `q=k_x`で`validate_cluster_count_covers_slopes`を再利用 | 未決 |
+| D3 | 閾値の標準誤差 | 元の`τ`の尺度でデルタ法（C1(b)を採る場合）。`z`検定・信頼区間はパラメータ全体に共通（標準正規分布） | `params`の`τ_j`に対する`std_errors`・`test_stats`・`p_values`・`conf_int`を`β`と同じ表に載せる | 未決 |
+| D4 | 全体検定 | LR検定（`lr_statistic`・`lr_p_value`、`df=k_x`）。帰無モデルは閾値のみで**入れ子**（Logit/Probitの切片なしと違い常に成り立つ）。`log_likelihood_null`は閉形式`Σ n_j log(n_j/n)` | 提供する。`pseudo_r_squared`（McFadden）・`aic`・`bic`も既存の`goodness_of_fit`を共有（`k`は総パラメータ数） | 未決 |
+| D5 | `df_model`・`df_resid` | `df_model=k_x`、`df_resid=n-(k_x+K-1)` | 左のとおり | 未決 |
+| D6 | 平行線（比例オッズ）仮定の検定（Brant検定等） | v1スコープ外（Issueで確定）。将来はオプトインの事後診断メソッド | 対象外。独立メソッドとして公開する方針（CLAUDE.md 2章）を`docs`の「Not implemented」に明記 | 確定 |
+
+### E. 結果・API
+
+| # | 論点 | 選択肢 | 推奨案 | 状態 |
+|---|---|---|---|---|
+| E1 | `params`等のキー名: 閾値の名前 | `"1/2"`（statsmodels・`MASS::polr`と同じ流儀）／`"cut1"`／`"cutpoint_1"`。`x`の列名との衝突（利用者の列が同名のとき）をどう扱うか（Tobitの`"sigma"`は同じ問題を抱える） | 前例（Tobitの`"sigma"`）の扱いを確認し、衝突検査を`fit()`で行う。名前はコード（例`"1"`..`"K-1"`）から作る案が読みやすい | 未決 |
+| E2 | `cutpoints`/`thresholds`プロパティ | `params`とは別に閾値のリストを公開するか、名前は`cutpoints`か`thresholds`か | Issueの用語は`cutpoint`。`cutpoints: list[float]`（昇順）を公開し`params`にも含める | 未決 |
+| E3 | 表の関数名 | Issueは`coef_table()`と書いているが、既存は**`params_table()`**（Logit/Probit/Tobit/IV） | `params_table()`に統一（Issueの記述は古い） | 未決 |
+| E4 | `predict()`の返り値 | カテゴリ別確率は`n×K`。(a)`list[list[float]]`／(b)polars `DataFrame`（列`prob_<code>`）／(c)`target="probabilities"`/`"class"`の切り替え（Tobitの`target`方式） | 既存の`predict()`は`list[float]`で、Series化の検討が別にある。`n×K`を`list[list[float]]`で返すか`DataFrame`かは要判断。クラス予測（最大確率）・期待カテゴリが要るか | 未決 |
+| E5 | `augment()` | カテゴリ別確率の列名（`predicted_probability_<code>`等）と元の列との衝突検査 | 列名規則はE4と合わせる。`new_data`のout-of-sample対応は既存手法と同じ（`y`は不要） | 未決 |
+| E6 | `marginal_effects()` | **Issueのスコープに無い**。順序モデルでは限界効果が中心的な解釈量（`∂P(y=j)/∂x_k=[f(τ_{j-1}-xβ)-f(τ_j-xβ)]β_k`、端のカテゴリは片側）。Logit/Probitは提供済み | v1に含めるか、別タスクにするか。含める場合は`(変数, カテゴリ)`ごとの行、`at`（`overall`/`mean`/`median`）、デルタ法（`β`と`τ`のヤコビアン）、離散変数の自動判定はしない（既存方針） | **確定**: 実装する。独立したタスクとして起票済み（v0.11.0の対象。詳細設計は本ノートで詰める） |
+| E7 | `pred_table()` | `K×K`の的中表（最大確率のカテゴリで分類）。Logit/Probitは提供 | 提供するか（E6より優先度は低い）。キーの命名は`actual`/`predicted_<code>`の前例に合わせる | 未決 |
+| E8 | `*Options` | `cov_type`・`cluster`・`solver`・`max_iter`・`tol`・`raise_on_non_convergence`・`confidence_level`（`LogitOptions`から`include_intercept`を除いたもの）。全引数キーワード専用。`options`は末尾のキーワード専用引数。`start_params`・`weights`・`offset`は無し | 左のとおり。`api-conventions.md`の表に1行足し`test_call_signatures.py`が検査する | 未決 |
+| E9 | pickle・`copy` | `*Fitted`（`β`・`τ`・共分散・カテゴリのコード・`x`の列名）を持つ。`from_parts`で`τ`が狭義単調増加・次元の整合を検査する | 既存パターンに従う。`FORMAT_VERSION`・`SAMPLES`への追加 | 確定 |
+
+### F. テスト・ベンチマーク・性能
+
+| # | 論点 | 選択肢 | 推奨案 | 状態 |
+|---|---|---|---|---|
+| F1 | 主リファレンスと交差検証 | Issueは主=statsmodels`OrderedModel`。`nonlinear-common.md`8章は主=R`MASS::polr`。statsmodels（0.15.0）の`OrderedModel`は`params`が`log`増分で返る・既定の最適化器が`nm`・`cov_type`（HC/cluster）の対応が未確認 | 主=statsmodels、交差検証=R（`MASS::polr`。`polr`の`vcov`は観測情報で非正準リンク（probit）でも本実装と一致する見込み。ロバストSE（`sandwich`/`ordinal::clm`等）の対応は**要調査**）。`nonlinear-common.md`8章の記述を直す。**実測（statsmodels 0.15.0・R `MASS::polr`・`sandwich` 3.1.3、合成データn=2000・K=4）**: 点推定・対数尤度は`newton`（または`gtol`を締めた`bfgs`）で1e-9・12桁一致（既定の`nm`は約1e-5ずれる）。SEはstatsmodels・polrとも数値微分でお互いに約1e-7ずれ、`RTOL=1e-8`は届かない。`hc0`はstatsmodelsとRの`sandwich(polr)`が約1e-8で一致。`hc1`はstatsmodelsが`hc0`と同値（補正なし）、Rは`vcovHC`が`polr`に使えず`sandwich(adjust=TRUE)`で出せる見込み（未検証）。`opg`・`cluster`はRの`vcovOPG`・`vcovCL`が`polr`で動く。`cluster`の補正はstatsmodelsと異なり、Rの`cadjust=TRUE`が本実装（`G/(G-1)・(n-1)/(n-k)`）と同じ式。**方針（確認待ち）**: 許容誤差は参照実装間の実測の食い違いから決め、点推定・対数尤度は`1e-8`、SE・検定統計量だけ緩める。参照はstatsmodels（`newton`/締めた`bfgs`）を主、Rを交差検証とし、自前実装のオラクルは参照にせず、誤差の床の確認と、外部に参照が無い量の補助的な確認に限る | 未決 |
+| F2 | 比較する量 | `params`（`β`・`τ`）・`std_errors`・LR・対数尤度・AIC/BIC・カテゴリ別確率・（E6を含めるなら）限界効果。statsmodelsの`log`増分尺度の共分散はデルタ法で`τ`の尺度へ変換して比べる | 左のとおり | 未決 |
+| F3 | 許容誤差 | 既定`RTOL=1e-8`。最適化器の許容誤差の差で`polr`は`~1e-6`ずれうる（Probitの`glm`の前例）。再fitで消す手順を使うか | 実測してから`tests/support/_tolerances_nonlinear.py`に例外を足す | 未決 |
+| F4 | 合成データ | `generate_ordered_choice_dataset(scenario, link)`を`benchmark/nonlinear/datasets.py`に足す。シナリオ候補: `baseline`（`K=4`）・`k3`（最小）・`k30`（最大）・`near_separation`・`sparse_category`（少数セル）・相関の強い`x`・`no_x`相当（B7次第）・`cluster`・`large_means` | 候補を確認してから決める | 未決 |
+| F4' | 実データ | 順序の被説明変数を持つ公開データ。Wooldridgeの`beauty`（`looks`が1〜5）等が候補（**データの内容は未確認**）。既存の実データは`mroz`・`apple` | 利用者に候補を確認する | 未決 |
+| F5 | テストの網羅性 | `testing-policy.md`の網羅性要件（`cov_type`×`solver`×切片なしの扱い・クラスター境界・信頼水準・検証順序・pickle・GIL・panic境界・エラー`code`）。`/test-new`と`/review-testing`で確認 | 左のとおり | 確定 |
+| F6 | 性能比較 | `performance/compare_ordered_logit.py`・`compare_ordered_probit.py`。statsmodelsの最適化器（`bfgs`か`newton`）をどれにするか（`nm`は不公平）。`n`の掃引に加え`K`の掃引 | `solver`軸と`n_sweep_engine_only=(200_000, 1_000_000)`の大標本ガードを既存手法と同型に | 未決 |
+
+### G. ドキュメント
+
+| # | 論点 | 推奨案 | 状態 |
+|---|---|---|---|
+| G1 | 公開ページ | `usage/`・`api/`・`methods/`の各1ページをOrderedLogit・OrderedProbitそれぞれに（`methods/`は2ページか1ページか）。mkdocs navのNonlinear models配下。「Options at a glance」「Fields by purpose」「Options by purpose」を漏れなく | 未決 |
+| G2 | 横断ガイドの更新 | `api-conventions.md`・`inference-conventions.md`の表に1行、`accepted-data.md`に`y`（順序コード）の行、`validation.md`に新しい検証の行、`verification.md`、`performance.md`、`error-codes.md`（生成）、`README.md` | 確定 |
+| G3 | 数式の正本 | 尤度・スコア・Hessian・限界効果・確率の定義式は`docs/methods/`に置き、`docs/spec/`には理由のみ | 確定 |
+
+## 2. 実装順序の案（確認後に確定する）
+
+1. 共通基盤（カテゴリ検証・コード検証・新しいエラー`code`・標準化の拡張）
+2. OrderedLogit: 尤度・スコア・Hessian → 点推定 → `cov_type` → 適合度 → カテゴリ別確率
+3. OrderedLogit: `engine_pybind` → Pythonラッパー → テスト・ベンチマーク → ドキュメント → 性能
+4. OrderedProbit: 共通化できる部分の抽出 → リンクの差し替え → 以降は3と同じ
+
+## 3. 確認済みの事実（調査メモ）
+
+- `nonlinear/common/validation.rs`に`validate_binary_y`はあるが`validate_categorical_y`は無い。
+- `nonlinear/`には`logit`・`probit`・`tobit`・`separation`のみ（多項ロジットは未着手）。
+- Logit/Probitの`fit()`が使う`ols_based_initial_params`・標準化（`standardize_columns`）は切片の存在を前提にしている。
+- `nonlinear-common.md`7章は「順序モデルの閾値パラメータ数はオプション化せず`K-1`を自動導出」と既に決めている。
+- 既存の表メソッドは`params_table()`（`coef_table()`は存在しない）。
+
+## 4. C1の実験結果（閾値のパラメータ化）
+
+**方法**: Pythonのプロトタイプ（numpy・scipy）。尤度・スコア・Hessianは解析式で、有限差分と`1e-9`、statsmodelsの対数尤度・最適点と9〜10桁で一致することを確認した。比べた方式は、直接`τ`（`θ=(β,τ)`、順序を破る点は`cost=+∞`）、直接`τ`＋境界までの割合（`direct_ftb`、Newtonのステップを`0.9·α_max`に縮めて順序を保つ）、`log`増分（`θ=(β,τ₁,log(τⱼ-τⱼ₋₁))`、statsmodelsと同じ）。ソルバーは、エンジン相当のNewton（LM梯子・補償和・`BelowCostResolution`）、BFGS、L-BFGS（scipyの`L-BFGS-B`と、warm start点の厳密な逆Hessianで前処理したもの）。`n=10⁵`（ストレスは`2·10⁴`）、`K=5`/`6`/`30`、`k=5`/`20`（相関0.9）、少数セル（0.05%）、強い効果、平均が大きい非中心化の`x`、logitとprobit。
+
+**結果**:
+
+1. **warm startからのNewtonは、どの方式も差が出ない**: 全シナリオで4〜6反復・評価回数4〜6で収束（`direct`・`direct_ftb`・`reparam`とも）。
+2. **悪い初期値（`β~N(0,1)`・`N(0,3)`＋ランダムな`τ`、`τ`を±6に広げた初期値、各12回）で差が出る**:
+   - `direct`: コストのHessianは常に正定値（不定0回）。全216回で成功。ただし棄却で梯子を上げるので評価回数が反復数の2〜4倍に膨らむ。
+   - `direct_ftb`: 全216回で成功。評価回数が反復数とほぼ等しい（梯子を使わない）。**最良**。
+   - `reparam`: **Hessianが不定になる反復が頻発する**（1つの条件の12回の実行の合計で最大13回）。失敗が出る（logit K5・K30、probit K30で12本中10〜11本が成功）。非凹性がTobitで踏んだ鞍点の罠と同じ形で出る。
+   - （訂正）当初、probitの極端な初期値（`β~N(0,3)`、`k=20`）で全方式が失敗していたが、原因はプロトタイプがスコアの比を`P=exp(logP)`経由で作っていて、`P`が0にアンダーフローして`0/0`になったこと（初期点で`min logP≈-5000`）。比を`exp(log f - log P)`に直して再実験すると、`direct`・`direct_ftb`は全216回（3シナリオ×3初期値×12回×logit/probit）で成功、`reparam`は同じ条件で10〜11/12の失敗が残った（上の数字は再実験後のもの）。C4の5章を参照。
+3. **L-BFGSは前処理しない場合に差が出る**: `K=30`で`direct`が102反復・`reparam`が26反復。ただし**warm start点の厳密な逆Hessianで初期化すると差が消える**（`direct`は4〜5反復、`reparam`は5〜7反復）。エンジンの`FaerBfgs`・`FaerLbfgs`は同じ初期化をしているので、この差は実装には持ち込まれない。直接`τ`ではコストのHessianが常に正定値なので、初期化が「正定値でなければ元に戻す」分岐に落ちることもない。
+4. **BFGS**は両方式とも5〜13反復で、差は小さい。
+5. **中心化**: 平均が大きい非中心化の`x`では、前処理なしのL-BFGSが`direct`で54〜75反復（中心化済みの`baseline`は15反復）。中心化は引き続き必要（C2）。
+
+**推奨（確認待ち）**:
+
+- 直接`τ`で最適化する。Newtonは、ステップが順序を破るときに`τ`の部分を境界までの割合（`0.9·α_max`）で縮める（LM梯子で全ステップを棄却しない）。
+- BFGS・L-BFGSは、探索方向に沿った実行可能な最大ステップ幅を計算してline searchの`stpmax`に渡す案と、順序を破る点で`cost=+∞`を返す案がある。**scipyのline searchは`+∞`でも問題なく動いたが、argminの`MoreThuenteLineSearch`が`+∞`を扱えるかは未検証**なので、実装の最初のタスクで確かめる。
+- 標準誤差は、収束点の観測情報行列を直接`τ`で評価するので、デルタ法は要らない（statsmodelsとの比較ではstatsmodels側を元の`τ`の尺度に変換する）。
+- 副産物: 補償和なしのコストは丸め誤差の床でNewtonを止める（`n=10⁵`で`|g|≈1e-3`以下）。順序モデルでも、既存の補償和と`BelowCostResolution`を使うこと。
+
+**限界**: プロトタイプ（scipyの`L-BFGS-B`はエンジンの`FaerLbfgs`とは別物）、1つのseed（ストレステストは初期値だけ12通り）、`n=10⁶`と完全分離は未実施、境界までの割合の係数`0.9`は未調整。実験のスクリプトはscratchpad（`/tmp/claude-1000/.../scratchpad/c1/`）にあり、永続化していない。
+
+## 5. C4の検討結果（確率の数値安定化）
+
+**記法**: `a=τ_y-x'β`、`b=τ_{y-1}-x'β`（端のカテゴリは`a=+∞`または`b=-∞`）、`P=F(a)-F(b)`、`f=F'`、`A=f(a)/P`、`B=-f(b)/P`。対数尤度の観測`i`の項`ℓ=ln P`について、`∂ℓ/∂a=A`、`∂ℓ/∂b=B`、`∂²ℓ/∂a²=A·(f'/f)(a)-A²`、`∂²ℓ/∂b²=B·(f'/f)(b)-B²`、`∂²ℓ/∂a∂b=-AB`（`(f'/f)(x)`はlogitで`1-2F(x)`、probitで`-x`）。`(a,b)`は線形予測子と閾値のアフィン関数なので、`β`・`τ`への微分は`∂a/∂θ=(-x, e_y)`・`∂b/∂θ=(-x, e_{y-1})`の連鎖律で作る。
+
+**方法**: 基準値は標準ライブラリの`decimal`（90桁。誤差関数は級数と連分数。scipyと15〜16桁で一致）。`a,b∈{±1000,±100,±38,±10,±3,±1,0}`の`a>b`の全組み合わせ、隣接閾値の接近（ギャップ`1e-3`〜`1e-9`）、端のカテゴリを合わせた119ケースで、logit・probitの3方式を比べた。(naive)差を直接取る。(flipnaive)`a+b>0`なら対称性で`P=F(-b)-F(-a)`に反転して倍精度領域で差を取る。(logspace)反転した上で`ln P = ln F(u)+log1mexp(ln F(v)-ln F(u))`（`log1mexp(x)=ln(1-e^x)`を`x>-ln2`で`ln(-expm1(x))`、それ以外で`ln1p(-exp(x))`）、スコアの比は`exp(ln f - ln P)`。
+
+**結果**:
+
+| 方式 | 非有限になったケース（logit／probit） | 有限なケースの精度 |
+|---|---|---|
+| naive | 10／19（正の側での`1-1=0`、深い裾） | 反転しないぶん正の側で桁落ち |
+| flipnaive | 2／12（深い裾のアンダーフロー。probitは`x`の絶対値が約38超、logitは約745超） | logspaceと同等 |
+| **logspace** | **0／0** | `A`・`B`の相対誤差は約`1e-14`以下。観測ごとの2×2のHessianの最小固有値／スケールは`-1.5e-17`以上（半正定値が丸めの範囲で保たれる） |
+
+- **深い裾**: スコアの比を対数空間で作ると、probitで`z`が約100・確率が`e^-5000`の悪い初期値からでもNewtonが収束した（`P=exp(ln P)`経由だと初期点の勾配が`0/0`でNaN）。
+- **ギャップ**: Hessianの相対誤差は約`ε/(カテゴリの確率質量)`で増える（ギャップ`1e-4`で約`1e-12`、`1e-6`で`1e-10`、`1e-8`で`1e-8`、`1e-10`で`1e-6`）。最適点では`n_j≥1`なので確率質量は`≳1/n`で、`n=10⁶`でも約`1e-10`に収まる。
+- **クランプ**: `U_CLAMP`型のクランプは、`a`・`b`が同じ裾で両方クランプされると`F(a)-F(b)=0`になるので順序モデルには使えない（Probitの`λ=φ(u)/Φ(u)`のように片側だけを見る量とは性質が違う）。対数空間なら不要。
+
+**決定（(A)で確定）**:
+
+1. 式は「反転＋対数空間」。反転は`a+b>0`のとき（端は有限の側で判定）に`(u,v)=(-b,-a)`、それ以外は`(a,b)`。端のカテゴリは`ln F(v)=-∞`（`b=-∞`）または`ln F(u)=0`（`a=+∞`）として同じ式で扱う。
+2. スコアは`A=exp(ln f(a)-ln P)`・`B=-exp(ln f(b)-ln P)`、Hessianは上の記法の式。`U_CLAMP`は使わない。
+3. `ln P`が非有限（`F(a)-F(b)`が丸めで0になる）ときは、`cost=+∞`にして棄却する。勾配・Hessianは有限のコストの点でだけ評価する。Newtonは境界までの割合の余裕（`0.9`）で順序を保つので、反復点では起きない（line searchの試行点では起きうる。C1の「argminが`+∞`を扱えるか」と同じ確認事項）。
+4. Rustに足す部品: `ln F`。logit: `x≥0`で`-ln1p(e^-x)`、`x<0`で`x-ln1p(e^x)`。probit: `shared::normal`に`ln_normal_cdf(x)`を足す（現状は`normal_cdf`・`normal_sf`のみで、`erfc`は約`z<-37.5`で0になる）。`x>-20`は`libm::erfc`（`x>0`では`ln1p(-½erfc(x/√2))`）、`x≤-20`は漸近展開`-x²/2-ln(-x)-½ln2π+ln(1-1/x²+3/x⁴-15/x⁶+…)`。継ぎ目（`-20`）の連続性と、130桁の参照値との比較を単体テストにする（`normal.rs`の既存の方針と同じ）。`f`・`ln f`は、logitは`ln F(x)+ln F(-x)`、probitは`-x²/2-½ln2π`。
+5. v1で行わないこと: 小さなギャップ（確率質量が`1e-6`未満）の精度改善（logitは`sinh((a-b)/2)/(2cosh(a/2)cosh(b/2))`の恒等式、probitは級数）。最適点では上のとおり`≈1e-10`なので不要と判断した。
+
+**限界**: 基準値は`decimal`の自前実装（scipyとの突き合わせ済み）、実験はPythonで、Rustの`libm::erfc`の精度（相対`z²·1e-16`）は反映していない。

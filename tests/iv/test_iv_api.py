@@ -17,6 +17,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 from _assertions import (
+    assert_close,
     assert_hac_time_reorders_rows,
     assert_option_case_insensitive,
     assert_params_table_matches_attributes,
@@ -90,7 +91,7 @@ def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
     取り違えが原因で、真の傾き係数数`q=1`（`z1`のみ）のところ`q=2`（定数項も
     含めて誤ってカウント）になり、`G=2`クラスターの構造的特異性
     （`rank(Ŝ)≤G-1=1`）で必ず失敗していた（`without_baked_in_intercept`の
-    導入で修正、`engine/src/iv/two_sls.rs`の同名Rustテストと対）。
+    導入で修正、`engine/src/iv/two_sls/cov.rs`の同名Rustテストと対）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
@@ -217,17 +218,206 @@ def test_overid_statistic_present_for_gmm_hansen_j(iv_dataset):
     _assert_valid_test_statistic(res.overid_statistic, res.overid_p_value)
 
 
+def test_overid_statistic_of_2sls_follows_cov_type(iv_dataset):
+    """2SLSの`overid_statistic`は`cov_type`に追従する。classicalはSargan、
+    ロバストな`cov_type`はそれと異なる値（同じ重みの2段階GMMのHansen J）で、
+    自由度は同じ。
+    """
+    classical = our_fit(iv_dataset)
+    robust = our_fit(iv_dataset, options=IVOptions(cov_type="hc0"))
+    assert classical.overid_df == robust.overid_df == 1
+    assert classical.overid_statistic != robust.overid_statistic
+
+
+def test_overid_statistic_is_the_same_for_hc0_to_hc3(iv_dataset):
+    """重みの`S`は小標本補正もレバレッジ補正も含まない素のロバストな
+    `Σ ε̂ᵢ² zᵢzᵢ'`なので、`hc0`〜`hc3`は同じ値になる。
+    """
+    expected = our_fit(iv_dataset, options=IVOptions(cov_type="hc0"))
+    for cov_type in ("hc1", "hc2", "hc3"):
+        res = our_fit(iv_dataset, options=IVOptions(cov_type=cov_type))
+        assert res.overid_statistic == expected.overid_statistic, cov_type
+        assert res.overid_p_value == expected.overid_p_value, cov_type
+        assert res.overid_df == expected.overid_df, cov_type
+
+
+def test_overid_statistic_of_2sls_equals_gmm_hansen_j_of_the_same_weight(
+    iv_dataset,
+):
+    """2SLS残差から作った`S`でGMMを再推定した解でのHansen Jは、同じ重みの種類の
+    2段階GMM（`estimator="gmm"`）のHansen Jと一致する。classicalのSarganも、
+    等分散の重みのGMMと一致する。
+    """
+    clustered = with_cluster_groups(iv_dataset, 10)
+    cases = {
+        "classical": (
+            iv_dataset,
+            IVOptions(),
+            IVOptions(estimator="gmm", gmm_weight_type="classical"),
+        ),
+        "hc0": (
+            iv_dataset,
+            IVOptions(cov_type="hc0"),
+            IVOptions(estimator="gmm", gmm_weight_type="robust"),
+        ),
+        "cluster": (
+            clustered,
+            IVOptions(cov_type="cluster", cluster="cluster_group"),
+            IVOptions(
+                estimator="gmm",
+                gmm_weight_type="cluster",
+                cluster="cluster_group",
+            ),
+        ),
+        "hac": (
+            iv_dataset,
+            IVOptions(cov_type="hac", **hac_time_for("hac")),
+            IVOptions(
+                estimator="gmm",
+                gmm_weight_type="hac",
+                **hac_time_for("hac"),
+            ),
+        ),
+    }
+    tolerance = TOLERANCES["iv_api"]["rtol_overid_same_weight"]
+    for name, (df, two_sls_options, gmm_options) in cases.items():
+        two_sls = our_fit(df, options=two_sls_options)
+        gmm = our_fit(df, options=gmm_options)
+        assert two_sls.overid_statistic is not None, name
+        assert gmm.overid_statistic is not None, name
+        assert_close(
+            two_sls.overid_statistic,
+            gmm.overid_statistic,
+            f"{name}/overid_statistic",
+            rtol=tolerance,
+            atol=0.0,
+        )
+        assert_close(
+            two_sls.overid_p_value,
+            gmm.overid_p_value,
+            f"{name}/overid_p_value",
+            rtol=tolerance,
+            atol=0.0,
+        )
+
+
+def test_overid_statistic_of_2sls_cluster_is_none_below_instrument_count(
+    iv_dataset,
+):
+    """クラスター数`G`が全操作変数の数`l`（定数項・`x1`・`z1`・`z2`で4）より少ないと、
+    クラスターの`S`は必ず特異で、過剰識別検定は定義できない。`fit()`は失敗せず、
+    検定の3つの値だけが`None`になる（`G = l`は定義できる）。
+    """
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    below = our_fit(with_cluster_groups(iv_dataset, 3), options=options)
+    assert below.overid_statistic is None
+    assert below.overid_p_value is None
+    assert below.overid_df is None
+    assert set(below.params) == {"const", "x1", "endog1"}
+
+    at = our_fit(with_cluster_groups(iv_dataset, 4), options=options)
+    _assert_valid_test_statistic(at.overid_statistic, at.overid_p_value)
+    assert at.overid_df == 1
+
+
+def test_overid_statistic_of_2sls_cluster_at_the_boundary_matches_gmm(
+    iv_dataset,
+):
+    """`G = l`ちょうどで定義でき、同じクラスターの重みのGMMのHansen Jと一致する。
+    `x_exog=[]`（切片だけ）では`l = 3`なので、`G = 2`は`None`、`G = 3`は定義できる
+    （構造方程式の傾きは`endog1`の1個なので`G = 2`は`G > q`を満たす）。
+    """
+    tolerance = TOLERANCES["iv_api"]["rtol_overid_same_weight"]
+    for n_groups in (2, 3):
+        df = with_cluster_groups(iv_dataset, n_groups)
+        kwargs = {"x_exog": [], "instruments": ["z1", "z2"]}
+        two_sls = our_fit(
+            df,
+            options=IVOptions(cov_type="cluster", cluster="cluster_group"),
+            **kwargs,
+        )
+        if n_groups == 2:
+            assert two_sls.overid_statistic is None
+            assert two_sls.overid_df is None
+            continue
+        gmm = our_fit(
+            df,
+            options=IVOptions(
+                estimator="gmm",
+                gmm_weight_type="cluster",
+                cluster="cluster_group",
+            ),
+            **kwargs,
+        )
+        assert two_sls.overid_statistic is not None
+        assert gmm.overid_statistic is not None
+        assert_close(
+            two_sls.overid_statistic,
+            gmm.overid_statistic,
+            "G = l/overid_statistic",
+            rtol=tolerance,
+            atol=0.0,
+        )
+
+
+def test_overid_statistic_of_2sls_hac_uses_hac_time_order_not_row_order(
+    iv_dataset,
+):
+    """HACの重みは、行順ではなく`hac_time`の順でラグを取る。行を並べ替えて元の時間列を
+    `hac_time`に渡すと並べ替え前と同じ値になり、並べ替えた行順を時間として渡すと別の値になる
+    （並べ替えが効いていること）。
+    """
+    n = iv_dataset.height
+    ordered = with_row_time(iv_dataset)
+    row_order = list(range(n))[::2] + list(range(n))[1::2]
+    shuffled = reorder_rows(ordered, row_order).with_columns(
+        pl.Series("position", range(n))
+    )
+
+    def statistic(df: pl.DataFrame, hac_time: str) -> float:
+        res = IV(
+            df,
+            y="y",
+            x_exog=["x1"],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+            options=IVOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        ).fit()
+        assert res.overid_statistic is not None
+        return res.overid_statistic
+
+    expected = statistic(ordered, ROW_TIME)
+    assert_close(
+        statistic(shuffled, ROW_TIME),
+        expected,
+        "shuffled rows with the original time",
+        rtol=0.0,
+        atol=TOLERANCES["iv_api"]["atol_hac_time_reorder"],
+    )
+    effect = abs(statistic(shuffled, "position") - expected) / expected
+    assert effect > TOLERANCES["iv_api"]["min_rel_hac_time_row_order_effect"]
+
+
 @pytest.mark.parametrize(
     "options",
     [
         IVOptions(),
+        IVOptions(cov_type="hc0"),
+        IVOptions(cov_type="hac", **hac_time_for("hac")),
         IVOptions(estimator="gmm", gmm_weight_type="classical"),
         IVOptions(estimator="gmm", gmm_weight_type="robust"),
         IVOptions(
             estimator="gmm", gmm_weight_type="hac", **hac_time_for("hac")
         ),
     ],
-    ids=["2sls", "gmm_classical", "gmm_robust", "gmm_hac"],
+    ids=[
+        "2sls",
+        "2sls_hc0",
+        "2sls_hac",
+        "gmm_classical",
+        "gmm_robust",
+        "gmm_hac",
+    ],
 )
 def test_overid_test_rejects_only_when_instrument_is_invalid(
     iv_dataset, options
@@ -260,7 +450,7 @@ def test_multi_endog_overid_df_and_wu_hausman_df(scenario, estimator):
     """複数内生変数（`k_endog=2`）の過剰識別検定とWu-Hausman検定の自由度。
     過剰識別検定の自由度は`len(instruments) - len(x_endog)`（丁度識別の
     `just_identified`は`None`）、Wu-Hausman検定はF(n_endog, df_resid - n_endog)
-    （2SLSのみ、GMMは`None`）。内生変数1本の小データだけを見る
+    （2SLS・GMMとも同じ）。内生変数1本の小データだけを見る
     `tests/cross_method/test_test_dfs.py`では`df_num=2`・`overid_df=l-2`が
     検証されない。
     """
@@ -278,18 +468,14 @@ def test_multi_endog_overid_df_and_wu_hausman_df(scenario, estimator):
         assert res.overid_df is None
     else:
         assert res.overid_df == len(instruments) - n_endog
-    if estimator == "2sls":
-        assert res.wu_hausman_df_num == n_endog
-        assert res.wu_hausman_df_denom == res.df_resid - n_endog
-    else:
-        assert res.wu_hausman_df_num is None
-        assert res.wu_hausman_df_denom is None
+    assert res.wu_hausman_df_num == n_endog
+    assert res.wu_hausman_df_denom == res.df_resid - n_endog
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 def test_three_endog_overid_df_and_wu_hausman_df(estimator):
     """内生変数3本・操作変数4本（過剰識別度1）の自由度。過剰識別検定は
-    `len(instruments) - len(x_endog) = 1`、Wu-Hausman検定（2SLSのみ）は
+    `len(instruments) - len(x_endog) = 1`、Wu-Hausman検定（2SLS・GMMとも）は
     F(3, df_resid - 3)。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
@@ -301,23 +487,112 @@ def test_three_endog_overid_df_and_wu_hausman_df(estimator):
     )
 
     assert res.overid_df == 1
-    if estimator == "2sls":
-        assert res.wu_hausman_df_num == 3
-        assert res.wu_hausman_df_denom == res.df_resid - 3
-    else:
-        assert res.wu_hausman_df_num is None
-        assert res.wu_hausman_df_denom is None
+    assert res.wu_hausman_df_num == 3
+    assert res.wu_hausman_df_denom == res.df_resid - 3
 
 
-def test_wu_hausman_is_none_for_gmm(iv_dataset):
-    """`wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="gmm"`では常に
-    `None`（`GmmEstimator`はWu-Hausman検定を実装しない、
-    `engine_pybind/src/iv/CLAUDE.md`参照）。
+def _wu_hausman_cases(iv_dataset):
+    """`cov_type`ごとの（データ・2SLSのオプション・GMMのオプションの一覧）。
+    GMMの重み・方式は`cov_type`と独立で、組み合わせても値が変わらない。
     """
-    options = IVOptions(estimator="gmm")
-    res = our_fit(iv_dataset, options=options)
+    clustered = with_cluster_groups(iv_dataset, 10)
+    cov_options = {
+        "classical": (iv_dataset, {}),
+        "hc0": (iv_dataset, {}),
+        "hc1": (iv_dataset, {}),
+        "hc2": (iv_dataset, {}),
+        "hc3": (iv_dataset, {}),
+        "cluster": (clustered, {"cluster": "cluster_group"}),
+        "hac": (iv_dataset, hac_time_for("hac")),
+    }
+    gmm_options = [
+        {"gmm_type": "one_step"},
+        {"gmm_type": "two_step", "gmm_weight_type": "classical"},
+        {"gmm_type": "two_step", "gmm_weight_type": "robust"},
+        {
+            "gmm_type": "iterated",
+            "gmm_weight_type": "robust",
+            "gmm_max_iter": 10,
+        },
+    ]
+    return [
+        (cov_type, df, extra, gmm)
+        for cov_type, (df, extra) in cov_options.items()
+        for gmm in gmm_options
+    ]
+
+
+def test_wu_hausman_of_gmm_equals_2sls_of_the_same_cov_type(iv_dataset):
+    """`estimator="gmm"`のWu-Hausmanは、同じデータ・`cov_type`の2SLSと同じ値になる
+    （補助回帰は第一段階残差を足した最小二乗で、第二段階の係数もGMMの重みも使わない）。
+    GMMの方式（1段階・2段階・反復）・重みの種類によらない。
+    """
+    tolerance = TOLERANCES["iv_api"]["rtol_wu_hausman_across_estimators"]
+    for cov_type, df, extra, gmm_kwargs in _wu_hausman_cases(iv_dataset):
+        label = f"{cov_type}/{gmm_kwargs}"
+        two_sls = our_fit(df, options=IVOptions(cov_type=cov_type, **extra))
+        gmm = our_fit(
+            df,
+            options=IVOptions(
+                estimator="gmm", cov_type=cov_type, **extra, **gmm_kwargs
+            ),
+        )
+        _assert_valid_test_statistic(
+            gmm.wu_hausman_statistic, gmm.wu_hausman_p_value
+        )
+        assert_close(
+            gmm.wu_hausman_statistic,
+            two_sls.wu_hausman_statistic,
+            f"{label}/wu_hausman_statistic",
+            rtol=tolerance,
+            atol=0.0,
+        )
+        assert_close(
+            gmm.wu_hausman_p_value,
+            two_sls.wu_hausman_p_value,
+            f"{label}/wu_hausman_p_value",
+            rtol=tolerance,
+            atol=0.0,
+        )
+        assert gmm.wu_hausman_df_num == two_sls.wu_hausman_df_num, label
+        assert gmm.wu_hausman_df_denom == two_sls.wu_hausman_df_denom, label
+
+
+def test_wu_hausman_of_gmm_follows_cov_type_not_the_weight(iv_dataset):
+    """`cov_type`を変えると値が変わり、`gmm_weight_type`を変えても変わらない
+    （GMMの重みは使わない）。
+    """
+    classical = our_fit(iv_dataset, options=IVOptions(estimator="gmm"))
+    hc1 = our_fit(
+        iv_dataset, options=IVOptions(estimator="gmm", cov_type="hc1")
+    )
+    robust_weight = our_fit(
+        iv_dataset,
+        options=IVOptions(estimator="gmm", gmm_weight_type="robust"),
+    )
+    assert classical.wu_hausman_statistic != hc1.wu_hausman_statistic
+    assert classical.wu_hausman_statistic == robust_weight.wu_hausman_statistic
+    assert classical.wu_hausman_p_value == robust_weight.wu_hausman_p_value
+
+
+def test_gmm_wu_hausman_degrades_to_none_with_few_clusters(
+    iv_dataset,
+):
+    """GMMでも、`cov_type="cluster"`で構造方程式は`G > q`でも補助回帰は
+    `G <= q_aug`（`q_aug = q + k_endog`）になる入力では、`wu_hausman_*`だけが`None`
+    になり、`fit()`は成功する（2SLSと同じ。`G=3`、`q=2`、`q_aug=3`）。
+    """
+    df = with_cluster_groups(iv_dataset, 3)
+    options = IVOptions(
+        estimator="gmm", cov_type="cluster", cluster="cluster_group"
+    )
+    res = our_fit(df, instruments=["z1"], options=options)
+
     assert res.wu_hausman_statistic is None
     assert res.wu_hausman_p_value is None
+    assert res.wu_hausman_df_num is None
+    assert res.wu_hausman_df_denom is None
+    assert res.params["endog1"] is not None
 
 
 def test_wu_hausman_is_not_none_for_2sls(iv_dataset):

@@ -4,7 +4,7 @@
 
 再実行可能なスクリプトは`performance/compare_fe.py`（手法非依存の計測ハーネス`performance/_perf_harness.py` ＋ FE固有アダプタ、コミット対象）。生の計測結果JSONはコミットしない（`.gitignore`の`docs/performance/results/*.json`参照）。
 
-比較対象は linearmodels 単体（[検証ページ](../guide/verification.md)の primary reference。`benchmark/panel/references/linearmodels_ref.py`と同じ主リファレンス）。`linearmodels.panel.PanelOLS`（`entity_effects=True`、2-wayなら`time_effects=True`）に対応させる（engine側は`FE(..., effects=[entity, time])`の1要素=1-way、2要素=2-way）。
+比較対象は linearmodels 単体（[検証ページ](../guide/verification.md)の primary reference。`benchmark/panel/references/linearmodels_ref.py`と同じ主リファレンス）。`linearmodels.panel.PanelOLS`（`entity_effects=True`、2-wayなら`time_effects=True`）に対応させる（engine側は`FE(..., effects=[entity, time])`の1要素=1-way、2要素=2-way）。3つ以上の効果は`PanelOLS`が吸収できないため、`linearmodels.iv.absorbing.AbsorbingLS`に対応させる。
 
 > **役割分担**: 計測結果の表と性能特性の解釈は、公開ページ（英語。CIの計測値から生成）の[Performance](../guide/performance.md)・[Performance results](../guide/performance-results.md)に置く。このノートは計測方法論・設計判断・既知の限界・今後の検討を記録する。
 
@@ -15,7 +15,10 @@
 - **N×T分解（サンプルサイズ軸のスイープ方針）**: パネルはサンプルサイズがentity数(N)×時点数(T)の2軸に分解されるが、ハーネスの`build_dataframe(n, k, seed)`は単一の`n`しか持たない。**T（時点数）を`6`に固定し、Nをスイープする**（ミクロパネル——企業・個人パネルでN大・T小が典型——を想定した設計。`benchmark/panel/datasets.py`のbaselineシナリオの既定値と同値）。`n_entities = n // 6`の整数除算により、実際の観測数は要求した`n`と若干ずれる（例: n=1,000 → 実際は996観測）。
 - **DGP**: `generate_fe_dataset("baseline", n_entities=n//6, n_periods=6, k=k, seed=seed)`。
 - **cov_type**: n軸・k軸は既定の classical のみ。標準誤差の種類は **cov軸**（n=100,000・k=5）で全て測る: classical・hc1・hc2・hc3・cluster・dk（`hc0` は FE が対応しない）。`hc2`/`hc3` は linearmodels に対応が無いため engine 単独。cluster は個体（`effects`の先頭の列）クラスター（G=N=n÷T、データは entity 順）の1ケースで、G・並びの 2×2 は使わない（パネルのクラスターは個体で決まり、G を変えると N×T の構成が変わるため）。linearmodels 側は `cluster_entity=True`。以前は classical と hac(dk) の2点を実装時の実測で手書き選定していた（dk は T=6・バンド幅2という小さい時点数では DK 計算自体のコストが OLS 本体に対して無視できる規模で、classical との差はほぼ測定誤差の範囲だった）。DKのバンド幅は時点数`T`ベース（`hac_auto_lag(6)=2`）であり、ハーネスの`ctx.hac_lags`（総観測数`n`ベース）は使わない。
-- **2-way固定効果（method軸の流用）**: 2-way FE（entity+time）はIV/Logit/Probitの`extra_methods`仕組みを流用し、代表点1つ（既定の classical・k=5・n=1,000,000）だけ追加計測する（`default_method="one_way"`, `extra_methods=("two_way",)`）。
+- **固定効果の構造（method軸の流用）**: 2-way・不均衡な2-way・3-wayはIV/Logit/Probitの`extra_methods`仕組みを流用し、代表点1つ（既定の classical・k=5・n=1,000,000）だけ追加計測する（`default_method="one_way"`, `extra_methods=("two_way", "two_way_unbalanced", "three_way")`）。method でデータの形が変わるため、ハーネスの`PerfAdapter.method_dataframes`（method → データ生成関数）で分ける。
+  - `two_way_unbalanced`: 均衡パネルの各行を確率0.7で残す（個体は最低2行）。観測数は要求した`n`の約7割。無作為な間引きで、疎なパネルや鎖状につながるパネル（掃引が多く、上限で`AbsorptionNotConverged`になりうる）は測らない。
+  - `three_way`: 均衡パネルの各行に、個体・時点とは無関係に3つ目の効果`c`（50水準）を割り振り、`y`に`c`の効果を足す。HC2/HC3の密な行列（最大の次元を除いた水準数の合計は時点6＋`c`50）は上限3,000水準に収まる。比較相手は`linearmodels.iv.absorbing.AbsorbingLS`（`PanelOLS`は2効果まで）で、lsmrの打ち切りは既定のまま（atol・btol=1e-8。engineの`tol`は1e-12）。3-wayの比較は`classical`だけで測る。
+  - 3-wayのHC2/HC3は engine 単独で、cov軸に`hc2_three_way`・`hc3_three_way`（n=100,000・k=5）として足している。
 - **k軸は既定の classical のみ**: k=20・dkはn_periods=6に対し次元過多で、engineが`ValidationError`で拒否する（詳細は下記「既知の限界」）。cov軸の dk は k=5 < T=6 の境界ちょうどに依存する。
 - **MultiIndex構築は計測区間の外**: `linearmodels.panel.PanelOLS`は呼び出し前に`MultiIndex(entity, time)`の構築が必須だが、engineは`effects`の列（個体・時点）をプレーン列として受け取るためこの手順が不要。MultiIndex構築も実務上は一度きりのデータ準備処理であるため、`PerfAdapter.build_pandas_df`（`_perf_harness.py`への拡張）でウォームアップ前に1回だけ構築し計測ループの外に置く（polars→pandas変換と同じ扱い）。
 - **計測範囲の対称性**: engine（`FeEstimator::fit`）は係数・標準誤差と同じ`.fit()`の中でパネル固有R²（within/between/overall）・F統計量まで常に一括計算する。linearmodelsの`PanelResults`は遅延評価プロパティのため、`.fit()`直後に`params`/`std_errors`/`tstats`/`pvalues`/`rsquared_within`/`rsquared_between`/`rsquared_overall`/`f_statistic_robust.stat`へ明示アクセスして確定させる（`f_statistic_robust`はcov_typeに連動する版。`f_statistic`は常にhomoskedastic固定でengineの値と対応しない）。`aic`/`bic`はlinearmodelsが提供しないため対称性を取る対象に含めない。
@@ -25,6 +28,10 @@
 
 - **FE/RE の `cluster` と `dk` は linearmodels と数値が一致しない**: engine は fixest/Stata 型の小標本補正と自由度を意図的に使う（cluster は `G/(G-1)·(n-1)/(n-K)` と t(G-1)、dk は `T/(T-1)·(n-1)/(n-K)` と t(T-1)。linearmodels は `df_resid`）。n=3,000 で標準誤差の最大相対差は FE cluster 1e-3、RE cluster 8e-4、dk 約9.5%（`sqrt(6/5)` と一致、T=6）。差は補正のスカラーで計算量は同等なため、cluster と dk の行も linearmodels と比較するが、速度比は「同等の計算量の推定量どうし」の比較であって数値の一致を保証しない。`classical` と `hc1` は機械精度（1e-15）で一致する。
 - **k=20・dkはengineで`ValidationError`になるため k=5 でのみ測る**: DKの`S`行列は時点ごとのスコアの外積（とそのラグ項）の和で、正規方程式によりスコアの和がゼロになるためrankが`T-1`以下。T=6（時点数）に対しk=20（説明変数数）ではF検定の部分行列が構造的に特異になり、engineは`fit()`冒頭で`PanelError::InsufficientDkPeriodsForInference`（`ValidationError`）を返す。RE（`re.md`）もハウスマン検定が同じ制約を受ける（`re.md`「既知の限界」参照）。k軸は classical のみ、cov軸の dk は k=5 で測っている。
+- **`AbsorbingLS`の計測範囲は完全には対称でない**: engineはパネルR²（within/between/overall）・F統計量・AIC/BICまで`.fit()`で一括計算するが、`AbsorbingLS`は`params`・`std_errors`・`tstats`・`pvalues`を計算するだけで、同等のパネルR²・F統計量を持たない。3-wayの速度比はengineにやや不利な側に偏る。
+- **3-wayの比較は`linearmodels`の打ち切りに依存する**: `AbsorbingLS`のlsmrは打ち切りを厳しくすると遅くなる（別の合成データでの目安は、n≈100万・3効果で既定の1e-8に比べ1e-14が5割ほど遅い）。既定のまま測っており、厳しくすると速度比はさらに開く。計測の詳細な値は公開ページ（CIの計測値）が正本。
+- **3-wayのデータは条件の良い場合だけ**: `c`は個体・時点と無関係に割り振るので、群がよくつながり、lsmrも交互射影も収束が速い。実務の3次元（例: 産業が企業にネストする）は条件が悪くなりうるが、ネストや水準数が多い場合は測っていない。HC2/HC3の密な行列は56水準（時点6＋`c`50）だけで、上限3,000水準に近い場合のコストも未計測。
+- **method軸の観測数と比較相手は行ごとに違う**: `two_way_unbalanced`の観測数は`n`の約7割、`three_way`のlinearmodels列は`AbsorbingLS`（他の行は`PanelOLS`）。method軸の秒数を行どうしで比べるものではない。
 - その他は`ols.md`「既知の限界」と共通。計測は開発コンテナ上の1回のスイープ（`repeats=3`の中央値）で、環境ノイズを排除しきれていない。
 
 ## 再現方法

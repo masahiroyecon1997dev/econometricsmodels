@@ -31,7 +31,7 @@ import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
 from _error_expectations import escaped, fully_qualified_type_name
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import (
     CASE_SPELLINGS,
     ROW_TIME,
@@ -537,7 +537,7 @@ def test_variable_with_non_finite_values_raises_validation_error(value):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="z",
-        value=pytest.approx(value, nan_ok=True),
+        value=approx_param(value),
         row=2,
         argument="variables",
         data_argument="data",

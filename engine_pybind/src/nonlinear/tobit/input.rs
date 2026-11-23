@@ -39,13 +39,12 @@ pub(super) fn validate_no_sigma_collision(x: &[String]) -> PyResult<()> {
 ///   （Logitの`build_logit_input`と同じ役割分担。`"sigma"`衝突はTobit固有、
 ///   `validate_no_sigma_collision`参照）
 /// - `cov_type`/`solver`の文字列が不正な場合は`ValidationError`
-/// - 打ち切り境界（`options.lower`/`options.upper`）の不正・`y`との不整合は
-///   `TobitInput::from_columns`が検出し`mle_error_to_pyerr`で`ValidationError`に変換
 /// - それ以外（次元不一致等）は`engine::nonlinear::common::MleError`から
 ///   `mle_error_to_pyerr`で変換
 ///
 /// `validate_binary_y`相当の検証はここでは行わない
-/// （`y`は連続変数のため）。打ち切り境界の検証は`TobitInput::from_columns`に委ねる
+/// （`y`は連続変数のため）。打ち切り境界（`options.lower`/`options.upper`）の不正・`y`との不整合は、
+/// `TobitEstimator::fit`が`confidence_level`・`max_iter`・`tol`の検査の後に検出する
 /// （engine層の責務、`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照）。
 pub(crate) fn build_tobit_input(
     df: &DataFrame,
@@ -56,7 +55,7 @@ pub(crate) fn build_tobit_input(
     // 検査と列の抽出は3手法共通の`extract_mle_columns`が担う。報告順は
     // `docs/guide/validation.md`「Order in which errors are reported」: オプションの値
     // （`cov_type` → `solver`）→ オプションの組合せ → ロール構造 → `"sigma"`衝突 →
-    // `y`/`x`の列 → オプション列 → エンジン（この関数の`from_columns`）。
+    // `y`/`x`の列 → オプション列 → エンジン（`TobitEstimator::fit`。この関数は次元だけを検査する）。
     let cols = extract_mle_columns(
         df,
         &y,
@@ -96,7 +95,7 @@ mod tests {
     use engine::nonlinear::common::{CovType as EngineCovType, SolverType as EngineSolverType};
     use polars::df;
 
-    /// `y`は`lower=0.0`（既定の境界）以上の値のみで構成する（`TobitInput::from_columns`の
+    /// `y`は`lower=0.0`（既定の境界）以上の値のみで構成する（`TobitEstimator::fit`の
     /// 境界整合性検証を通過させるため）。
     fn well_formed_df() -> DataFrame {
         df!(
@@ -219,17 +218,17 @@ mod tests {
         assert_eq!(input.upper(), Some(100.0));
     }
 
-    /// 打ち切り境界の不正（両方`None`）は`TobitInput::from_columns`（engine層）が検出し、
-    /// `mle_error_to_pyerr`経由で`ValidationError`になる（`build_tobit_input`のdoc
-    /// コメント参照。ここでの独自バリデーションは行わない）。
+    /// 打ち切り境界の不正（両方`None`）は入力の構築では検出しない。`TobitEstimator::fit`が、
+    /// `confidence_level`・`max_iter`・`tol`の検査の後に検出する（`build_tobit_input`のdocコメント参照。
+    /// Pythonからの報告順は`tests/cross_method/test_validation_order.py`が固定する）。
     #[test]
-    fn build_tobit_input_returns_validation_error_when_both_bounds_are_none() {
+    fn build_tobit_input_leaves_the_censoring_bound_check_to_fit() {
         let df = well_formed_df();
         let mut options = default_options();
         options.lower = None;
         options.upper = None;
 
         let result = build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 }

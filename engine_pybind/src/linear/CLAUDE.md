@@ -43,7 +43,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 `fit_*`と`predict()`/`augment()`の`new_data`は、`PyDataFrame`への変換（`pyo3-polars`が全列をArrow経由で取り込む）を直接行わない。
 `shared/column_extraction/`の`check_dataframe`で`polars.DataFrame`かを調べ（`TypeError`）、
 `select_columns`で**推定に指名された列だけ**を取り込んだ`DataFrame`（`SelectedData.frame`）と、元のPythonオブジェクト（`SelectedData.source`）を得る。
-指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こす（取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
+指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こし、`Extension`列（登録した拡張型を含む）が`ComputeError`で失敗する（どちらも取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
 指名される列は`fit_*`（`lib.rs`）が`y`・`x`等と各`*Options::data_columns()`（`cluster`・`hac_time`・`time`・`dk_time`）から組み立てる。
 **オプションに列名を持つフィールドを足したら、`data_columns()`に足す**（足さないと、その列が取り込まれず`COLUMN_NOT_FOUND`になる）。
 存在しない列は選ばず、列を引く側（`extract_f64_column`等）が`COLUMN_NOT_FOUND`にする。取り込めないdtypeの列は、`Null`型の目印の列
@@ -75,6 +75,8 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 - `x`が空リストの場合
 
 これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/shared/validation.rs`（`shared/`配下、`column_extraction/`と同じ位置づけ）に集約した: `validate_role_non_empty`（複数列ロールの空リスト拒否。`x`のほかIVの`x_endog`/`instruments`でも使う）/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
+
+`y`/`x`の検査は`validate_common_roles`（OLS・Logit・Probit・Tobit）か、`weight`と`y`の重複も見る`validate_weighted_roles`（WLS）でまとめて呼ぶ。どちらも「空の`x` → `y`/`x`の重複 →（WLSのみ）`weight`/`y`の重複 → `x`内の重複 → `"const"`」の順で、ロール間の重複を`x`内の重複・`"const"`より先に報告する（`docs/guide/validation.md`の順序を全手法で揃えるため）。`weight`を別に`validate_no_duplicate_roles`で呼ぶと、この順序が崩れる。
 
 `confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」の対応表を参照）。
 

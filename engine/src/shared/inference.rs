@@ -1,7 +1,7 @@
 //! 系統横断で共有するt/z検定の後処理ロジック。
 //!
-//! OLS（t分布）・Logit（z分布）で、係数から`std_err`/`stat`/`p_value`/
-//! `conf_low`/`conf_high`を計算する処理がほぼ同型のまま独立実装されていたため、
+//! OLS（t分布）・Logit（z分布）などで、係数から`std_err`/`stat`/`p_value`/
+//! `conf_low`/`conf_high`を計算する処理は同型のため、
 //! `statrs::distribution::ContinuousCDF`をジェネリックに取る形でここに集約する
 //! （`docs/spec/panel-common.md` 4.2節）。
 //! FE/RE・IVの2SLS（t分布）・GMM（z分布）は、係数の表全体を作る`inference_table`で共有する。

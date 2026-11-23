@@ -1,0 +1,147 @@
+//! `fit`のテスト。テーマ別に子モジュールへ分ける。
+//!
+//! - `basic.rs`: 基本挙動（getter・推定回数と収束・係数名・自由度）
+//! - `c_statistic.rs`: C統計量（`fe_gmm_c_statistic`。ダミー変数を明示した`iv::gmm`との照合、手計算、Hansen Jとの整合、検証）
+//! - `cov_type.rs`: `cov_type`別の標準誤差（FE-2SLSへの還元、ダミー変数を明示したGMM、手計算との照合）・推論・Wald・R²・検証
+//! - `first_stage.rs`: 第一段階・弱操作変数診断・Wu-Hausman（FE-2SLSと共有する計算。同じデータ・`cov_type`ならFE-2SLSと一致）
+//! - `fixed_effects.rs`: 固定効果自体の復元（`fixed_effects()`。正規方程式の残差、FE-2SLSへの還元）
+//! - `hansen_j.rs`: Hansen J過剰識別検定（FE-2SLSのSarganへの還元、ダミー変数を明示したGMM、手計算、`None`の条件）
+//! - `reference.rs`: FE-2SLSへの還元、ダミー変数を明示したGMM（FWL）、クラスター重みの手計算との照合
+//! - `validation.rs`: 入力検証・エラー返却・検証順序・クラスター数の境界
+
+use crate::panel::common::PanelError;
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator};
+use crate::panel::fe_iv::common::FeIvInput;
+use crate::panel::fe_iv::gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
+use crate::shared::group_codes::GroupCodes;
+
+mod basic;
+mod c_statistic;
+mod cov_type;
+mod first_stage;
+mod fixed_effects;
+mod hansen_j;
+mod reference;
+mod validation;
+
+pub(super) use crate::panel::fe_iv::common::test_support::{
+    N_ENTITIES, N_PERIODS, all_rows, dummies, entity_labels, input_spec, input_with, one_way_input,
+    third_labels, time_labels, two_way_input,
+};
+
+// ── 複数のテーマが使うヘルパー ──────────────────────────────────────
+
+pub(super) fn unbalanced_rows() -> Vec<usize> {
+    all_rows()
+        .into_iter()
+        .filter(|r| ![3, 17, 22, 30].contains(r))
+        .collect()
+}
+
+/// 構造の名前から、入力と固定効果の方向を作る（推定が入力を消費するので、呼ぶたびに作る）。
+pub(super) fn model(structure: &str) -> (FeIvInput, FeEffects) {
+    let rows = all_rows();
+    match structure {
+        "one_way" => (
+            input_spec(&rows, &[entity_labels()], 1, 1, 2),
+            FeEffects::OneWay,
+        ),
+        "just_identified" => (
+            input_spec(&rows, &[entity_labels()], 1, 1, 1),
+            FeEffects::OneWay,
+        ),
+        "two_endogenous" => (
+            input_spec(&rows, &[entity_labels()], 1, 2, 3),
+            FeEffects::OneWay,
+        ),
+        "two_way" => (
+            input_spec(&rows, &[entity_labels(), time_labels()], 1, 1, 2),
+            FeEffects::TwoWay,
+        ),
+        "two_way_unbalanced" => (
+            input_spec(
+                &unbalanced_rows(),
+                &[entity_labels(), time_labels()],
+                1,
+                1,
+                2,
+            ),
+            FeEffects::TwoWay,
+        ),
+        "three_way" => (
+            input_spec(
+                &rows,
+                &[entity_labels(), time_labels(), third_labels()],
+                1,
+                1,
+                2,
+            ),
+            FeEffects::MultiWay,
+        ),
+        other => panic!("unknown structure {other}"),
+    }
+}
+
+pub(super) const STRUCTURES: [&str; 6] = [
+    "one_way",
+    "just_identified",
+    "two_endogenous",
+    "two_way",
+    "two_way_unbalanced",
+    "three_way",
+];
+
+pub(super) fn fit(
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: FeGmmType,
+) -> Result<FeGmmEstimator, PanelError> {
+    FeGmmEstimator::fit(input, effects, gmm_type, true, FeCovType::Classical, 0.95)
+}
+
+/// `cov_type`を指定して推定する（信頼水準95%）。
+pub(super) fn fit_with(
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: FeGmmType,
+    cov_type: FeCovType,
+) -> Result<FeGmmEstimator, PanelError> {
+    FeGmmEstimator::fit(input, effects, gmm_type, true, cov_type, 0.95)
+}
+
+/// [`fit_with`]と同じ推定を、内生変数ごとの第一段階の`FeEstimator`も一緒に返す形で行う。
+pub(super) fn fit_with_stages(
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: FeGmmType,
+    cov_type: FeCovType,
+) -> Result<(FeGmmEstimator, Vec<(String, FeEstimator)>), PanelError> {
+    FeGmmEstimator::fit_with_first_stages(
+        input,
+        effects,
+        gmm_type,
+        true,
+        cov_type,
+        0.95,
+        &Default::default(),
+        |name, stage| (name.to_string(), stage),
+    )
+}
+
+pub(super) fn two_step(weight: FeWeightType) -> FeGmmType {
+    FeGmmType::TwoStep { weight }
+}
+
+/// 個体（`entity_labels`）でクラスタリングする重み。
+pub(super) fn entity_cluster_weight() -> FeWeightType {
+    FeWeightType::Cluster {
+        groups: GroupCodes::from_labels_without_keys(&entity_labels()),
+    }
+}
+
+/// 時点（`time_labels`）でクラスタリングする重み。
+pub(super) fn time_cluster_weight() -> FeWeightType {
+    FeWeightType::Cluster {
+        groups: GroupCodes::from_labels_without_keys(&time_labels()),
+    }
+}

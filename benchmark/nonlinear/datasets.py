@@ -331,12 +331,12 @@ TOBIT_SCENARIOS = [
     "outlier_regressor",
 ]
 
-# 数値比較の対象外（ComputationError の発生確認のみ）のシナリオ。scale_variance は
-# OLS（benchmark/linear/datasets.py）と同じく傾き係数の同時共分散部分行列が倍精度の
-# 限界を超えて特異になる（Tobit の Wald 検定が OLS の F 検定と同型で、この部分行列の
-# 反転を要求するため。Logit/Probit は LR 検定でこの反転が不要なので成功パス扱いだが、
-# Tobit は OLS 側の precedent に従う）。scale_variance_mild（スケール比 1e3）が数値
-# リグレッション検知用の成功パス。
+# 参照実装との数値比較の対象外のシナリオ。perfect_multicollinearity は ComputationError の
+# 発生確認のみ。scale_variance は失敗せず、単位を揃えたデータと全体 Wald 統計量・p 値が
+# 一致することをテストコード側で確認する（Tobit の Wald 検定は OLS の F 検定と同じく
+# 相関スケール化した行列で判定するため。Logit/Probit は LR 検定でこの反転が不要なので
+# 成功パス扱い）。scale_variance_mild（スケール比 1e3）が数値リグレッション検知用の
+# 成功パス。
 TOBIT_ERROR_PATH_SCENARIOS = ("perfect_multicollinearity", "scale_variance")
 
 # 各シナリオの打ち切り方向（kind）と目標打ち切り比率（frac）。実際の打ち切り境界値は

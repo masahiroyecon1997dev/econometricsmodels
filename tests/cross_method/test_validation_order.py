@@ -9,12 +9,16 @@
    `solver` → `variance_method`。使われないオプションの未知の値も報告する
 3. オプションの組合せ: 使われないオプション → 必須オプションの欠落
    （`cov_type`の`hac`/`dk`が先、`gmm_weight_type`の`hac`が後）
-4. ロールの構造: `x`が空 → ロール間の重複（`y`・`effects`・`x`） → `x`内の重複 →
+4. ロールの構造: `x`が空 → ロール間の重複（`y`・`weight`・`effects`・`x`） → `x`内の重複 →
    `dk_time`のロール → `"const"`などの名前の衝突
    （FE/REの`effects`の列数の検査は、これより前に行われる）
 5. `y`・`x`などモデルの列（存在・dtype・欠損値）。順序は`y` → `x` → `effects`
 6. オプションの列（`cluster`・`hac_time`・`dk_time`・GMMの重み行列の列）
-7. エンジンの検査（`confidence_level`の範囲など）
+7. エンジンの検査。設定値 → データの大きさに依る検査の順:
+   `confidence_level` → `max_iter` → `tol` → `gmm_max_iter` → `gmm_tol` →
+   `y`の値・打ち切り境界（Logit/Probit/Tobit）。観測数の不足は、故障が入力の行を
+   変えられないので、`test_confidence_level_is_reported_before_the_observation_count`が
+   別に確かめる
 
 故障を1つずつ`FAULTS`に定義し、手法ごとに「その手法に当てはまる故障」を総当たりで
 2つ組み合わせる。順位（段階と段階内の順）が違う組について、順位が早い故障のエラーが
@@ -36,11 +40,13 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -121,6 +127,7 @@ _NONLINEAR_FAULTS = (
     "missing_cluster_column",
     "bad_confidence_level",
     "bad_max_iter",
+    "bad_tol",
 )
 _IV_FAULTS = (
     "uint128_y",
@@ -177,6 +184,17 @@ _IV_ARGS = {
     "instruments": ["z", "z2"],
 }
 _PANEL_ARGS = {"y": "y", "x": _X, "effects": ["entity"]}
+_FE_IV_ARGS = {**_IV_ARGS, "effects": ["entity"]}
+# FEIVの`x_endog`・`instruments`の空の検査は`effects`の列数の次。FEIVは固定効果が切片を
+# 吸収して切片を足さないので、`const_in_x`は当てはめない。
+_FE_IV_FAULTS = (*_PANEL_FAULTS, "missing_instrument")
+_FE_GMM_FAULTS = (
+    *_FE_IV_FAULTS,
+    "unknown_gmm_type",
+    "unknown_gmm_weight_type",
+    "unused_gmm_max_iter",
+    "unused_gmm_tol",
+)
 
 METHODS = [
     Method(
@@ -231,6 +249,8 @@ METHODS = [
             "unused_gmm_weight_type",
             "missing_weight_time_option",
             "missing_weight_cluster_column",
+            "bad_gmm_max_iter",
+            "bad_gmm_tol",
         ),
         base_opts={"estimator": "gmm"},
         time_cov_type="hac",
@@ -241,9 +261,34 @@ METHODS = [
         "fe",
         _simple(FE, FEOptions),
         _PANEL_ARGS,
-        _PANEL_FAULTS,
+        (*_PANEL_FAULTS, "bad_max_iter", "bad_tol"),
         time_cov_type="dk",
         time_option="dk_time",
+    ),
+    Method(
+        "feiv",
+        _simple(FEIV, FEIVOptions),
+        _FE_IV_ARGS,
+        (*_FE_IV_FAULTS, "bad_max_iter", "bad_tol"),
+        time_cov_type="dk",
+        time_option="dk_time",
+        x_role="x_exog",
+    ),
+    Method(
+        "feiv_gmm",
+        _simple(FEIV, FEIVOptions),
+        _FE_IV_ARGS,
+        (
+            *_FE_GMM_FAULTS,
+            "bad_max_iter",
+            "bad_tol",
+            "bad_gmm_max_iter",
+            "bad_gmm_tol",
+        ),
+        base_opts={"estimator": "gmm"},
+        time_cov_type="dk",
+        time_option="dk_time",
+        x_role="x_exog",
     ),
     Method(
         "re",
@@ -260,7 +305,7 @@ METHODS = [
 
 def _arg_role(method: Method) -> str:
     """`empty_x`が指摘する、空のリストを渡した引数（IVは`x_endog`）。"""
-    return "x_endog" if method.name.startswith("iv") else "x"
+    return "x_endog" if "x_endog" in method.base_args else "x"
 
 
 def _dup_x(method: Method) -> dict[str, Any]:
@@ -334,7 +379,9 @@ class Fault:
 # （estimator → cov_type → gmm_type → gmm_weight_type → solver → variance_method）。
 # 段階3は使われないオプション(0) → `cov_type`の必須オプションの欠落(1) →
 # `gmm_weight_type`の必須オプションの欠落(2)。段階6は`cov_type`の列(0, 1)が先、
-# GMMの重み行列の列(2)が後。同じ順位の故障は、組にしない。
+# GMMの重み行列の列(2)が後。段階7は`confidence_level`(0) → `max_iter`(1) → `tol`(2) →
+# `gmm_max_iter`(3) → `gmm_tol`(4) → `y`の値・打ち切り境界(5)。
+# 同じ順位の故障は、組にしない。
 FAULTS = {
     f.id: f
     for f in [
@@ -454,7 +501,7 @@ FAULTS = {
         ),
         Fault(
             "weight_is_y",
-            (4, 6),
+            (4, 2),
             code=ErrorCode.ROLE_COLUMN_OVERLAP,
             params={
                 "column": "y",
@@ -475,9 +522,9 @@ FAULTS = {
             (4, 0),
             code=ErrorCode.EFFECTS_TOO_MANY,
             params=lambda m: {
-                "model": m.name.upper(),
-                "n_columns": 3,
-                "max_columns": 2,
+                "model": m.name.removesuffix("_gmm").upper(),
+                "n_columns": 6,
+                "max_columns": 2 if m.name == "re" else 5,
             },
         ),
         Fault(
@@ -573,18 +620,41 @@ FAULTS = {
         ),
         Fault(
             "bad_max_iter",
-            (7, 0),
+            (7, 1),
             code=ErrorCode.MAX_ITER_OUT_OF_RANGE,
             params={"value": 0, "min": 1, "max": 10_000},
         ),
         Fault(
+            "bad_tol",
+            (7, 2),
+            code=ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+            params={"option": "tol"},
+        ),
+        Fault(
+            "bad_gmm_max_iter",
+            (7, 3),
+            code=ErrorCode.GMM_MAX_ITER_OUT_OF_RANGE,
+            params={"value": 1, "min": 3, "max": 10_000},
+        ),
+        Fault(
+            "bad_gmm_tol",
+            (7, 4),
+            code=ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+            params={"option": "gmm_tol"},
+        ),
+        Fault(
             "non_binary_y",
-            (7, 0),
+            (7, 5),
             code=ErrorCode.OUTCOME_NOT_BINARY,
+            params={
+                "column": "yc",
+                "argument": "y",
+                "data_argument": "data",
+            },
         ),
         Fault(
             "bad_censoring_bounds",
-            (7, 0),
+            (7, 5),
             code=ErrorCode.CENSORING_BOUNDS_NOT_ORDERED,
             params={"lower": 1.0, "upper": 0.0},
         ),
@@ -596,17 +666,12 @@ _Y_FAULTS = frozenset(
     {"y_in_x", "weight_is_y", "effects_second_is_y", "dk_time_is_y"}
 )
 _Y_CHANGERS = frozenset({"missing_y", "non_binary_y", "uint128_y"})
+# `gmm_type="iterated"`を選ぶと使われてしまう、`gmm_max_iter`/`gmm_tol`の未使用の故障。
+_UNUSED_WITHOUT_ITERATED = frozenset({"unused_gmm_max_iter", "unused_gmm_tol"})
 # `hac`/`dk`を選ぶと使われてしまう、`hac_lags`/`dk_*`の未使用の故障。
 _UNUSED_WITHOUT_TIME_COV = frozenset(
     {"unused_hac_lags", "unused_dk_bandwidth", "unused_dk_time"}
 )
-
-
-def rank(method: Method, fault_id: str) -> tuple[int, int]:
-    """`method`での故障の順位。IVの空の`x_endog`は、`"const"`の検査と同じ順位。"""
-    if fault_id == "empty_x" and method.name.startswith("iv"):
-        return FAULTS[fault_id].rank[0], 6
-    return FAULTS[fault_id].rank
 
 
 def changes(method: Method, fault_id: str) -> Changes:
@@ -629,6 +694,13 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "unused_cluster":
             # FE/REの既定の`cov_type`は`cluster`なので、`cluster`が使われなくなるよう
             # `classical`にする。
+            if method.name == "feiv_gmm":
+                # FEIVの既定の重み`cluster`も`cluster`を使うので、重みも使わない種類にする。
+                return {}, {
+                    "cov_type": "classical",
+                    "cluster": "cluster",
+                    "gmm_weight_type": "robust",
+                }
             if method.time_cov_type == "dk":
                 return {}, {"cov_type": "classical", "cluster": "cluster"}
             return {}, {"cluster": "cluster"}
@@ -655,7 +727,7 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "const_in_x":
             return {x_role: ["const", *base_x]}, {}
         case "empty_x":
-            if method.name.startswith("iv"):
+            if "x_endog" in method.base_args:
                 return {"x_endog": []}, {}
             return {x_role: []}, {}
         case "weight_is_y":
@@ -665,7 +737,9 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "effects_empty":
             return {"effects": []}, {}
         case "effects_too_many":
-            return {"effects": ["entity", "time", "cluster"]}, {}
+            return {
+                "effects": ["entity", "time", "cluster", "a", "b", "c"]
+            }, {}
         case "effects_second_is_y":
             return {"effects": ["entity", method.base_args["y"]]}, {}
         case "dk_time_is_y":
@@ -705,8 +779,16 @@ def changes(method: Method, fault_id: str) -> Changes:
             return {}, {"confidence_level": 2.0}
         case "bad_max_iter":
             return {}, {"max_iter": 0}
+        case "bad_tol":
+            return {}, {"tol": -1.0}
+        case "bad_gmm_max_iter":
+            return {}, {"gmm_type": "iterated", "gmm_max_iter": 1}
+        case "bad_gmm_tol":
+            return {}, {"gmm_type": "iterated", "gmm_tol": -1.0}
         case "non_binary_y":
-            return {"y": "y"}, {}
+            # 連続の`yc`を二値の被説明変数として渡す（列名が引数名`y`と違うので、
+            # `column`と`argument`の取り違えも見つかる）。
+            return {"y": "yc"}, {}
         case "bad_censoring_bounds":
             return {}, {"lower": 1.0, "upper": 0.0}
     raise AssertionError(fault_id)
@@ -724,6 +806,8 @@ def compose(
     - `hac_lags`/`dk_*`の未使用の故障と、`hac`/`dk`を選ぶ故障
       （選ぶと`hac_lags`/`dk_*`は使われる）
     - `y`の列名を使う故障と、`y`を別の列に変える故障
+    - `gmm_max_iter`/`gmm_tol`の未使用の故障と、`gmm_type="iterated"`を選ぶ故障
+      （選ぶと`gmm_max_iter`/`gmm_tol`は使われる）
     """
     e_args, e_opts = changes(method, early)
     l_args, l_opts = changes(method, late)
@@ -738,6 +822,11 @@ def compose(
             **method.base_opts,
             **l_opts,
             "cluster": "cluster",
+            **(
+                {"gmm_weight_type": "robust"}
+                if method.name == "feiv_gmm"
+                else {}
+            ),
         }
     conflicts = {k for k in e_args if k in l_args and e_args[k] != l_args[k]}
     conflicts |= {k for k in e_opts if k in l_opts and e_opts[k] != l_opts[k]}
@@ -755,6 +844,11 @@ def compose(
         return None
     if early in _Y_FAULTS and late in _Y_CHANGERS:
         return None
+    if (
+        early in _UNUSED_WITHOUT_ITERATED
+        and l_opts.get("gmm_type") == "iterated"
+    ):
+        return None
     args = {**method.base_args, **l_args, **e_args}
     opts = {**method.base_opts, **l_opts, **e_opts}
     return args, opts
@@ -770,7 +864,7 @@ def _pairs(method: Method) -> list[tuple[str, str]]:
     return [
         (a, b)
         for a, b in itertools.permutations(method.faults, 2)
-        if rank(method, a) < rank(method, b) and compose(method, a, b)
+        if FAULTS[a].rank < FAULTS[b].rank and compose(method, a, b)
     ]
 
 
@@ -868,7 +962,71 @@ def test_every_method_covers_every_stage_boundary(method):
     故障の定義を変えて、ある手法の境界の組がすべて消えたときに気づくための検査。
     """
     covered = {
-        (rank(method, a)[0], rank(method, b)[0]) for a, b in _pairs(method)
+        (FAULTS[a].rank[0], FAULTS[b].rank[0]) for a, b in _pairs(method)
     }
     for boundary in BOUNDARIES:
         assert boundary in covered, boundary
+
+
+# ── 観測数が足りない入力での設定値 ───────────────────────────────────
+
+# 先頭の2行だけの入力で、`confidence_level`が正しいときに出る、観測数・自由度の不足のエラー。
+_TOO_FEW_ROWS_CODE = {
+    "ols": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "wls": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "logit": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "probit": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "tobit": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "iv": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "iv_gmm": ErrorCode.INSUFFICIENT_OBSERVATIONS,
+    "fe": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+    "feiv": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+    "feiv_gmm": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+    "re": ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+}
+# 観測数より先に報告される設定値の故障（`confidence_level`は別に確かめる）。
+_SETTING_FAULTS = (
+    "bad_max_iter",
+    "bad_tol",
+    "bad_gmm_max_iter",
+    "bad_gmm_tol",
+)
+
+
+def test_every_method_has_a_too_few_rows_code():
+    assert set(_TOO_FEW_ROWS_CODE) == {m.name for m in METHODS}
+
+
+@pytest.mark.parametrize("method", _method_params())
+def test_confidence_level_is_reported_before_the_observation_count(df, method):
+    """行数が足りない入力でも、範囲外の`confidence_level`が先に報告される。
+
+    故障は入力の行を変えられないので、組合せには入れず、ここで別に確かめる。
+    先頭の2行は同じ個体の2行で、どの手法も観測数（FE/RE/FEIVは自由度）が足りない。
+    """
+    small = df.head(2)
+    args = dict(method.base_args)
+    opts = dict(method.base_opts)
+    # 前提: 行数が足りない入力は、それだけで観測数・自由度の不足になる。
+    with raises_error(_TOO_FEW_ROWS_CODE[method.name]):
+        method.run(small, args, opts)
+    with raises_error(ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=2.0):
+        method.run(small, args, {**opts, "confidence_level": 2.0})
+
+
+def _setting_params():
+    return [
+        pytest.param(m, f, id=f"{m.name}-{f}")
+        for m in METHODS
+        for f in _SETTING_FAULTS
+        if f in m.faults
+    ]
+
+
+@pytest.mark.parametrize(("method", "fault"), _setting_params())
+def test_setting_is_reported_before_the_observation_count(df, method, fault):
+    """行数が足りない入力でも、範囲外の`max_iter`・`tol`・`gmm_max_iter`・`gmm_tol`が先に報告される。"""
+    args_changes, opts = changes(method, fault)
+    args = {**method.base_args, **args_changes}
+    with raises_fault(FAULTS[fault], method):
+        method.run(df.head(2), args, {**method.base_opts, **opts})

@@ -401,21 +401,15 @@ def test_iv_overid_df_is_none_when_just_identified(panel_df):
     assert res.overid_df is None
 
 
-def test_iv_wu_hausman_dfs(panel_df):
-    res = _iv(panel_df)
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_iv_wu_hausman_dfs(panel_df, estimator):
+    res = _iv(panel_df, estimator=estimator)
     assert res.wu_hausman_df_num == 1
     # 拡張回帰（const, x1, endog, 第一段階残差）の残差自由度
     assert res.wu_hausman_df_denom == N - 4
     assert _f_p(res.wu_hausman_statistic, 1, N - 4) == pytest.approx(
         res.wu_hausman_p_value, rel=1e-6
     )
-
-
-def test_iv_wu_hausman_dfs_are_none_for_gmm(panel_df):
-    res = _iv(panel_df, estimator="gmm")
-    assert res.wu_hausman_statistic is None
-    assert res.wu_hausman_df_num is None
-    assert res.wu_hausman_df_denom is None
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])

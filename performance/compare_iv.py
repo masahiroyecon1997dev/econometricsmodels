@@ -55,8 +55,9 @@ F統計量・過剰識別検定（Sargan / Hansen J）・弱操作変数F統計�
 アクセス時に**第一段階回帰をフル再fitする**（OLS の `rsquared` や Logit の
 `llnull` と同じ位置づけ）。`_fit_once_linearmodels` は `.fit()` 直後に
 `params`/`std_errors`/`tstats`/`pvalues`/`rsquared`/`rsquared_adj`/
-`f_statistic`/`first_stage.diagnostics`（2SLS は加えて `sargan`・`wu_hausman()`、
-GMM は `j_stat`）へ明示アクセスし、engine と同じ処理範囲で計測する。
+`f_statistic`/`first_stage.diagnostics`（2SLS は加えて `wu_hausman()` と、classical なら
+`sargan`、それ以外の cov_type なら `wooldridge_overid`、GMM は `j_stat`）へ明示アクセスし、
+engine と同じ処理範囲で計測する。
 
 使用例（リポジトリルートから）:
     python -m performance.compare_iv \\
@@ -239,7 +240,17 @@ def _fit_once_linearmodels(ctx: FitContext):
         res.first_stage.diagnostics,
     )
     if ctx.method == "2sls":
-        _ = (res.sargan.stat, res.sargan.pval, res.wu_hausman().stat)
+        _ = res.wu_hausman().stat
+        if ctx.cov_type == "classical":
+            _ = (res.sargan.stat, res.sargan.pval)
+        else:
+            # engine の 2SLS は過剰識別検定を1回だけ、`cov_type` に追従して計算する。
+            # classical は Sargan、それ以外は小標本補正なしの素の重み（hc0〜hc3 は同じ値）での
+            # Hansen J。linearmodels の同等の処理は `wooldridge_overid`（ロバストな score 検定。
+            # hc0〜hc3 の重みの Hansen J と同じ量で、`fit` の `cov_type` には依らない）。
+            # cluster・hac では統計量そのものは一致しないが、計測範囲（過剰識別検定を1回計算する）を
+            # 揃える。Sargan も触ると linearmodels だけ検定を2回計算することになる。
+            _ = res.wooldridge_overid.stat
     else:
         _ = res.j_stat.stat
     return res

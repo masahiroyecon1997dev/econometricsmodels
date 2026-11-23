@@ -9,7 +9,7 @@
 - **Explicit validation.** Invalid input is rejected rather than silently dropped or repaired. Missing values, perfectly collinear columns, degenerate groups, and options that would have no effect raise an error that states the cause (see [Validation and errors](guide/validation.md)).
 - **Modern dataframe workflow.** Built for [polars](https://pola.rs/), with data passed to the Rust core through Arrow, avoiding unnecessary conversions and copies. Other dataframe types are not accepted (see [Accepted data](guide/accepted-data.md)).
 - **Verified against established packages.** Each estimator is compared against at least one reference implementation, and differences in conventions (such as small-sample corrections) are documented (see [Verification](guide/verification.md)).
-- **Performance as a design goal.** The computational core is written in Rust, with no system BLAS/LAPACK dependency. Representative cases of each method are timed, against the packages it is verified against where there is a comparable one (Tobit has none), and the results are published as measured, including cases where it is not faster (see [Performance](guide/performance.md)).
+- **Performance as a design goal.** The computational core is written in Rust, with no system BLAS/LAPACK dependency. Representative cases of each method are timed, against the packages it is verified against where there is a comparable one (Tobit and FEIV have none), and the results are published as measured, including cases where it is not faster (see [Performance](guide/performance.md)).
 
 ## Installation
 
@@ -51,6 +51,7 @@ print(result.params_table())  # a list of dicts, ready for polars or json.dumps
 | Tobit | The outcome is censored at a lower bound, an upper bound or both (for example, zero spending) | [Usage](usage/tobit.md) | [Options and results](api/tobit.md) | [Definitions](methods/tobit.md) |
 | IV | A regressor is endogenous and you have excluded instruments (2SLS or GMM) | [Usage](usage/iv.md) | [Options and results](api/iv.md) | [Definitions](methods/iv.md) |
 | FE | Panel data, with entity (and optionally time) effects, given as `effects`, that may be correlated with the regressors | [Usage](usage/fe.md) | [Options and results](api/fe.md) | [Definitions](methods/fe.md) |
+| FEIV | As FE, but one or more regressors are endogenous and you have excluded instruments (fixed effects two-stage least squares or GMM, with the `estimator` option as in IV) | [Usage](usage/fe_iv.md) | [Options and results](api/fe_iv.md) | [Definitions](methods/fe_iv.md) |
 | RE | Panel data, with entity (and optionally time) effects, given as `effects`, assumed uncorrelated with the regressors; time-invariant regressors are allowed | [Usage](usage/re.md) | [Options and results](api/re.md) | [Definitions](methods/re.md) |
 
 Each method has three pages: **Usage** (examples), **Options and results** (the arguments, options and result fields) and **Definitions** (the estimator, the covariance types, the test distributions, the fit statistics and the diagnostics). [Getting Started](getting-started.md) introduces the conventions all of them share.

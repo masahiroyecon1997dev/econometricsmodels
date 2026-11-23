@@ -12,15 +12,23 @@ import datetime as dt
 import numpy as np
 import polars as pl
 import pytest
-from _dtype_helpers import make_frame, unused_column
-from _errors import raises_error
+from _dtype_helpers import (
+    EXTENSION_DTYPES,
+    NESTED_LOOKALIKE_DTYPES,
+    NESTED_UINT128_DTYPES,
+    make_frame,
+    unused_column,
+)
+from _errors import approx_param, raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -81,6 +89,24 @@ CLUSTER_FITS = {
     "FE": lambda d: FE(
         d, "y", ["x1"], ["entity"], options=FEOptions(**CLUSTER)
     ).fit(),
+    "FEIV": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(**CLUSTER),
+    ).fit(),
+    "FEIV_GMM": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(estimator="gmm", **CLUSTER),
+    ).fit(),
     "RE": lambda d: RE(
         d, "y", ["x1"], ["entity"], options=REOptions(**CLUSTER)
     ).fit(),
@@ -88,6 +114,22 @@ CLUSTER_FITS = {
 
 ENTITY_FITS = {
     "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
+    # FEの3つ目以降の効果は、`effects[0]`と同じ同一性だけのキーとして抽出する。
+    "FE.effects_third": lambda d: FE(
+        d, "y", ["x1"], ["cluster", "t", "entity"]
+    ).fit(),
+    "FEIV": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    ).fit(),
+    "FEIV_GMM": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(estimator="gmm"),
+    ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
 
@@ -99,6 +141,36 @@ TIME_FITS = {
         ["x1"],
         ["entity"],
         options=FEOptions(cov_type="dk", dk_time="t"),
+    ).fit(),
+    "FEIV.effects_time": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity", "t"]
+    ).fit(),
+    "FEIV.dk_time": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(cov_type="dk", dk_time="t"),
+    ).fit(),
+    "FEIV_GMM.effects_time": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity", "t"],
+        options=FEIVOptions(estimator="gmm"),
+    ).fit(),
+    "FEIV_GMM.dk_time": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(estimator="gmm", cov_type="dk", dk_time="t"),
     ).fit(),
     "RE.effects_time": lambda d: RE(d, "y", ["x1"], ["entity", "t"]).fit(),
     "RE.dk_time": lambda d: RE(
@@ -120,9 +192,10 @@ UNSUPPORTED_IDENTITY_DTYPES = [
     (pl.List(pl.Int64), "List"),
     (pl.Array(pl.Int64, 2), "Array"),
     (pl.Struct({"a": pl.Int64}), "Struct"),
-    (pl.List(pl.UInt128), "List"),
-    (pl.Array(pl.UInt128, 2), "Array"),
-    (pl.Struct({"a": pl.UInt128}), "Struct"),
+    (pl.Struct({"UInt128": pl.Int64}), "Struct"),
+    *NESTED_UINT128_DTYPES,
+    *NESTED_LOOKALIKE_DTYPES,
+    *EXTENSION_DTYPES,
 ]
 UNSUPPORTED_TIME_DTYPES = [
     (pl.Boolean, "Boolean"),
@@ -213,6 +286,39 @@ def test_unsupported_dtype_as_cluster_raises(frame, method, dtype, label):
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
         column="cluster",
         dtype=label,
+        argument="cluster",
+        data_argument="data",
+    ):
+        CLUSTER_FITS[method](df)
+
+
+@pytest.mark.parametrize("method", list(CLUSTER_FITS))
+@pytest.mark.parametrize(
+    ("storage", "name"),
+    [
+        (pl.Int64, "my_ext"),
+        (pl.UInt128, "my_ext"),
+        (pl.Int64, "registered_ext"),
+    ],
+    ids=["Int64", "UInt128", "registered"],
+)
+def test_extension_cluster_with_values_is_a_validation_error(
+    frame, method, storage, name
+):
+    """値の入った`Extension`の列（`register_extension_type`で登録した型を含む）を
+    `cluster`に渡すと、ストレージ型によらず`COLUMN_UNSUPPORTED_DTYPE`
+    （列の取り込み時の`INTERNAL_ERROR`にならない）。
+    """
+    # polars 1.38.1では`cast`でExtensionにならない（元の型のまま）ので、
+    # コンストラクタでdtypeを指定して作る。
+    values = frame["cluster"].cast(pl.Int64).cast(storage).to_list()
+    extension = pl.Series("cluster", values, dtype=pl.Extension(name, storage))
+    df = frame.with_columns(extension)
+
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="cluster",
+        dtype="Extension",
         argument="cluster",
         data_argument="data",
     ):
@@ -318,9 +424,31 @@ def test_non_finite_float_key_raises_for_every_method(
         with raises_error(
             ErrorCode.COLUMN_NON_FINITE,
             column=column,
-            value=pytest.approx(bad, nan_ok=True),
+            value=approx_param(bad),
             row=2,
             argument=_key_argument(column, method),
+            data_argument="data",
+        ):
+            fit(df)
+
+
+def test_non_finite_float_key_error_counts_every_bad_value(frame):
+    """キー列でも`count`は列内の全件数で、`row`・`value`は最初の1件（行2のNaN）。"""
+    bad = (
+        frame["cluster"]
+        .cast(pl.Float64)
+        .scatter([2, 5, 7], [float("nan"), float("inf"), float("-inf")])
+    )
+    df = frame.with_columns(bad.alias("cluster"))
+
+    for method, fit in CLUSTER_FITS.items():
+        with raises_error(
+            ErrorCode.COLUMN_NON_FINITE,
+            column="cluster",
+            value=approx_param(float("nan")),
+            row=2,
+            count=3,
+            argument=_key_argument("cluster", method),
             data_argument="data",
         ):
             fit(df)
@@ -417,6 +545,245 @@ def test_null_boolean_cluster_raises_for_every_method(frame):
 
     for method, fit in CLUSTER_FITS.items():
         _assert_missing_key_raises(fit, df, "cluster", method, count=1)
+
+
+# ── 空・空白だけのラベル: 欠損値が`""`に書き換わったものを1グループにしない ────
+# 文字列・`Categorical`・`Enum`のラベルが空文字列・空白だけ（Unicodeの`White_Space`だけでできた文字列。Rustの`str::trim`で空になるもの）
+# のキー列は、全手法・全役割で拒否する。数値・日時のラベルは空にならないので対象外。
+# `"NA"`・`"null"`や前後に空白のあるラベルは、正当なラベルとしてそのまま使う。
+
+# `Enum`は、カテゴリに空白のラベルを含める必要があるので、列ごとに作る。
+ENUM = "enum"
+BLANK_LABELS = ["", " ", "   ", "\t", "\n", "\u3000", "\u00a0"]
+BLANK_CASES = [
+    *[(pl.String, blank) for blank in BLANK_LABELS],
+    (pl.Categorical, ""),
+    (pl.Categorical, " "),
+    (ENUM, ""),
+    (ENUM, " "),
+]
+ROLE_CASES = [
+    (column, method, fit)
+    for column, fits, _ in KEY_ROLES
+    for method, fit in fits.items()
+]
+
+
+def _labelled_key(frame, column, dtype, labels):
+    """`column`をグループ構造を保ったまま文字列ラベルにし、`labels`（行→ラベル）で上書きして
+    `dtype`（`String`・`Categorical`・`ENUM`）の列にする。
+    """
+    values = frame[column].cast(pl.String).to_list()
+    for row, label in labels.items():
+        values[row] = label
+    if dtype == ENUM:
+        dtype = pl.Enum(sorted({*values, *(str(i) for i in range(10))}))
+    series = pl.Series(column, values, dtype=pl.String).cast(dtype)
+    return frame.with_columns(series)
+
+
+def _assert_blank_key_raises(fit, df, column, method, count, row):
+    with raises_error(
+        ErrorCode.COLUMN_BLANK_LABEL,
+        column=column,
+        count=count,
+        row=row,
+        argument=_key_argument(column, method),
+        data_argument="data",
+    ):
+        fit(df)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "blank"),
+    BLANK_CASES,
+    ids=[f"{dtype}-{blank!r}" for dtype, blank in BLANK_CASES],
+)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_blank_key_label_raises_for_every_method(
+    frame, column, method, fit, dtype, blank
+):
+    """空・空白だけのラベルは、全手法・全役割・ラベルを持つ全dtypeで、件数と最初の行つきで拒否する。"""
+    df = _labelled_key(frame, column, dtype, {2: blank, 40: blank})
+
+    _assert_blank_key_raises(fit, df, column, method, count=2, row=2)
+
+
+@pytest.mark.parametrize("row", [0, 30, 59], ids=["first", "middle", "last"])
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_single_blank_key_label_is_found_at_any_row(
+    frame, column, method, fit, row
+):
+    df = _labelled_key(frame, column, pl.String, {row: ""})
+
+    _assert_blank_key_raises(fit, df, column, method, count=1, row=row)
+
+
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_different_blank_labels_are_counted_together(
+    frame, column, method, fit
+):
+    """空文字列と空白だけの別のラベルは別々のグループでも、まとめて数え、最初の行を報告する。"""
+    df = _labelled_key(frame, column, pl.String, {7: " ", 3: "", 20: "\t"})
+
+    _assert_blank_key_raises(fit, df, column, method, count=3, row=3)
+
+
+@pytest.mark.parametrize("dtype", [pl.String, pl.Categorical, ENUM], ids=str)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_all_blank_key_column_counts_every_row(
+    frame, column, method, fit, dtype
+):
+    df = _labelled_key(
+        frame, column, dtype, {row: " " for row in range(frame.height)}
+    )
+
+    _assert_blank_key_raises(
+        fit, df, column, method, count=frame.height, row=0
+    )
+
+
+@pytest.mark.parametrize("dtype", [pl.String, pl.Categorical, ENUM], ids=str)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_null_key_is_reported_before_a_blank_label(
+    frame, column, method, fit, dtype
+):
+    """nullと空白ラベルが混在する列は、欠損値として報告する（欠損値の検査が先）。"""
+    df = _labelled_key(frame, column, dtype, {2: ""})
+    df = df.with_columns(df[column].scatter(5, None).alias(column))
+
+    _assert_missing_key_raises(fit, df, column, method, count=1)
+
+
+# 順序が整数の0..9と同じになるよう、ラベルは辞書順に並べる（グループの並びが変わると、
+# 標準誤差が丸めの範囲で変わりうる）。
+IDENTITY_TOKENS = sorted(
+    [" A", "-", "A", "A ", "N/A", "NA", "NaN", "None", "n/a", "null"]
+)
+TIME_TOKENS = sorted(["NA", "NaN", "None", "null", "A ", " A"])
+
+
+@pytest.mark.parametrize("dtype", [pl.String, pl.Categorical, ENUM], ids=str)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_missing_value_tokens_and_padded_labels_are_ordinary_labels(
+    frame, column, method, fit, dtype
+):
+    """`"NA"`・`"null"`・`"None"`・`"NaN"`や、前後に空白のあるラベル（`"A "`と`" A"`と`"A"`）は
+    別々の正当なラベルで、整数のキーと同じグループ分け・同じ結果になる。
+    """
+    tokens = TIME_TOKENS if column == "t" else IDENTITY_TOKENS
+    labels = {
+        row: tokens[value] for row, value in enumerate(frame[column].to_list())
+    }
+    df = _labelled_key(frame, column, dtype, labels)
+
+    _assert_same_result(fit(df), fit(frame))
+
+
+@pytest.mark.parametrize("char", ["\u200b", "\ufeff", "\u2060"], ids=repr)
+def test_invisible_characters_outside_white_space_are_ordinary_labels(
+    frame, char
+):
+    """空白の定義はUnicodeの`White_Space`で、ゼロ幅スペース等（`White_Space`ではない）は
+    見た目が空でも拒否しない。前後に空白のあるラベルと同じく、そのまま別のラベルとして使う。
+    """
+    fit = CLUSTER_FITS["OLS"]
+    labels = {row: f"g{value}" for row, value in enumerate(frame["cluster"])}
+    labels[2] = char
+
+    fit(_labelled_key(frame, "cluster", pl.String, labels))
+
+
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_blank_enum_category_absent_from_the_data_is_accepted(
+    frame, column, method, fit
+):
+    """データに現れない`Enum`のカテゴリが空・空白だけでも拒否しない（行に現れるラベルだけを検査する）。"""
+    dtype = pl.Enum([str(i) for i in range(10)] + ["", " "])
+    series = frame[column].cast(pl.String).cast(dtype)
+    df = frame.with_columns(series.alias(column))
+
+    _assert_same_result(fit(df), fit(frame))
+
+
+@pytest.mark.parametrize("present", [False, True], ids=["absent", "present"])
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_enum_category_named_like_an_unreadable_dtype_is_accepted(
+    frame, column, method, fit, present
+):
+    """カテゴリ名が`UInt128`の`Enum`は、取り込めないdtypeと取り違えずに受け付ける
+    （dtypeの文字列表現にはカテゴリ名が入る）。カテゴリがデータに現れない場合と、
+    最後のカテゴリの行ラベルを`UInt128`にして現れる場合の両方で、同じ結果になる
+    （最後のラベルを置き換えるのは、グループの並びを保って結果の丸めを変えないため）。
+    """
+    labels = [str(i) for i in range(10)]
+    if present:
+        labels[-1] = "UInt128"
+    dtype = pl.Enum(labels if present else [*labels, "UInt128"])
+    series = frame[column].cast(pl.String).replace("9", labels[-1]).cast(dtype)
+    df = frame.with_columns(series.alias(column))
+
+    _assert_same_result(fit(df), fit(frame))
+
+
+C_STAT_FITS = {
+    "IV": CLUSTER_FITS["IV"],
+    "FEIV_GMM": CLUSTER_FITS["FEIV_GMM"],
+}
+
+
+@pytest.mark.parametrize("method", list(C_STAT_FITS))
+def test_enum_category_named_like_an_unreadable_dtype_is_read_again_after_fit(
+    frame, method
+):
+    """推定後のメソッドは保持したデータからキー列を読み直すので、カテゴリ名が`UInt128`の
+    `Enum`のクラスター列でも、`fit()`のときと同じく受け付ける。
+    """
+    labels = [*(str(i) for i in range(9)), "UInt128"]
+    keyed = frame.with_columns(
+        pl.col("cluster")
+        .cast(pl.String)
+        .replace("9", "UInt128")
+        .cast(pl.Enum(labels))
+        .alias("cluster")
+    )
+
+    got = C_STAT_FITS[method](keyed).c_stat(variables=["x1"])
+
+    expected = C_STAT_FITS[method](frame).c_stat(variables=["x1"])
+    assert got.statistic == expected.statistic
 
 
 # ── 時点の順序: 桁が上がる・月や年をまたぐ時点でも、時系列順になる ───────────

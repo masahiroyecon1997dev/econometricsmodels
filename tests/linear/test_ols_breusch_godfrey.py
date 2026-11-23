@@ -27,7 +27,7 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import (
     CASE_SPELLINGS,
     ROW_TIME,
@@ -427,7 +427,7 @@ def test_float_time_column_with_non_finite_values_raises_validation_error(
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="t",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
         argument="time",
         data_argument="data",
@@ -543,7 +543,7 @@ def test_result_without_training_data_raises_validation_error():
 # Python経由では到達できない（残差が全て0・完全適合になる入力は、元の`fit()`が
 # 分散共分散行列の特異で先に`ComputationError`にする。補助回帰が特異になる条件は、
 # 説明変数が残差のラグそのものという、`fit()`の結果に依存する構成のため合成できない）。
-# これらはRustの単体テスト（`engine/src/linear/diagnostics.rs`の`mod tests`:
+# これらはRustの単体テスト（`engine/src/linear/diagnostics/breusch_godfrey.rs`の`mod tests`:
 # `breusch_godfrey_reports_a_singular_auxiliary_regression_with_its_context`・
 # `breusch_godfrey_fails_for_all_zero_or_non_finite_residuals`・
 # `breusch_godfrey_fails_when_the_auxiliary_regression_fits_the_residuals_exactly`）で担保する。

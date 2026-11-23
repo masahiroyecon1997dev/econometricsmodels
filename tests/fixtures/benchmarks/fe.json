@@ -45,7 +45,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.661390+00:00",
+            "generated_at": "2026-11-07T22:12:56.351169+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -97,10 +97,116 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.703215+00:00",
+            "generated_at": "2026-11-07T22:12:56.377250+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        }
+      },
+      "two_way": {
+        "classical": {
+          "params": {
+            "x1": 1.685982763426252,
+            "x2": -0.20296338604101924
+          },
+          "std_errors": {
+            "x1": 0.08458524092868092,
+            "x2": 0.09475319760473304
+          },
+          "test_stats": {
+            "x1": 19.93235161259172,
+            "x2": -2.1420214955456127
+          },
+          "p_values": {
+            "x1": 9.379559817260566e-44,
+            "x2": 0.033828123059801866
+          },
+          "conf_int": {
+            "x1": [
+              1.5188319661993477,
+              1.8531335606531565
+            ],
+            "x2": [
+              -0.3902073111695602,
+              -0.015719460912478306
+            ]
+          },
+          "n_obs": 195,
+          "df_resid": 148,
+          "df_model": 47,
+          "n_entities": 40,
+          "f_statistic": 199.03767279967877,
+          "f_p_value": 1.1032573034112183e-42,
+          "r_squared_within": 0.643303674240202,
+          "r_squared_between": 0.634904144106369,
+          "r_squared_overall": 0.6432490280704531,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:56.452885+00:00",
+            "cov_type_requested": "classical",
+            "cov_type_linearmodels": "unadjusted",
+            "effects": "two_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        },
+        "hc1": {
+          "params": {
+            "x1": 1.685982763426252,
+            "x2": -0.20296338604101924
+          },
+          "std_errors": {
+            "x1": 0.08493859290872767,
+            "x2": 0.10655679275650616
+          },
+          "test_stats": {
+            "x1": 19.849431285469443,
+            "x2": -1.9047437595537677
+          },
+          "p_values": {
+            "x1": 1.4711960013390241e-43,
+            "x2": 0.058753375930229675
+          },
+          "conf_int": {
+            "x1": [
+              1.5181336994034145,
+              1.8538318274490897
+            ],
+            "x2": [
+              -0.41353266105448916,
+              0.007605888972450708
+            ]
+          },
+          "n_obs": 195,
+          "df_resid": 148,
+          "df_model": 47,
+          "n_entities": 40,
+          "f_statistic": 197.00970913161743,
+          "f_p_value": 1.915439122741404e-42,
+          "r_squared_within": 0.643303674240202,
+          "r_squared_between": 0.634904144106369,
+          "r_squared_overall": 0.6432490280704531,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:56.489734+00:00",
+            "cov_type_requested": "hc1",
+            "cov_type_linearmodels": "robust",
+            "effects": "two_way",
             "confidence_level": 0.95,
             "hac_bandwidth": null,
             "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
@@ -153,7 +259,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.734934+00:00",
+            "generated_at": "2026-11-07T22:12:56.517597+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -205,7 +311,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.765612+00:00",
+            "generated_at": "2026-11-07T22:12:56.560828+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -259,7 +365,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.808973+00:00",
+            "generated_at": "2026-11-07T22:12:56.597784+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -311,7 +417,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.853408+00:00",
+            "generated_at": "2026-11-07T22:12:56.634160+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -367,7 +473,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.889486+00:00",
+            "generated_at": "2026-11-07T22:12:56.657963+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -419,7 +525,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.917203+00:00",
+            "generated_at": "2026-11-07T22:12:56.683627+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -473,7 +579,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:52.964818+00:00",
+            "generated_at": "2026-11-07T22:12:56.715272+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -525,7 +631,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.039174+00:00",
+            "generated_at": "2026-11-07T22:12:56.747822+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -581,7 +687,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.070032+00:00",
+            "generated_at": "2026-11-07T22:12:56.772936+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -633,7 +739,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.099708+00:00",
+            "generated_at": "2026-11-07T22:12:56.797021+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -687,7 +793,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.139108+00:00",
+            "generated_at": "2026-11-07T22:12:56.836349+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -739,7 +845,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.178861+00:00",
+            "generated_at": "2026-11-07T22:12:56.872899+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -795,7 +901,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.209033+00:00",
+            "generated_at": "2026-11-07T22:12:56.900261+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -847,7 +953,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.239021+00:00",
+            "generated_at": "2026-11-07T22:12:56.927742+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -901,7 +1007,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.305110+00:00",
+            "generated_at": "2026-11-07T22:12:56.962117+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -953,7 +1059,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.352125+00:00",
+            "generated_at": "2026-11-07T22:12:56.996014+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -1009,7 +1115,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.396116+00:00",
+            "generated_at": "2026-11-07T22:12:57.022705+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -1061,7 +1167,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.442915+00:00",
+            "generated_at": "2026-11-07T22:12:57.051416+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -1115,7 +1221,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.506262+00:00",
+            "generated_at": "2026-11-07T22:12:57.091997+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -1167,7 +1273,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.560843+00:00",
+            "generated_at": "2026-11-07T22:12:57.134200+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -1223,7 +1329,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.596483+00:00",
+            "generated_at": "2026-11-07T22:12:57.161690+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -1275,7 +1381,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.630862+00:00",
+            "generated_at": "2026-11-07T22:12:57.187216+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -1329,7 +1435,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.674466+00:00",
+            "generated_at": "2026-11-07T22:12:57.221962+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -1381,7 +1487,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.716833+00:00",
+            "generated_at": "2026-11-07T22:12:57.257873+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -1437,7 +1543,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.749032+00:00",
+            "generated_at": "2026-11-07T22:12:57.285051+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -1489,7 +1595,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.777744+00:00",
+            "generated_at": "2026-11-07T22:12:57.310531+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -1543,7 +1649,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.816996+00:00",
+            "generated_at": "2026-11-07T22:12:57.345216+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -1595,7 +1701,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.860140+00:00",
+            "generated_at": "2026-11-07T22:12:57.380252+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -1651,7 +1757,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.890914+00:00",
+            "generated_at": "2026-11-07T22:12:57.410085+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -1703,7 +1809,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.919464+00:00",
+            "generated_at": "2026-11-07T22:12:57.436161+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -1757,7 +1863,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.958334+00:00",
+            "generated_at": "2026-11-07T22:12:57.471953+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -1809,7 +1915,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:53.996620+00:00",
+            "generated_at": "2026-11-07T22:12:57.507545+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -2027,7 +2133,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.040388+00:00",
+            "generated_at": "2026-11-07T22:12:57.546707+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -2241,7 +2347,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.077545+00:00",
+            "generated_at": "2026-11-07T22:12:57.581760+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -2457,7 +2563,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.125246+00:00",
+            "generated_at": "2026-11-07T22:12:57.628377+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -2671,7 +2777,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.176588+00:00",
+            "generated_at": "2026-11-07T22:12:57.676407+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -2727,7 +2833,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.207165+00:00",
+            "generated_at": "2026-11-07T22:12:57.702473+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -2779,7 +2885,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.235265+00:00",
+            "generated_at": "2026-11-07T22:12:57.727411+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -2833,7 +2939,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.271672+00:00",
+            "generated_at": "2026-11-07T22:12:57.763961+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -2885,7 +2991,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.307699+00:00",
+            "generated_at": "2026-11-07T22:12:57.799425+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -2941,7 +3047,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.336309+00:00",
+            "generated_at": "2026-11-07T22:12:57.823615+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -2993,7 +3099,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.362827+00:00",
+            "generated_at": "2026-11-07T22:12:57.850762+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -3047,7 +3153,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.401805+00:00",
+            "generated_at": "2026-11-07T22:12:57.891814+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -3099,7 +3205,435 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.438288+00:00",
+            "generated_at": "2026-11-07T22:12:57.927292+00:00",
+            "cov_type_requested": "hc1",
+            "cov_type_linearmodels": "robust",
+            "effects": "two_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        }
+      }
+    },
+    "unbalanced_sparse": {
+      "one_way": {
+        "classical": {
+          "params": {
+            "x1": 1.4212970107465819,
+            "x2": -0.21176225006494262
+          },
+          "std_errors": {
+            "x1": 0.14212073415206486,
+            "x2": 0.15197968568430653
+          },
+          "test_stats": {
+            "x1": 10.000630936973893,
+            "x2": -1.3933589157752104
+          },
+          "p_values": {
+            "x1": 1.0522892519475062e-14,
+            "x2": 0.1683316990030168
+          },
+          "conf_int": {
+            "x1": [
+              1.1373782056376007,
+              1.705215815855563
+            ],
+            "x2": [
+              -0.5153765750103639,
+              0.09185207488047872
+            ]
+          },
+          "n_obs": 106,
+          "df_resid": 64,
+          "df_model": 42,
+          "n_entities": 40,
+          "f_statistic": 51.30157260270437,
+          "f_p_value": 5.0570459202772094e-14,
+          "r_squared_within": 0.6158535907524856,
+          "r_squared_between": 0.5884763968606546,
+          "r_squared_overall": 0.5882059830933741,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:57.952155+00:00",
+            "cov_type_requested": "classical",
+            "cov_type_linearmodels": "unadjusted",
+            "effects": "one_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        },
+        "hc1": {
+          "params": {
+            "x1": 1.4212970107465819,
+            "x2": -0.21176225006494262
+          },
+          "std_errors": {
+            "x1": 0.1398960516472007,
+            "x2": 0.19176807062260587
+          },
+          "test_stats": {
+            "x1": 10.159664937012694,
+            "x2": -1.1042622965200746
+          },
+          "p_values": {
+            "x1": 5.6306957628377e-15,
+            "x2": 0.2736138448410318
+          },
+          "conf_int": {
+            "x1": [
+              1.1418225198490095,
+              1.7007715016441542
+            ],
+            "x2": [
+              -0.594863011499012,
+              0.17133851136912673
+            ]
+          },
+          "n_obs": 106,
+          "df_resid": 64,
+          "df_model": 42,
+          "n_entities": 40,
+          "f_statistic": 54.18842361608584,
+          "f_p_value": 1.699938871005877e-14,
+          "r_squared_within": 0.6158535907524856,
+          "r_squared_between": 0.5884763968606546,
+          "r_squared_overall": 0.5882059830933741,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:57.980629+00:00",
+            "cov_type_requested": "hc1",
+            "cov_type_linearmodels": "robust",
+            "effects": "one_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        }
+      },
+      "two_way": {
+        "classical": {
+          "params": {
+            "x1": 1.5059201100388249,
+            "x2": -0.18925902984189089
+          },
+          "std_errors": {
+            "x1": 0.11776272746891396,
+            "x2": 0.13084269800612883
+          },
+          "test_stats": {
+            "x1": 12.7877482324477,
+            "x2": -1.4464622995853065
+          },
+          "p_values": {
+            "x1": 1.178719247150165e-18,
+            "x2": 0.153339525601754
+          },
+          "conf_int": {
+            "x1": [
+              1.2702774366624598,
+              1.7415627834151899
+            ],
+            "x2": [
+              -0.4510746638087536,
+              0.07255660412497181
+            ]
+          },
+          "n_obs": 106,
+          "df_resid": 59,
+          "df_model": 47,
+          "n_entities": 40,
+          "f_statistic": 82.89388822826152,
+          "f_p_value": 7.291887285047603e-18,
+          "r_squared_within": 0.613615751121644,
+          "r_squared_between": 0.609499235896185,
+          "r_squared_overall": 0.6021100956987555,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:58.029093+00:00",
+            "cov_type_requested": "classical",
+            "cov_type_linearmodels": "unadjusted",
+            "effects": "two_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        },
+        "hc1": {
+          "params": {
+            "x1": 1.5059201100388249,
+            "x2": -0.18925902984189089
+          },
+          "std_errors": {
+            "x1": 0.12226566707280427,
+            "x2": 0.15660660428066037
+          },
+          "test_stats": {
+            "x1": 12.316786438028512,
+            "x2": -1.2084996715892833
+          },
+          "p_values": {
+            "x1": 5.958249441551071e-18,
+            "x2": 0.2316764562592614
+          },
+          "conf_int": {
+            "x1": [
+              1.2612670753272648,
+              1.750573144750385
+            ],
+            "x2": [
+              -0.5026281211855905,
+              0.12411006150180873
+            ]
+          },
+          "n_obs": 106,
+          "df_resid": 59,
+          "df_model": 47,
+          "n_entities": 40,
+          "f_statistic": 77.05575485823825,
+          "f_p_value": 3.5174718069178274e-17,
+          "r_squared_within": 0.613615751121644,
+          "r_squared_between": 0.609499235896185,
+          "r_squared_overall": 0.6021100956987555,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:58.063684+00:00",
+            "cov_type_requested": "hc1",
+            "cov_type_linearmodels": "robust",
+            "effects": "two_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        }
+      }
+    },
+    "unbalanced_disconnected": {
+      "one_way": {
+        "classical": {
+          "params": {
+            "x1": 2.019976047907845,
+            "x2": -0.3599993604107596
+          },
+          "std_errors": {
+            "x1": 0.1642070534928705,
+            "x2": 0.14427298873869993
+          },
+          "test_stats": {
+            "x1": 12.301396346506808,
+            "x2": -2.495265146705823
+          },
+          "p_values": {
+            "x1": 8.350561200722705e-18,
+            "x2": 0.015453988128004626
+          },
+          "conf_int": {
+            "x1": [
+              1.6912799179111941,
+              2.3486721779044957
+            ],
+            "x2": [
+              -0.6487931244589039,
+              -0.07120559636261525
+            ]
+          },
+          "n_obs": 100,
+          "df_resid": 58,
+          "df_model": 42,
+          "n_entities": 40,
+          "f_statistic": 76.560706493959,
+          "f_p_value": 5.3453430398170994e-17,
+          "r_squared_within": 0.7252765639489198,
+          "r_squared_between": 0.6392395569737315,
+          "r_squared_overall": 0.6476359421951203,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:58.090579+00:00",
+            "cov_type_requested": "classical",
+            "cov_type_linearmodels": "unadjusted",
+            "effects": "one_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        },
+        "hc1": {
+          "params": {
+            "x1": 2.019976047907845,
+            "x2": -0.3599993604107596
+          },
+          "std_errors": {
+            "x1": 0.14965357759680675,
+            "x2": 0.16851138824138856
+          },
+          "test_stats": {
+            "x1": 13.497679643516564,
+            "x2": -2.136350333160089
+          },
+          "p_values": {
+            "x1": 1.5120015878653307e-19,
+            "x2": 0.0368820331972327
+          },
+          "conf_int": {
+            "x1": [
+              1.7204118650674312,
+              2.3195402307482587
+            ],
+            "x2": [
+              -0.6973115525311329,
+              -0.02268716829038625
+            ]
+          },
+          "n_obs": 100,
+          "df_resid": 58,
+          "df_model": 42,
+          "n_entities": 40,
+          "f_statistic": 95.1299926719053,
+          "f_p_value": 4.865380120133581e-19,
+          "r_squared_within": 0.7252765639489198,
+          "r_squared_between": 0.6392395569737315,
+          "r_squared_overall": 0.6476359421951203,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:58.120690+00:00",
+            "cov_type_requested": "hc1",
+            "cov_type_linearmodels": "robust",
+            "effects": "one_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        }
+      },
+      "two_way": {
+        "classical": {
+          "params": {
+            "x1": 1.966555469624434,
+            "x2": -0.28751405918682754
+          },
+          "std_errors": {
+            "x1": 0.17139015180505146,
+            "x2": 0.14959899531123197
+          },
+          "test_stats": {
+            "x1": 11.474145094761932,
+            "x2": -1.9218983295220087
+          },
+          "p_values": {
+            "x1": 5.530567783983929e-16,
+            "x2": 0.06000197229464142
+          },
+          "conf_int": {
+            "x1": [
+              1.6227903590045305,
+              2.310320580244338
+            ],
+            "x2": [
+              -0.5875716449359076,
+              0.012543526562252605
+            ]
+          },
+          "n_obs": 100,
+          "df_resid": 53,
+          "df_model": 47,
+          "n_entities": 40,
+          "f_statistic": 66.0327244300204,
+          "f_p_value": 4.066201577929911e-15,
+          "r_squared_within": 0.7237117951222214,
+          "r_squared_between": 0.6379479616762206,
+          "r_squared_overall": 0.6464906947141765,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:58.159699+00:00",
+            "cov_type_requested": "classical",
+            "cov_type_linearmodels": "unadjusted",
+            "effects": "two_way",
+            "confidence_level": 0.95,
+            "hac_bandwidth": null,
+            "note": "aic/bicはlinearmodels.PanelOLSが提供しないためこのフィクスチャに含まない（fixestクロスチェック側のみで検証、panel-common.md5.4節と同型の単一参照実装の例外）。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため本実装の値と意図的に一致しない（fixestのfitstat(m,'wr2')のみで検証）。"
+          }
+        },
+        "hc1": {
+          "params": {
+            "x1": 1.966555469624434,
+            "x2": -0.28751405918682754
+          },
+          "std_errors": {
+            "x1": 0.14744244198322234,
+            "x2": 0.1874790134045355
+          },
+          "test_stats": {
+            "x1": 13.337784176473493,
+            "x2": -1.5335799669824377
+          },
+          "p_values": {
+            "x1": 1.4282603708739266e-18,
+            "x2": 0.1310812524962273
+          },
+          "conf_int": {
+            "x1": [
+              1.6708233820766987,
+              2.2622875571721694
+            ],
+            "x2": [
+              -0.6635493395291197,
+              0.08852122115546451
+            ]
+          },
+          "n_obs": 100,
+          "df_resid": 53,
+          "df_model": 47,
+          "n_entities": 40,
+          "f_statistic": 92.19755834314525,
+          "f_p_value": 5.537431225384751e-18,
+          "r_squared_within": 0.7237117951222214,
+          "r_squared_between": 0.6379479616762206,
+          "r_squared_overall": 0.6464906947141765,
+          "true_beta": [
+            1.64373629133578,
+            -0.3667293614876863
+          ],
+          "_meta": {
+            "reference": "linearmodels",
+            "linearmodels_version": "7.1",
+            "generated_at": "2026-11-07T22:12:58.199808+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -3154,7 +3688,7 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.1",
-          "generated_at": "2026-10-30T14:20:54.465292+00:00",
+          "generated_at": "2026-11-07T22:12:58.236980+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "one_way",
@@ -3215,7 +3749,7 @@
         "_meta": {
           "reference": "linearmodels",
           "linearmodels_version": "7.1",
-          "generated_at": "2026-10-30T14:20:54.501971+00:00",
+          "generated_at": "2026-11-07T22:12:58.270722+00:00",
           "cov_type_requested": "classical",
           "cov_type_linearmodels": "unadjusted",
           "effects": "two_way",
@@ -3276,7 +3810,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.568921+00:00",
+            "generated_at": "2026-11-07T22:12:58.320718+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "one_way",
@@ -3332,7 +3866,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.610156+00:00",
+            "generated_at": "2026-11-07T22:12:58.363557+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "one_way",
@@ -3390,7 +3924,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.665895+00:00",
+            "generated_at": "2026-11-07T22:12:58.415115+00:00",
             "cov_type_requested": "classical",
             "cov_type_linearmodels": "unadjusted",
             "effects": "two_way",
@@ -3446,7 +3980,7 @@
           "_meta": {
             "reference": "linearmodels",
             "linearmodels_version": "7.1",
-            "generated_at": "2026-10-30T14:20:54.725386+00:00",
+            "generated_at": "2026-11-07T22:12:58.465268+00:00",
             "cov_type_requested": "hc1",
             "cov_type_linearmodels": "robust",
             "effects": "two_way",
@@ -3460,9 +3994,9 @@
   },
   "_meta": {
     "method": "fe",
-    "generated_at": "2026-10-30T14:20:54.725552+00:00",
+    "generated_at": "2026-11-07T22:12:58.465406+00:00",
     "primary_reference": "linearmodels",
     "linearmodels_version": "7.1",
-    "note": "singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorシナリオはここに含まない（いずれもValidationErrorの発生確認のみ、テストコード側で対応）。unbalancedは1-way専用（2-way FEはバランスパネル必須のため、2-way要求時のValidationErrorはunbalanced_two_wayシナリオで確認）。hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（generate_fe_crosscheck_fixtures.pyのfixestクロスチェックのみで検証する単一参照実装の例外、panel-common.md5.4節と同型）。aic/bicも同じ理由でlinearmodelsに無く、generate_fe_crosscheck_fixtures.py側のみに含まれる。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため、この値をそのまま数値比較に使わないこと（fixestのfitstat(m,'wr2')で検証、linearmodels_ref.pyモジュールdoc参照）。wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）はmarried/union/expersqのみ使用——educ/black/hisp等の時間不変変数はwithin変換で分散ゼロになり除外、exper自体も2-way FEでentity+time効果と完全共線になるため除外している（benchmark/common/constants.pyのWAGEPAN_X参照）。cluster/dkはここに含まない（本実装の小標本補正がfixest・Stata型に変わりlinearmodelsとは一致しないため、fixestクロスチェックのみで検証する、モジュールdoc・COV_TYPESのコメント参照）。moderate_multicollinearity/high_condition_number/scale_variance_mild/many_regressors/outlier_regressor/high_varianceは悪条件・高次元・外れ値シナリオ（`benchmark/panel/datasets.py`参照）。baseline_df1は自由度ちょうど1の境界成功パス。1-way（entity=3×period=2、k=2、df_resid=6-3-2=1）と2-way（entity=3×period=3、k=3、df_resid=9-(3+3+3-1)=1）で別データ（fe_baseline_df1_one_way.csv/fe_baseline_df1_two_way.csv）。"
+    "note": "singleton_entity/singleton_time/zero_variance_regressorシナリオはここに含まない（いずれもValidationErrorの発生確認のみ、テストコード側で対応）。unbalanced/unbalanced_sparse/unbalanced_disconnectedは組合せが欠ける不均衡パネルで、2-wayは交互射影で推定する（unbalanced_disconnectedは個体と時点のつながりが2つの連結成分に分かれる。自由度はlinearmodelsもk+N+T-1のまま）。hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外（generate_fe_crosscheck_fixtures.pyのfixestクロスチェックのみで検証する単一参照実装の例外、panel-common.md5.4節と同型）。aic/bicも同じ理由でlinearmodelsに無く、generate_fe_crosscheck_fixtures.py側のみに含まれる。2-way FEのr_squared_withinはlinearmodels自身がentityのみdemeanの別定義を使うため、この値をそのまま数値比較に使わないこと（fixestのfitstat(m,'wr2')で検証、linearmodels_ref.pyモジュールdoc参照）。wagepan（Wooldridge、N=545人×T=8年、1980-1987、バランスパネル）はmarried/union/expersqのみ使用——educ/black/hisp等の時間不変変数はwithin変換で分散ゼロになり除外、exper自体も2-way FEでentity+time効果と完全共線になるため除外している（benchmark/common/constants.pyのWAGEPAN_X参照）。cluster/dkはここに含まない（本実装の小標本補正がfixest・Stata型に変わりlinearmodelsとは一致しないため、fixestクロスチェックのみで検証する、モジュールdoc・COV_TYPESのコメント参照）。moderate_multicollinearity/high_condition_number/scale_variance_mild/many_regressors/outlier_regressor/high_varianceは悪条件・高次元・外れ値シナリオ（`benchmark/panel/datasets.py`参照）。baseline_df1は自由度ちょうど1の境界成功パス。1-way（entity=3×period=2、k=2、df_resid=6-3-2=1）と2-way（entity=3×period=3、k=3、df_resid=9-(3+3+3-1)=1）で別データ（fe_baseline_df1_one_way.csv/fe_baseline_df1_two_way.csv）。"
   }
 }

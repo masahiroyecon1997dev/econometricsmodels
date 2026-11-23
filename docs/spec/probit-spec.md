@@ -1,6 +1,6 @@
 # Probit 仕様書
 
-Probit（二項プロビット回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/probit.rs`（共通基盤は
+Probit（二項プロビット回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/probit.rs`（ファサード）と`probit/`（入力・数式・目的関数・`ProbitFitted`・`fit`。共通基盤は
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/probit.rs`・
 `python_package/econometricsmodels/nonlinear/probit.py`として実装済み。Logitと共通基盤・API面を
 共有する設計のため、共通する式・理由は[`logit-spec.md`](./logit-spec.md)を参照し、本ドキュメントでは

@@ -14,7 +14,7 @@ $ARGUMENTS が指定されていればそのパターンに絞る。指定がな
 ## 手順
 
 1. `cargo test -p engine $ARGUMENTS` を実行する。
-2. `pytest tests $ARGUMENTS` を実行する。
+2. `pytest tests $ARGUMENTS --check-no-skips` を実行する。スキップは0件のはず（出たら原因を調べる。全体実行で件数が変わったら、まず`_lib`のビルドの種類を疑う。`.claude/rules/testing-policy.md`「テストをスキップしない」）。
 3. 失敗があれば、以下の観点で原因を切り分ける。
    - 実装のバグか
    - リファレンス実装（statsmodels/linearmodels/R）との前提の違い（計算方法の差異）か

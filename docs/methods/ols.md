@@ -37,7 +37,7 @@ This assumes homoskedastic, uncorrelated errors.
 | `"hc2"` | \(1 / (1 - h_{ii})\) |
 | `"hc3"` | \(1 / (1 - h_{ii})^2\) |
 
-\(h_{ii} = x_i'(X'X)^{-1}x_i\) is the leverage of observation \(i\). HC2 and HC3 grow without bound as a leverage approaches 1, so a single extreme observation can dominate them.
+\(h_{ii} = x_i'(X'X)^{-1}x_i\) is the leverage of observation \(i\). HC2 and HC3 grow without bound as a leverage approaches 1, so a single extreme observation can dominate them. An observation with \(h_{ii} = 1\) (for example a dummy that is nonzero in one row) is fitted exactly and its weight is not defined; the fit raises `ComputationError` (`UNIT_LEVERAGE_OBSERVATION`) instead of returning a number that depends on rounding (see [Validation](../guide/validation.md#observation-with-leverage-1)).
 
 ### `"hac"`: Newey-West
 
@@ -147,4 +147,4 @@ F = \frac{\big(\sum_t \hat\varepsilon_t^2 - \mathrm{SSR}_{\mathrm{aux}}\big)/m}{
 
 `time` and `nlags` have no defaults. The auxiliary regression uses `X` exactly as in the model, so no constant is added when the model has none.
 
-Here \(R^2\) is measured against \(\sum_t \hat\varepsilon_t^2\), not against the variation of \(\hat\varepsilon\) around its mean (an uncentered \(R^2\)). With an intercept the residuals have mean zero and the two coincide. Without one they differ, and the definition used here is that of R's `lmtest::bgtest` and of Greene; statsmodels adds a constant to the auxiliary regression in that case, so its value differs.
+Here \(R^2\) is measured against \(\sum_t \hat\varepsilon_t^2\), not against the variation of \(\hat\varepsilon\) around its mean (an uncentered \(R^2\)). With an intercept the residuals have mean zero and the two coincide. Without one they differ, and the definition used here is that of R's `lmtest::bgtest`; statsmodels adds a constant to the auxiliary regression in that case, so its value differs.

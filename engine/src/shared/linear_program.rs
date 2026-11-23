@@ -67,7 +67,7 @@ pub trait LinearProgramSolver {
     fn maximize(&self, lp: &BoxBoundedLp<'_>) -> Result<Vec<f64>, LpError>;
 }
 
-/// 密なタブローを使う単体法（Bland規則）。
+/// 密なタブローを使う単体法（Dantzig規則を主とし、退化が続くとBland規則に切り替える）。
 ///
 /// 変数を`x = p - q`（`p, q >= 0`）に分け、箱制約を`p_j <= bound`・`q_j <= bound`の行として
 /// 加えて標準形にする。`rhs >= 0`なのでスラック変数を基底にした原点が許容基底解になり、
@@ -79,8 +79,9 @@ pub trait LinearProgramSolver {
 /// （実測）。一方Dantzig規則は退化頂点で巡回しうるため、退化ピボット（右辺が0のままの
 /// ピボット）が`DEGENERATE_PIVOTS_BEFORE_BLAND`回続いたらBland規則に切り替えて巡回を断ち、
 /// 非退化ピボットが出たらDantzig規則に戻す。比の同点は絶対許容幅`RATIO_TIE_TOLERANCE`で判定する
-/// （右辺が`1e-16`級の非ゼロになると厳密比較の同点判定が崩れるため）。さらに、制約の右辺には
-/// 行ごとに異なる`1e-11`級の決定的な摂動を足して退化そのものを解く（`rhs_perturbation`）。
+/// （右辺が`1e-16`級の非ゼロになると厳密比較の同点判定が崩れるため。幅は摂動より十分小さく取る）。
+/// さらに、制約の右辺には行ごとに異なる`1e-11`級の決定的な摂動を足して退化そのものを解く
+/// （`rhs_perturbation`）。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DenseSimplex;
 
@@ -92,8 +93,21 @@ const PIVOT_TOLERANCE: f64 = 1e-11;
 const PIVOT_LIMIT_FACTOR: usize = 50;
 /// 退化を避けるため、制約の右辺に足す決定的な微小摂動の基準値（[`rhs_perturbation`]）。
 const RHS_PERTURBATION: f64 = 1e-11;
-/// 比検定で同点とみなす比の差の絶対許容幅。
-const RATIO_TIE_TOLERANCE: f64 = 1e-12;
+/// 比検定で同点とみなす比の差の絶対許容幅。**右辺の摂動（`RHS_PERTURBATION`、`1e-11`級）より
+/// 十分小さく取ること**。許容領域が原点だけの錐制約では、右辺も比も摂動と同じ桁になるため、
+/// 摂動と同じ桁の許容幅は別々の比を同点とみなして退出行を誤り、ピボット上限まで終わらなかった
+/// （`1e-12`のとき、混合スケールのデータで列の組み合わせにより起きた）。
+///
+/// `1e-15`は経験的に決めた値で、導出した値ではない。分離検出の混合スケールのデータ
+/// （1040ケース）で許容幅を振ると、失敗は`1e-13`で93件、`1e-14`で1件、`1e-15`以下（`0`を含む）で
+/// 0件だった。つまり失敗する値との余裕は約1桁で、このLPでは同点の許容はほぼ要らない。
+/// 摂動の大きさ（`RHS_PERTURBATION`）や使う問題の形を変えるときは振り直すこと。
+///
+/// 絶対幅なので、想定するのは原点付近の小さな比（摂動級の`1e-11`前後）。丸め誤差による比の
+/// ずれは比の大きさ×`1e-16`程度なので、その範囲では本来の同点を拾える。箱制約の行
+/// （比が`bound/a`で1以上）では、比が約9を超えると`1e-15`は1ulp未満で事実上厳密比較になる
+/// （そのような行が最小比になるのは分離があるときで、実害は確認していない）。
+const RATIO_TIE_TOLERANCE: f64 = 1e-15;
 /// 右辺がこれ以下のピボットを退化ピボットとみなす。
 const DEGENERATE_RHS_TOLERANCE: f64 = 1e-12;
 /// 退化ピボットがこの回数続いたらBland規則（巡回しない規則）に切り替える。
@@ -322,6 +336,23 @@ mod tests {
     fn respects_the_bound_value() {
         let x = solve(&[1.0, -1.0], &[], &[], 2.5);
         assert_eq!(x, vec![2.5, -2.5]);
+    }
+
+    /// 比が`RATIO_TIE_TOLERANCE`（`1e-15`）より大きく、`1e-12`より小さく違う2行では、比の小さい
+    /// 行が退出しなければならない。制約は`6x <= 0`・`7.47x <= 0`（右辺は摂動で`1e-11`級になる）
+    /// で、比は約`1.67e-12`と`2.17e-12`、差は約`5e-13`。後者のほうがピボット要素が大きいので、
+    /// 許容幅が`1e-12`だと同点とみなされて後者が退出し、前者の制約を破った解（`x≈2.17e-12`）で
+    /// 終わる。厳密解は小さい比の`rhs_perturbation(0)/6`。
+    #[test]
+    fn ratio_test_does_not_merge_ratios_that_differ_at_the_perturbation_scale() {
+        let rows = vec![vec![6.0], vec![7.47]];
+        let x = solve(&[1.0], &rows, &[0.0, 0.0], 1.0);
+        let expected = rhs_perturbation(0) / 6.0;
+        assert!(
+            (x[0] - expected).abs() < 1e-13,
+            "x={:e}, expected={expected:e}",
+            x[0]
+        );
     }
 
     #[test]

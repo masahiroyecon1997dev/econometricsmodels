@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
+from _assertions import assert_close
 from _cross_method_helpers import (
     FE_DF_RESID_ONE_WAY,
     FE_DF_RESID_TWO_WAY,
@@ -22,12 +23,15 @@ from _cross_method_helpers import (
     fit_fe,
     fit_re,
 )
+from _tolerances import TOLERANCES
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -38,6 +42,8 @@ from econometricsmodels import (
     TobitOptions,
 )
 from scipy import stats as sps
+
+NORMAL_P_VALUE = TOLERANCES["stat_dist_normal_p_value"]
 
 
 def _check_t(res, df_expected: int) -> None:
@@ -55,6 +61,14 @@ def _check_normal(res) -> None:
     assert res.stat_dist == "normal"
     assert res.stat_df is None
     assert set(res.test_stats) == set(res.params)
+    # p値は標準正規分布の両側確率（z検定の生存関数が`1e-14`級の精度であることまで固定する）。
+    for name, z in res.test_stats.items():
+        assert_close(
+            res.p_values[name],
+            2.0 * sps.norm.sf(abs(z)),
+            f"p_value/{name}",
+            **NORMAL_P_VALUE,
+        )
 
 
 # ── 手法別の分布と自由度 ──────────────────────────────────────────────
@@ -107,7 +121,7 @@ def test_iv_distribution_follows_estimator(panel_df, estimator, dist):
     if dist == "t":
         assert res.stat_df == res.df_resid
     else:
-        assert res.stat_df is None
+        _check_normal(res)
     assert set(res.test_stats) == set(res.params)
 
 
@@ -144,6 +158,66 @@ def test_fe_dk_uses_t_minus_one_df(panel_df):
         panel_df, y="y", x=["x1", "x2"], effects=["entity"], options=options
     ).fit()
     _check_t(res, N_PERIODS - 1)
+
+
+def _fe_iv(panel_df, **options):
+    return FEIV(
+        panel_df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+        options=FEIVOptions(**options),
+    ).fit()
+
+
+def test_fe_iv_classical_uses_t_with_panel_residual_df(panel_df):
+    res = _fe_iv(panel_df, cov_type="classical")
+    _check_t(res, res.df_resid)
+    assert res.wald_dist == "f"
+    assert res.wald_df_denom == res.stat_df
+
+
+def test_fe_iv_cluster_uses_g_minus_one_df(panel_df):
+    """FEIVの既定`cov_type`は`"cluster"`（entity単位）で、自由度は`G-1`。"""
+    res = _fe_iv(panel_df)
+    _check_t(res, N_ENTITIES - 1)
+    assert res.wald_df_denom == N_ENTITIES - 1
+
+
+def test_fe_iv_dk_uses_t_minus_one_df(panel_df):
+    res = _fe_iv(panel_df, cov_type="dk", dk_time="time")
+    _check_t(res, N_PERIODS - 1)
+    assert res.wald_df_denom == N_PERIODS - 1
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "cluster", "dk"])
+def test_fe_iv_gmm_uses_normal_and_chi2(panel_df, cov_type):
+    """FEIVは`cov_type`によらず、係数のzとWaldのχ²を使う（自由度は持たない）。"""
+    options = FEIVOptions(
+        estimator="gmm",
+        cov_type=cov_type,
+        dk_time="time" if cov_type == "dk" else None,
+    )
+    res = FEIV(
+        panel_df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+        options=options,
+    ).fit()
+    _check_normal(res)
+    for name, z in res.test_stats.items():
+        p = 2.0 * sps.norm.sf(abs(z))
+        assert p == pytest.approx(res.p_values[name], rel=1e-8)
+    assert res.wald_dist == "chi2"
+    assert res.wald_df_denom is None
+    assert res.wald_p_value == pytest.approx(
+        sps.chi2.sf(res.wald_statistic, res.wald_df_num), rel=1e-8
+    )
 
 
 def test_re_classical_uses_t_with_residual_df(panel_df):

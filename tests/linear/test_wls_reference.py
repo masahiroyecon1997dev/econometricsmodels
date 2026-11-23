@@ -11,6 +11,8 @@ t値・p値・信頼区間・適合度統計量まで`_check_result`で検証す
 `include_intercept=False`（切片なし）・`confidence_level`非既定も、
 baselineシナリオで全cov_type（classical/HC0-3/cluster/HAC）と
 組み合わせて同じフィクスチャ経由で検証する。
+列のスケール・相関が大きい実データ（`EXACT_CLUSTER_CASES`）のクラスターロバスト推定は、
+フィクスチャではなく有理数の厳密値と比べる（末尾の節）。
 
 役割分担:
     - 構造・API・OLSとの不変条件回帰テスト: `test_wls_api.py`
@@ -40,6 +42,13 @@ from _assertions import (
     assert_inference_close,
 )
 from _constants import DATA_DIR, WIDE_X
+from _exact_cluster import (
+    EXACT_CLUSTER_CASES,
+    REGION,
+    WEIGHT,
+    exact_cluster_inference,
+    load_exact_cluster_case,
+)
 from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     ROW_TIME,
@@ -75,6 +84,7 @@ FIXTURE_PATH = (
 
 RTOL = TOLERANCES["wls_reference"]["rtol"]
 ATOL = TOLERANCES["wls_reference"]["atol"]
+RTOL_EXACT = TOLERANCES["wls_exact_cluster"]["rtol"]
 
 # HACのラグは`hac_lags`を省略して本実装の自動選択に任せる。フィクスチャ生成側
 # （benchmark/linear/references/statsmodels_ref.py）は同じ式（`hac_auto_lag(n)`）で
@@ -469,3 +479,51 @@ def test_wide_dataset_per_name_statistics_match_statsmodels(wide_dataset):
         _assert_close(res.p_values[name], sm_res.pvalues[i], f"p/{name}")
         _assert_close(res.conf_int[name][0], sm_ci[i][0], f"ci_lower/{name}")
         _assert_close(res.conf_int[name][1], sm_ci[i][1], f"ci_upper/{name}")
+
+
+# ── 厳密値（有理数）との照合（実データ） ──────────────────────────────
+
+
+@pytest.mark.parametrize("case_name", list(EXACT_CLUSTER_CASES))
+def test_cluster_badly_scaled_real_data_matches_exact_values(case_name):
+    """列のスケール・相関が大きい実データで、クラスターロバストの係数・標準誤差・全体Fが
+    有理数の厳密値と一致すること。重みは`w = (1 + ダミー)²`で、厳密値は`√w`倍した変数の
+    OLSとして求める。`card_poly`（経験年数の4次多項式）は、`X'X`を明示的に反転してサンドイッチを
+    組む経路では全体Fがずれる設計で、その経路の再発を検出する。
+    """
+    df, case = load_exact_cluster_case(load_wooldridge_dataset, case_name)
+    assert df[REGION].n_unique() == case.n_clusters
+    exact, f_exact = exact_cluster_inference(df, case, weighted=True)
+
+    res = WLS(
+        df,
+        y=case.y,
+        x=case.x,
+        weight=WEIGHT,
+        options=WLSOptions(cov_type="cluster", cluster=REGION),
+    ).fit()
+
+    assert res.param_names == ["const", *case.x]
+    label = f"{case_name}/cluster/exact"
+    for name, beta, se in zip(res.param_names, exact.beta, exact.se):
+        assert_close(
+            res.params[name],
+            beta,
+            f"{label} params/{name}",
+            rtol=RTOL_EXACT,
+            atol=0.0,
+        )
+        assert_close(
+            res.std_errors[name],
+            se,
+            f"{label} std_errors/{name}",
+            rtol=RTOL_EXACT,
+            atol=0.0,
+        )
+    assert_close(
+        res.f_statistic,
+        f_exact,
+        f"{label} f_statistic",
+        rtol=RTOL_EXACT,
+        atol=0.0,
+    )

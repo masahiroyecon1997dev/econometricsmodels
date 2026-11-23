@@ -60,7 +60,7 @@ The coefficients are the same for every `cov_type`; only the standard errors, th
 
 | If the errors may be... | Use | Notes |
 |---|---|---|
-| Homoskedastic and uncorrelated | `"classical"` (default) | The textbook formula; too small if the variance of the errors depends on the regressors |
+| Homoskedastic and uncorrelated | `"classical"` (default) | The textbook formula; unreliable (too small or too large) if the variance of the errors depends on the regressors |
 | Heteroskedastic, observations independent | `"hc0"` to `"hc3"` | HC1 rescales HC0 by `n / (n - k)`. HC2 and HC3 correct for the leverage of each observation and are more cautious in small samples. |
 | Correlated within groups (firms, schools, regions) | `"cluster"` with `cluster=` | Name the column of the level at which errors can be correlated. The result is unreliable with few clusters; at least two are required, and more than the number of slope coefficients |
 | Serially correlated (time series) | `"hac"` with `hac_time=` | Newey-West. Also robust to heteroskedasticity. The lag length is chosen automatically unless you set `hac_lags` |

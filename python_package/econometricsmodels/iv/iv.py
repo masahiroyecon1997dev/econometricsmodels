@@ -22,10 +22,20 @@ from .. import _lib
 from .._lib import IVOptions
 from .._results_utils import (
     by_param,
+    c_statistic_result,
     conf_int_by_param,
     cov_params_by_param,
+    cragg_donald_result,
+    effective_f_result,
+    kleibergen_paap_result,
     params_table_rows,
     results_repr,
+)
+from ..diagnostics import (
+    CraggDonaldResult,
+    CStatisticResult,
+    EffectiveFResult,
+    KleibergenPaapResult,
 )
 from ..linear.ols import OLSResults
 
@@ -150,9 +160,9 @@ class IVResults:
       `wald_dist`, `wald_df_num`, `wald_df_denom`.
     - Weak instruments: `weak_instrument_f_statistics`,
       `weak_instrument_f_df_num`, `weak_instrument_f_df_denom`.
-    - Overidentification (Sargan or Hansen J): `overid_statistic`,
-      `overid_p_value`, `overid_df`.
-    - Endogeneity (2SLS only): `wu_hausman_statistic`,
+    - Overidentification (Sargan, or Hansen's J that follows `cov_type`
+      for 2SLS): `overid_statistic`, `overid_p_value`, `overid_df`.
+    - Endogeneity (Wu-Hausman, both estimators): `wu_hausman_statistic`,
       `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`.
     - Fit: `r_squared`, `adj_r_squared`.
     - Estimator used: `estimator`, `gmm_type`, `gmm_weight_type`,
@@ -163,6 +173,15 @@ class IVResults:
     - Residuals: `residuals` (structural residuals).
     - Methods: `first_stage()` (one `OLSResults` per endogenous
       variable), `params_table()`.
+    - Weak-instrument diagnostics (methods, computed when called):
+      `cragg_donald()`, `kleibergen_paap()`, `effective_f()`.
+    - Exogeneity of endogenous variables and orthogonality of excluded
+      instruments, for either estimator (method, computed when called):
+      `c_stat()`. Unlike the Wu-Hausman test, which is a regression
+      test, it is the difference of two Hansen J statistics (its
+      covariance of the moment conditions follows `gmm_weight_type` for
+      two-step and iterated GMM, and `cov_type` otherwise), and it can
+      test a subset of the endogenous variables or of the instruments.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -302,25 +321,29 @@ class IVResults:
         return self._raw.hac_lags_used
 
     @property
-    def estimator(self) -> str:
+    def estimator(self) -> Literal["2sls", "gmm"]:
         """Estimator actually used (normalized to lowercase):
         `"2sls"` or `"gmm"`."""
         return self._raw.estimator
 
     @property
-    def gmm_weight_type(self) -> str | None:
+    def gmm_weight_type(
+        self,
+    ) -> Literal["classical", "robust", "hac", "cluster"] | None:
         """Weight matrix actually used for GMM point estimation
-        (normalized to lowercase). Only meaningful for `estimator="gmm"`;
-        always `None` for `estimator="2sls"`, which has no such concept,
-        and for `gmm_type="one_step"`, which does not use a weight
-        type."""
+        (normalized to lowercase): `"classical"`, `"robust"`, `"hac"` or
+        `"cluster"`. `None` for `estimator="2sls"`, which has no such
+        concept, and for `gmm_type="one_step"`, which does not use a
+        weight type."""
         return self._raw.gmm_weight_type
 
     @property
-    def gmm_type(self) -> str | None:
+    def gmm_type(
+        self,
+    ) -> Literal["one_step", "two_step", "iterated"] | None:
         """GMM estimation type actually used (normalized to
-        lowercase): `"one_step"`, `"two_step"` or `"iterated"`. Always
-        `None` for `estimator="2sls"`."""
+        lowercase): `"one_step"`, `"two_step"` or `"iterated"`. `None`
+        for `estimator="2sls"`."""
         return self._raw.gmm_type
 
     @property
@@ -391,25 +414,42 @@ class IVResults:
     def weak_instrument_f_df_num(self) -> int | None:
         """Numerator degrees of freedom of the weak-instrument F
         statistics (the number of excluded instruments; the same for
-        every endogenous variable). Never `None`, because `x_endog`
-        always has at least one variable."""
+        every endogenous variable). The type allows `None`, but the value
+        is always an integer, because `x_endog` always has at least one
+        variable."""
         return self._raw.weak_instrument_f_df_num
 
     @property
     def weak_instrument_f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of the weak-instrument F
         statistics (residual degrees of freedom of the first-stage
-        regressions; the same for every endogenous variable). Never
-        `None`, because `x_endog` always has at least one variable."""
+        regressions; the same for every endogenous variable). The type
+        allows `None`, but the value is always an integer, because
+        `x_endog` always has at least one variable."""
         return self._raw.weak_instrument_f_df_denom
 
     @property
     def overid_statistic(self) -> float | None:
-        """Overidentification test statistic: Sargan (`estimator="2sls"`)
-        or Hansen J (`estimator="gmm"`).
+        """Overidentification test statistic.
+
+        With `estimator="2sls"` it follows `cov_type`. For `"classical"`
+        it is the Sargan statistic, which assumes homoskedastic errors.
+        For the other covariances it is Hansen's J statistic with the
+        weight matrix of that covariance, evaluated at the GMM estimate
+        that uses this weight matrix. With `"hc0"` to `"hc3"` the four give
+        the same value, because the weight matrix has no small-sample
+        or leverage correction, as with `gmm_weight_type="robust"`.
+        With `estimator="gmm"` it is Hansen's J statistic of the fit.
 
         `None` when just-identified (`len(instruments) ==
-        len(x_endog)`, degrees of freedom 0).
+        len(x_endog)`, degrees of freedom 0). It is also `None` for
+        2SLS when the weight matrix of the covariance is singular
+        (the fit still succeeds). That always happens with
+        `cov_type="cluster"` when the number of clusters is smaller
+        than the number of exogenous regressors (including the
+        intercept) plus excluded instruments, and it can happen rarely
+        for numerical reasons, for example with nearly collinear
+        regressors.
         """
         return self._raw.overid_statistic
 
@@ -417,7 +457,7 @@ class IVResults:
     def overid_p_value(self) -> float | None:
         """P-value of the overidentification test.
 
-        Same conditions as `overid_statistic` for when this is `None`.
+        `None` under the same conditions as `overid_statistic`.
         """
         return self._raw.overid_p_value
 
@@ -445,8 +485,11 @@ class IVResults:
         residuals, so the augmented regression fits perfectly; or
         there are too few observations or clusters for the extra
         residual columns) — this does not affect the validity of the
-        other results. **Always `None` for
-        `estimator="gmm"`** (not implemented for GMM).
+        other results. It is computed with both estimators and uses
+        neither the second-stage coefficients nor the GMM weight, so for
+        the same data and `cov_type` the value is the same with
+        `estimator="2sls"` and `estimator="gmm"`; use `c_stat()` for a
+        test based on Hansen J statistics.
         """
         return self._raw.wu_hausman_statistic
 
@@ -516,3 +559,170 @@ class IVResults:
             name: OLSResults(raw)
             for name, raw in self._raw.first_stage().items()
         }
+
+    def cragg_donald(self) -> CraggDonaldResult:
+        """Cragg-Donald statistic and Stock-Yogo critical values.
+
+        The Cragg-Donald statistic measures the joint strength of the
+        excluded instruments for all endogenous variables, assuming
+        homoskedastic errors; it does not depend on `cov_type`. With one
+        endogenous variable it equals the partial F-statistic in
+        `weak_instrument_f_statistics`. The Stock-Yogo critical values are
+        tabulated for a limited number of endogenous variables and
+        excluded instruments (see `CraggDonaldResult`).
+
+        The Stock-Yogo critical values are derived for independent,
+        homoskedastic errors; with heteroskedastic, clustered or
+        autocorrelated errors use `kleibergen_paap()` or `effective_f()`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`; it follows neither `cov_type` nor
+        `gmm_weight_type`.
+
+        Returns:
+            A `CraggDonaldResult` with the statistic, the numbers of
+            endogenous variables and excluded instruments, and the
+            critical values (`None` where not tabulated).
+
+        Raises:
+            ComputationError: The statistic is undefined for these data,
+                for example because the instruments are collinear with the
+                exogenous variables or a first stage fits perfectly.
+        """
+        return cragg_donald_result(self._raw.cragg_donald())
+
+    def kleibergen_paap(self) -> KleibergenPaapResult:
+        """Kleibergen-Paap rk LM and rk Wald F statistics.
+
+        Robust versions of the Cragg-Donald analysis. The covariance of
+        the first-stage scores follows the `cov_type` (and `cluster`,
+        `hac_lags`, `hac_time`) of the options passed to `fit()`, so with
+        `cov_type="classical"` the rk Wald F equals the Cragg-Donald
+        statistic. The rk LM statistic tests that the first stage is
+        underidentified. The result has no critical values; for one
+        endogenous variable use `effective_f()`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`. For GMM it follows `cov_type`, not
+        `gmm_weight_type`.
+
+        Returns:
+            A `KleibergenPaapResult`. Either statistic is `None` when
+            only the other is defined (the Wald F needs one more cluster
+            than the LM).
+
+        Raises:
+            ComputationError: Neither statistic is defined for these
+                data, for example because the instruments are collinear
+                with the exogenous variables or the covariance of the
+                scores is singular.
+        """
+        return kleibergen_paap_result(self._raw.kleibergen_paap())
+
+    def effective_f(self, *, alpha: float = 0.05) -> EffectiveFResult:
+        """Montiel Olea-Pflueger effective F statistic.
+
+        A weak-instrument statistic for one endogenous variable that is
+        valid under heteroskedasticity, clustering and autocorrelation.
+        The covariance follows the `cov_type` (and `cluster`, `hac_lags`,
+        `hac_time`) of the options passed to `fit()`; with
+        `cov_type="classical"` it equals the Cragg-Donald statistic. With
+        one or two excluded instruments, prefer the simplified critical
+        values (see `EffectiveFResult`).
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`. For GMM it follows `cov_type`, not
+        `gmm_weight_type`.
+
+        Args:
+            alpha: Level of the critical values, strictly between 0 and
+                1. Defaults to 0.05.
+
+        Returns:
+            An `EffectiveFResult` with the statistic and the critical
+            values for the worst-case Nagar bias thresholds.
+
+        Raises:
+            TypeError: `alpha` is not a real number.
+            ValidationError: `alpha` is not strictly between 0 and 1, or
+                the model does not have exactly one endogenous variable.
+            ComputationError: The statistic is undefined for these data,
+                for example because the covariance of the scores is
+                singular (too few clusters or observations).
+        """
+        return effective_f_result(self._raw.effective_f(alpha))
+
+    def c_stat(
+        self,
+        *,
+        variables: list[str] | None = None,
+        instruments: list[str] | None = None,
+    ) -> CStatisticResult:
+        """C statistic (difference-in-Hansen test).
+
+        Tests whether endogenous variables in `variables` are in fact
+        exogenous, and whether excluded instruments in `instruments` are
+        uncorrelated with the error. The model is estimated by two-step GMM
+        with and without the tested moment conditions. The statistic is the
+        difference of the two Hansen J statistics. Under the null that the
+        tested moment conditions are valid, it is chi-squared distributed.
+        The test is conditional: the remaining instruments are taken as
+        valid. Both J statistics use the same estimate of the covariance of
+        the moment conditions, so the statistic is never negative. Pass
+        `variables`, `instruments` or both.
+
+        The covariance of the moment conditions follows `gmm_weight_type`
+        (grouped by `cluster` for the cluster weight, and using `hac_lags`
+        and `hac_time` for the HAC weight) when `estimator="gmm"` with
+        `gmm_type` `"two_step"` or `"iterated"`, and the covariance of
+        the same kind as `cov_type` otherwise, that is for 2SLS and for
+        `gmm_type="one_step"` (`"classical"`; `"hc0"` to `"hc3"` as a robust
+        covariance; `"hac"`; `"cluster"`). It does not depend on
+        `gmm_max_iter` or `gmm_tol`, and a model fitted with
+        `gmm_type="one_step"` gets the two-step statistic. With the
+        classical covariance the statistic is a difference of Sargan
+        statistics that share one error variance.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to `fit()`
+        (keep that data unchanged) and estimates the model again on every
+        call.
+
+        Args:
+            variables: Names from `x_endog` whose exogeneity is tested.
+                Defaults to `None` (no endogenous variable is tested). The
+                names are reported in the order of `x_endog`, not the order
+                given.
+            instruments: Names from the excluded `instruments` whose
+                orthogonality is tested. Defaults to `None` (no instrument
+                is tested). At least as many instruments as endogenous
+                variables must remain.
+
+        Returns:
+            A `CStatisticResult` with the statistic, p-value, degrees of
+            freedom and the two J statistics.
+
+        Raises:
+            TypeError: `variables` or `instruments` is not a list of str.
+            ValidationError: Neither argument is given, a list is empty or
+                repeats a name, a name in `variables` is not in `x_endog`,
+                a name in `instruments` is not among the excluded
+                instruments, or so many instruments are tested that fewer
+                excluded instruments than endogenous variables remain.
+            ComputationError: The statistic is undefined for these data, for
+                example because the instruments are collinear, or because
+                there are fewer clusters than the columns of the full
+                instrument set (the exogenous regressors, the tested
+                endogenous variables and all excluded instruments). Unlike
+                `fit()`, which rejects too few clusters for the cluster
+                weight of GMM (`gmm_weight_type="cluster"`) with a
+                `ValidationError`, the diagnostic can only detect this
+                while computing.
+        """
+        return c_statistic_result(self._raw.c_stat(variables, instruments))

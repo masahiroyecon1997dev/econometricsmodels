@@ -1,0 +1,186 @@
+//! `cov_type`別のモーメント条件の分散共分散行列`Ω̂`の組み立てと、係数の分散共分散行列（サンドイッチ型）。
+//! サンドイッチの代数は共有の`shared::gmm::GmmSolution::covariance`（白色化した操作変数の直交座標）。
+//!
+//! 定義は`gmm.rs`のモジュールdoc「標準誤差・検定統計量（`cov_type`対応）」参照。
+//!
+//! テストは`sandwich/tests.rs`と`sandwich/tests/`にテーマ別で置く。
+
+use faer::Mat;
+
+use crate::iv::common::IvError;
+use crate::linear::ols::CovType;
+use crate::shared::covariance::{
+    HcScale, HcVariant, cluster_correction, cluster_meat, hc_meat, hc_scales, resolve_hac_lags,
+    time_ordering,
+};
+use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::gmm::GmmSolution;
+use crate::shared::gmm_weight::hac_moment_covariance;
+use crate::shared::group_codes::GroupCodes;
+use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
+
+/// [`sandwich_covariance`]の戻り値。
+pub(super) struct GmmCovariance {
+    pub(super) cov_params: Mat<f64>,
+    /// 全体Wald検定に使う直交座標（`b̃`・`M̃`。`cov_params = R⁻¹M̃R⁻ᵀ`と同じ計算から出る）。
+    pub(super) wald: WaldCoordinates,
+    /// `cov_type=Hac`のとき実際に使われたラグ数。それ以外では`None`。
+    pub(super) hac_lags_used: Option<usize>,
+}
+
+/// GMMのサンドイッチ型係数分散共分散行列
+/// `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`B = X'ZWZ'X`、`W = S_used⁻¹`は点推定に実際に使った
+/// 重み、k×k）。`gmm.rs`のモジュールdoc「標準誤差・検定統計量（cov_type対応）」参照。
+/// 代数は白色化した最小二乗の直交座標（`solution`。`shared::gmm::GmmSolution`）で行い、
+/// `B`も`B⁻¹`も作らない。ここは`cov_type`ごとの`Ω̂`を組み立てる。
+///
+/// `df_resid`は`cov_type=Classical`の`σ̂² = Σ(êᵢ-ē)²/df_resid`にだけ使う（`fit()`は`n - k`を
+/// 渡す）。HC1・クラスターの小標本補正は`n`・`k`（`x`の形）に従う。
+pub(super) fn sandwich_covariance(
+    cov_type: &CovType,
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    solution: &GmmSolution,
+    df_resid: usize,
+) -> Result<GmmCovariance, IvError> {
+    // `Ω̂`は、`Z`ではなく白色化した`Z̃ = Z L⁻ᵀ`から組み立てて、直接`Ω̃ = L⁻¹Ω̂L⁻ᵀ`を得る
+    // （`GmmSolution::z_tilde`）。以下の`z`・`ztz`は`Z̃`・`Z̃'Z̃`。
+    let z = solution.z_tilde();
+    // `Z̃'Z̃`は古典的な`Ω̂`にだけ使う（他では作らない。HC2・HC3のレバレッジは`Z̃`のQRから）。
+    let ztz_tilde = if matches!(cov_type, CovType::Classical) {
+        z.transpose() * z
+    } else {
+        Mat::zeros(0, 0)
+    };
+    let ztz = &ztz_tilde;
+    let n = z.nrows();
+    let l = z.ncols();
+    let k = x.ncols();
+    let mut hac_lags_used = None;
+
+    let omega_hat = match cov_type {
+        CovType::Classical => {
+            // 残差を中心化した標本分散を使う（`weight_type=Classical`以外では
+            // GMMの一次条件が`ē=0`を保証しないため、`gmm.rs`のモジュールdoc
+            // 「標準誤差・検定統計量」`classical`の項参照）。
+            let mean_residual: f64 = (0..n).map(|i| *residuals.get(i, 0)).sum::<f64>() / (n as f64);
+            let centered_ssr: f64 = (0..n)
+                .map(|i| (*residuals.get(i, 0) - mean_residual).powi(2))
+                .sum();
+            let sigma2 = centered_ssr / (df_resid as f64);
+            Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
+        }
+        CovType::Hc0 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc0)?,
+        CovType::Hc1 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc1)?,
+        CovType::Hc2 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc2)?,
+        CovType::Hc3 => gmm_hc_omega(z, residuals, n, k, HcVariant::Hc3)?,
+        CovType::Hac { lags, time_order } => {
+            let lags = resolve_hac_lags(*lags, n)?;
+            hac_lags_used = Some(lags);
+            let order = time_ordering(time_order, n);
+            // Newey-West重み付け以外の小標本補正を持たないため、点推定用の
+            // `hac_moment_covariance`と計算式が一致する（`gmm.rs`の
+            // モジュールdoc参照。`robust_moment_covariance`/`cluster_moment_covariance`は
+            // 補正が無く使い回せないのと対照的）。
+            hac_moment_covariance(z, residuals, n, l, lags, &order)
+        }
+        CovType::Cluster { groups } => {
+            // クラスター数 `g >= 2`・`g > df_model`（構造方程式の傾き係数の数）は`fit()`冒頭
+            // （`validate_iv_fit_inputs`）で検証済み。
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })?;
+            gmm_cluster_omega(z, residuals, n, k, l, groups)
+        }
+    };
+
+    let (cov_params, wald) = solution.covariance(&omega_hat);
+    Ok(GmmCovariance {
+        cov_params,
+        wald,
+        hac_lags_used,
+    })
+}
+
+/// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
+/// （l×l）。係数のHC（`shared::covariance::hc_cov_params`）と同じ外積の和（`hc_meat`）で、
+/// 設計行列の代わりに`Z`（呼び出し側が渡す白色化した`Z̃`）を使い、レバレッジは`Z̃`のQR分解から計算する
+/// ——**GMMのHC2/HC3は外部参照実装での検証は不可能**（`linearmodels`の`IVGMM`にもRクロス
+/// チェックの`momentfit`にも対応する共分散推定が無い、`docs/spec/iv-spec.md`4章）。2SLSの
+/// HC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認済み
+/// （`docs/spec/iv-spec.md`4章）だが、GMMには同等の参照が無いため対象外のまま。`gmm.rs`の
+/// モジュールdoc「標準誤差・検定統計量（cov_type対応）」参照。
+///
+/// **HC1の小標本補正`n/(n-k)`は`l`（全操作変数の数）ではなく`k`（構造方程式の係数の数）を
+/// 使う**: 補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常にk個の
+/// パラメータで推定された構造残差であり、消費された自由度は常に`k`——`l`は単に外積を
+/// 取る操作変数の本数（過剰識別なら`l > k`）に過ぎず、消費した自由度とは無関係
+/// （共有の`hc_cov_params`のHC1が設計行列の列数=k自身を使うのと同じ理由。「`X̂`→`Z`、`k`→`l`」という
+/// 機械的な置換はレバレッジの計算には妥当だが、補正係数の分母にまで機械的に適用したのは
+/// 誤りだった）。このようにスコアに依存する部分（レバレッジと補正係数）をここで決めて、
+/// 共有の`hc_scales`・`hc_meat`に渡す。
+fn gmm_hc_omega(
+    z: &Mat<f64>,
+    residuals: &Mat<f64>,
+    n: usize,
+    k: usize,
+    variant: HcVariant,
+) -> Result<Mat<f64>, IvError> {
+    let resid = |i: usize| *residuals.get(i, 0);
+    let scales = match variant {
+        HcVariant::Hc0 => hc_scales(n, resid, HcScale::Hc0)?,
+        HcVariant::Hc1 => {
+            let factor = ((n as f64) / ((n - k) as f64)).sqrt();
+            hc_scales(n, resid, HcScale::Hc1 { factor })?
+        }
+        HcVariant::Hc2 => {
+            let h = z_leverages(z)?;
+            hc_scales(n, resid, HcScale::Hc2 { leverage: &h })?
+        }
+        HcVariant::Hc3 => {
+            let h = z_leverages(z)?;
+            hc_scales(n, resid, HcScale::Hc3 { leverage: &h })?
+        }
+    };
+    Ok(hc_meat(z, &scales))
+}
+
+/// `Z̃`のレバレッジ`h_ii = z̃_i'(Z̃'Z̃)⁻¹z̃_i`（HC2/HC3用）。`Z`の列の線形変換で不変なので、`Z`の
+/// レバレッジと同じ値。`Z̃`のQR分解の`Q`の行ノルムから求め（`Z̃'Z̃`も逆行列も作らない）、
+/// 近共線な操作変数・クラスター重みで`Z̃'Z̃`の条件数が大きくなっても精度を失わない。
+///
+/// `Z̃`は重みの白色化でfull column rankに作られているため、QR分解の失敗は理論上到達不能だが、
+/// 丸め誤差に備えて`Result`のまま扱う（`.claude/rules/rust-style.md`「unwrap/expectは避ける」）。
+fn z_leverages(z: &Mat<f64>) -> Result<Vec<f64>, IvError> {
+    let design = OrthonormalDesign::new(z).map_err(|_| {
+        CommonError::internal(
+            "the whitened instruments could not be factorized for the HC2/HC3 leverage",
+        )
+    })?;
+    Ok(design.row_leverages())
+}
+
+/// クラスターロバストなモーメント条件の分散共分散行列（cov_type用）:
+/// `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)' * correction`（l×l）。`two_sls.rs`の
+/// `shared::covariance::cluster_cov_params`（2SLSが呼ぶ共有関数）と同型の自己拡張
+/// （`X̂`→`Z`、集計は`cluster_meat`共有）。点推定用の`cluster_moment_covariance`は
+/// 小標本補正が無いため使い回さない（`gmm.rs`のモジュールdoc参照）。`groups`が
+/// `G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
+///
+/// 小標本補正`(G/(G-1))((n-1)/(n-k))`は`gmm_hc_omega`のHC1補正と同じ理由で`l`ではなく
+/// `k`（構造方程式の係数の数）を使う（`gmm_hc_omega`のdocコメント参照）。
+fn gmm_cluster_omega(
+    z: &Mat<f64>,
+    residuals: &Mat<f64>,
+    n: usize,
+    k: usize,
+    l: usize,
+    groups: &GroupCodes,
+) -> Mat<f64> {
+    let (s_hat, n_groups) = cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a)));
+    let correction = cluster_correction(n_groups, n, k);
+    Mat::from_fn(l, l, |i, j| correction * (*s_hat.get(i, j)))
+}
+
+#[cfg(test)]
+mod tests;

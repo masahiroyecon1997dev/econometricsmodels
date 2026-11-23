@@ -25,11 +25,11 @@ An observation is censored when \(y_i\) is exactly equal to a bound, so make sur
 
 The error standard deviation \(\sigma\) is estimated together with \(\beta\) and is reported as the last parameter, named `sigma`, with its own standard error. Internally the optimizer works with \(\ln\sigma\), which keeps \(\sigma\) positive, and the covariance matrix is transformed to \((\beta, \sigma)\) by the delta method, including the covariances between \(\beta\) and \(\sigma\). Results are keyed by parameter name and \(\sigma\) appears under `sigma`, so a column of `x` may not have that name.
 
-Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\sigma)\) is not globally concave. The default `"newton"` solver damps its step (a Levenberg-Marquardt-type modification) where the Hessian is indefinite; the three solvers still converge to the same maximum-likelihood estimate.
+Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\sigma)\) is not globally concave. The default `"newton"` solver damps its step (a Levenberg-Marquardt-type modification) where the Hessian is indefinite; the three solvers target the same maximum-likelihood estimate. `"bfgs"` and `"lbfgs"` stop before reaching `"newton"`'s precision, so they agree with `"newton"` to about `2e-7` rather than to machine precision. The solver options, the meaning of `tol` and the convergence rules are those described for [Logit](logit.md#solvers-and-convergence), applied to the Tobit parameters \((\beta, \ln\sigma)\).
 
 ### What `fit()` rejects
 
-`fit()` raises an error if both bounds are `None`, if `lower >= upper`, if any \(y_i\) lies outside the bounds, and if no observation lies strictly inside the bounds (the model is then not identified).
+`fit()` raises an error if both bounds are `None`, if `lower >= upper`, if any \(y_i\) lies outside the bounds, and if no observation lies strictly inside the bounds (the model is then not identified). With an intercept it also raises an error when \(y\) has the same value in every row (up to rounding), because there is nothing to explain (`OUTCOME_CONSTANT`); a \(y\) that equals a bound in every row is reported as having no observation inside the bounds instead. Without an intercept a constant \(y\) is estimated.
 
 ## Covariance of the coefficients: `cov_type`
 

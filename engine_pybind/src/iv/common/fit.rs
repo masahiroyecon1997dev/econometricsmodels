@@ -3,7 +3,7 @@
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::SelectedData;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
-use engine::iv::common::{IvEstimate, compute_first_stage, validate_iv_fit_inputs};
+use engine::iv::common::{IvEstimate, compute_first_stage_with, validate_iv_fit_inputs};
 use engine::iv::gmm::GmmEstimator;
 use engine::iv::two_sls::TwoSlsEstimator;
 use polars::prelude::DataFrame;
@@ -23,13 +23,17 @@ use super::result::IVResult;
 /// compute_first_stage`（`IVResult`のdocコメント・モジュールdocコメント「`first_stage()`/
 /// `weak_instrument_f_statistics`は`estimator`に依存しない共通ロジック」参照）から構築する。
 /// `overid_statistic`/`overid_p_value`は`estimator="2sls"`では`TwoSlsEstimator::
-/// sargan_statistic()`/`sargan_p_value()`（Sargan検定）、`estimator="gmm"`では
+/// overid_statistic()`/`overid_p_value()`（`cov_type`に追従する。classicalはSargan、それ以外は
+/// ロバストなHansen J）、`estimator="gmm"`では
 /// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`（Hansen J検定）から構築する。
-/// `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="2sls"`では`TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()`、`estimator="gmm"`では
-/// 常に`None`（`GmmEstimator`は実装しない、モジュールdocコメント参照）。
+/// `wu_hausman_statistic`/`wu_hausman_p_value`は`TwoSlsEstimator::wu_hausman_statistic()`/
+/// `wu_hausman_p_value()`・`GmmEstimator::wu_hausman_statistic()`/`wu_hausman_p_value()`から構築する
+/// （`cov_type`に従い、GMMの重みには依らない。同じデータ・`cov_type`なら両推定量で同じ値）。GMMには
+/// 上の第一段階の残差を渡して、補助回帰のために第一段階を二重に回さない。
 ///
 /// # Errors
+/// - `confidence_level`が`(0, 1)`の範囲外、または`gmm_type="iterated"`で`gmm_max_iter`・`gmm_tol`が
+///   範囲外: `ValidationError`（`validate_iv_fit_inputs`。この順に、他のどの検査より先に行う）
 /// - 観測数が構造方程式の係数の数以下、または第一段階の回帰変数の数以下:
 ///   `ValidationError`（`validate_iv_fit_inputs`、`compute_first_stage`より前）
 /// - `cov_type="cluster"`でクラスター数が構造方程式の傾き係数の数以下（または2未満）:
@@ -53,10 +57,13 @@ pub(crate) fn fit(
     options: &IVOptions,
 ) -> PyResult<IVResult> {
     // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
-    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は使わず、
-    // 関数の末尾（`detach`から戻ってGILを持った状態）で`data`ごとdropされる。
-    let SelectedData { frame, .. } = data;
-    py.detach(|| fit_frame(&frame, y, x_exog, x_endog, instruments, options))
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は結果に持たせる。
+    let SelectedData { source, frame } = data;
+    let mut result = py.detach(|| fit_frame(&frame, y, x_exog, x_endog, instruments, options))?;
+    // 診断のメソッドが`IvInput`を作り直すための元のデータとオプション（GILを持って付ける）。
+    result.source_data = Some(source);
+    result.options = Some(options.clone());
+    Ok(result)
 }
 
 /// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
@@ -69,6 +76,11 @@ fn fit_frame(
     instruments: Vec<String>,
     options: &IVOptions,
 ) -> PyResult<IVResult> {
+    let names = RetainedNames {
+        x_exog: x_exog.clone(),
+        x_endog: x_endog.clone(),
+        instruments: instruments.clone(),
+    };
     let BuiltIvInput {
         input,
         cov_type,
@@ -76,6 +88,7 @@ fn fit_frame(
         plan,
     } = build_iv_input(df, y, x_exog, x_endog, instruments, options)?;
 
+    // `confidence_level`の範囲・GMMの反復設定（`gmm_max_iter`・`gmm_tol`）に続けて、
     // 識別の順序条件（過小識別な入力で無駄な第一段階回帰を走らせない。この時点で
     // `build_iv_input`の`validate_role_non_empty("x_endog"/"instruments", ...)`を通過しており
     // `k_endog`/`k_instruments`はともに1以上なので、「両方指定されているが数が足りない」
@@ -85,24 +98,39 @@ fn fit_frame(
     // 回帰変数・傾き係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると
     // 構造方程式側のチェックが`FirstStageFailed`（第一段階の`k`・`g`・`q`）に隠れ、
     // エンジン側のチェックがPythonから到達不能になる。
-    validate_iv_fit_inputs(&input, &cov_type).map_err(iv_error_to_pyerr)?;
+    validate_iv_fit_inputs(
+        &input,
+        &cov_type,
+        options.confidence_level,
+        plan.gmm.as_ref().map(|gmm| &gmm.gmm_type),
+    )
+    .map_err(iv_error_to_pyerr)?;
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
     // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。
-    let (first_stage, weak_instrument_f_statistics) =
-        compute_first_stage(&input, &cov_type, options.confidence_level)
-            .map_err(iv_error_to_pyerr)?;
-    let weak_instrument_f_df = first_stage.first().map(|(_, first_stage_estimator)| {
-        (input.k_instruments(), first_stage_estimator.df_resid())
-    });
-    // 第一段階の推定量（設計行列を持つ）は結果に変えて手放す。`IVResult`が持つのは結果だけで、
-    // `first_stage()`の戻り値にも、pickleの状態にもそのまま使える。
-    let first_stage: Vec<(String, OLSResult)> = first_stage
+    //
+    // 第一段階の推定量（設計行列を持つ）は、内生変数ごとに結果へ変えてすぐ手放す（内生変数の数だけ
+    // 設計行列を同時に持たない）。`IVResult`が持つのは結果だけで、`first_stage()`の戻り値にも、
+    // pickleの状態にもそのまま使える。
+    let (first_stage_with_df, weak_instrument_f_statistics) = compute_first_stage_with(
+        &input,
+        &cov_type,
+        options.confidence_level,
+        |_, estimator| {
+            let df_resid = estimator.df_resid();
+            (
+                ols_estimator_to_result(&estimator, cov_type_name.clone()),
+                df_resid,
+            )
+        },
+    )
+    .map_err(iv_error_to_pyerr)?;
+    let weak_instrument_f_df = first_stage_with_df
+        .first()
+        .map(|(_, (_, df_resid))| (input.k_instruments(), *df_resid));
+    let first_stage: Vec<(String, OLSResult)> = first_stage_with_df
         .into_iter()
-        .map(|(name, estimator)| {
-            let result = ols_estimator_to_result(&estimator, cov_type_name.clone());
-            (name, result)
-        })
+        .map(|(name, (result, _))| (name, result))
         .collect();
 
     let shared = SharedFit {
@@ -111,15 +139,24 @@ fn fit_frame(
         weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
         weak_instrument_f_df,
         first_stage,
+        names,
     };
 
     if let Some(gmm) = plan.gmm {
-        let estimator = GmmEstimator::fit(
+        // GMMのWu-Hausmanが使う第一段階の残差は、`first_stage`の`OLSResult`が持つ残差を借りる
+        // （`IVResult`が保持するものと別に複製しない。補助回帰が終わると借用は終わる）。
+        let first_stage_residuals: Vec<&[f64]> = shared
+            .first_stage
+            .iter()
+            .map(|(_, result)| result.residuals.as_slice())
+            .collect();
+        let estimator = GmmEstimator::fit_with_first_stage_residuals(
             input,
             gmm.gmm_type,
             options.raise_on_non_convergence.unwrap_or(true),
             cov_type,
             options.confidence_level,
+            &first_stage_residuals,
         )
         .map_err(iv_error_to_pyerr)?;
 
@@ -134,10 +171,10 @@ fn fit_frame(
             overid_statistic: estimator.hansen_j_statistic(),
             overid_p_value: estimator.hansen_j_p_value(),
             overid_df: estimator.hansen_j_df(),
-            wu_hausman_statistic: None,
-            wu_hausman_p_value: None,
-            wu_hausman_df_num: None,
-            wu_hausman_df_denom: None,
+            wu_hausman_statistic: estimator.wu_hausman_statistic(),
+            wu_hausman_p_value: estimator.wu_hausman_p_value(),
+            wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),
+            wu_hausman_df_denom: estimator.wu_hausman_df().map(|(_, denom)| denom),
         };
         return Ok(build_result(&estimator, shared, specific));
     }
@@ -157,9 +194,9 @@ fn fit_frame(
         wald_dist: "f",
         wald_df_num: estimator.wald_df().map(|(num, _)| num),
         wald_df_denom: estimator.wald_df().map(|(_, denom)| denom),
-        overid_statistic: estimator.sargan_statistic(),
-        overid_p_value: estimator.sargan_p_value(),
-        overid_df: estimator.sargan_df(),
+        overid_statistic: estimator.overid_statistic(),
+        overid_p_value: estimator.overid_p_value(),
+        overid_df: estimator.overid_df(),
         wu_hausman_statistic: estimator.wu_hausman_statistic(),
         wu_hausman_p_value: estimator.wu_hausman_p_value(),
         wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),
@@ -176,6 +213,14 @@ struct SharedFit {
     weak_instrument_f_statistics: HashMap<String, f64>,
     weak_instrument_f_df: Option<(usize, usize)>,
     first_stage: Vec<(String, OLSResult)>,
+    names: RetainedNames,
+}
+
+/// 診断のメソッドが`IvInput`を作り直すために結果が保持する列名（`y`は`dep_var_name`）。
+struct RetainedNames {
+    x_exog: Vec<String>,
+    x_endog: Vec<String>,
+    instruments: Vec<String>,
 }
 
 /// `IVResult`のフィールドのうち、`estimator`によって値の出どころや意味が変わるもの
@@ -248,5 +293,10 @@ fn build_result<E: IvEstimate>(
         weak_instrument_f_df_num: shared.weak_instrument_f_df.map(|(num, _)| num),
         weak_instrument_f_df_denom: shared.weak_instrument_f_df.map(|(_, denom)| denom),
         first_stage: shared.first_stage,
+        source_data: None,
+        options: None,
+        x_exog: shared.names.x_exog,
+        x_endog: shared.names.x_endog,
+        instruments: shared.names.instruments,
     }
 }

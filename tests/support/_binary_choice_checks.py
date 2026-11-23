@@ -44,7 +44,7 @@ from _assertions import (
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_expectations import escaped
-from _errors import raises_error, raises_one_of_errors
+from _errors import approx_param, raises_error, raises_one_of_errors
 from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     load_wooldridge_dataset,
@@ -55,6 +55,7 @@ from _helpers import (
 from _nonlinear_helpers import (
     check_margeff,
     load_apple_adoption_dataset,
+    mixed_scale_binary_dataset,
     multi_dummy_separation_dataset,
     separated_dataset,
     single_overlap_binary_dataset,
@@ -622,7 +623,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="y",
         data_argument="data",
@@ -635,7 +636,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="y",
         data_argument="data",
@@ -648,7 +649,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=pytest.approx(float("nan"), nan_ok=True),
+        value=approx_param(float("nan")),
         row=1,
         argument="x",
         data_argument="data",
@@ -661,7 +662,7 @@ def check_non_finite_values_raise(estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="data",
@@ -690,7 +691,12 @@ def check_non_binary_y_raises(dataset, estimator_cls, bad_value):
     """
     df = dataset.with_columns(dataset["y"].scatter(0, bad_value))
     with raises_error(
-        ErrorCode.OUTCOME_NOT_BINARY, row=0, value=float(bad_value)
+        ErrorCode.OUTCOME_NOT_BINARY,
+        column="y",
+        argument="y",
+        data_argument="data",
+        row=0,
+        value=float(bad_value),
     ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
@@ -756,7 +762,7 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="new_data",
@@ -1310,6 +1316,21 @@ def check_strongly_collinear_regressors_are_not_rejected_as_separation(
     assert res.converged is True
 
 
+def check_mixed_scale_regressors_are_not_rejected_as_separation(
+    estimator_cls, options_cls, link, solver, seed, n_regressors
+):
+    """平均が標準偏差より大きい列を含む混合スケールの説明変数で、分離していない2値データは
+    `SEPARATION_CHECK_FAILED`にも`SEPARATION_DETECTED`にもならず収束する。かつては分離検出の
+    線形計画（許容領域が原点だけの退化した問題）で単体法が終わらず、`n_regressors=14`以上で
+    列の組み合わせによって失敗した。"""
+    df = mixed_scale_binary_dataset(link, seed)
+    x = [f"x{j}" for j in range(1, n_regressors + 1)]
+    res = estimator_cls(
+        df, y="y", x=x, options=options_cls(solver=solver)
+    ).fit()
+    assert res.converged is True
+
+
 def check_non_convergence_raises_computation_error_with_tiny_max_iter(
     dataset, estimator_cls, options_cls
 ):
@@ -1857,7 +1878,7 @@ def check_predict_new_data_without_intercept_matches_statsmodels(
 
 
 def check_predict_with_include_intercept_false_and_x_named_const(
-    estimator_cls, options_cls, link
+    estimator_cls, options_cls, link, *, rtol: float
 ) -> None:
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
     `predict(new_data=...)`が正しく動作すること（OLSの`test_predict_with_include_
@@ -1873,7 +1894,9 @@ def check_predict_with_include_intercept_false_and_x_named_const(
 
     `link`はリンク関数（Logitは`Λ`、Probitは`Φ`）を`z -> probability`の
     呼び出し可能オブジェクトとして呼び出し側から渡す（このcheck自体はLogit/
-    Probit共有のため、期待値の計算式だけを手法ごとに差し替える）。
+    Probit共有のため、期待値の計算式だけを手法ごとに差し替える）。`rtol`は
+    予測確率と`link`の値の相対許容誤差（確率が極小になりうるので相対誤差のみで
+    比べ、絶対誤差の下限は置かない）。
     """
     df = pl.DataFrame(
         {
@@ -1895,7 +1918,7 @@ def check_predict_with_include_intercept_false_and_x_named_const(
     ):
         z = coef_const * c + coef_x2 * x2
         expected = link(z)
-        assert abs(prob - expected) < 1e-9, f"probability/{i}"
+        assert_close(prob, expected, f"probability/{i}", rtol=rtol, atol=0.0)
 
 
 def check_cluster_unused_by_cov_type_raises(

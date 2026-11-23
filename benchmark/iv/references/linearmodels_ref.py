@@ -32,7 +32,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照
 `h_ii`によるスケーリングは未実装）ため、本スクリプトの対象外（`iv-spec.md`
 3.1節の既存の記述通り。R `ivreg`側にも確立した参照実装が無いことは以前から判明
 済み）。`engine`側は独自のOLS拡張として実装済みで、`engine`のRust単体テスト
-（`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
+（`two_sls/cov/tests/reference.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
 独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
 
 ## 検定分布（`iv-spec.md`3.2節）
@@ -69,6 +69,17 @@ augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`�
 該当コメント参照。統計量自体は主モデルのdfに依存しないため機械精度で
 一致するが、p値だけ最大0.2%程度乖離するバグが初版にあった。`test_iv_reference.py`
 作成時に発覚・修正済み）。
+
+## 過剰識別検定の対応関係（`_overid_for_cov_type`）
+
+本実装の2SLSの`overid_statistic`は`cov_type`に追従する（`docs/spec/iv-spec.md`3.5節）。
+`classical`は`res.sargan`、それ以外は同じ重みの種類の2段階GMMのHansen J
+（`IVGMM(weight_type=...)`を`iter_limit=2`でfitした`j_stat`。`hc0`〜`hc3`は
+`robust`、`cluster`は`clustered`、`hac`は`kernel`(bartlett)）。`hc0`では
+`res.wooldridge_overid`（`fit`の`cov_type`に依存しないロバストなscore検定）も
+`overid_statistic_wooldridge`として返し、全シナリオで2段階GMMのJと機械精度で一致する。
+`hc1`〜`hc3`は補正を入れない定義なので`hc0`と同じ値。クラスター数が全操作変数の数より少ない
+場合は`None`（`S`が必ず特異）。
 
 使用例（リポジトリルートから）:
     python -m benchmark.iv.references.linearmodels_ref \\
@@ -245,6 +256,73 @@ def _weak_instrument_diagnostics(
     }
 
 
+def _overid_for_cov_type(
+    pdf,
+    formula: str,
+    res,
+    cov_type: str,
+    cluster: str | None,
+    hac_lag: int | None,
+    n_exog_total: int,
+    n_instruments: int,
+    n_endog: int,
+) -> dict:
+    """2SLSの`overid_statistic`/`overid_p_value`の参照値を`cov_type`ごとに作る。
+
+    本実装の2SLSは`cov_type`に追従する（`docs/spec/iv-spec.md`3.5節）:
+    - `classical`: `res.sargan`（等分散前提のSargan）。
+    - `hc0`〜`hc3`: 小標本補正もレバレッジ補正もない素のロバストな重みの2段階GMMの
+      Hansen J。`IVGMM(weight_type="robust")`を2段階（`iter_limit=2`、初期重み
+      `(Z'Z)⁻¹`、2SLS残差から`S`を作って再推定）で`fit`した`j_stat`を使う。
+      `hc1`〜`hc3`も`hc0`と同じ値（補正を入れない設計）。
+    - `cluster`: `weight_type="clustered"`の2段階。クラスター数`G`が全操作変数の数
+      `l`より少ないと`S`が必ず特異で、本実装は`None`にする。
+    - `hac`: `weight_type="kernel"`（Bartlett、ラグ`hac_lag`）の2段階。
+
+    `hc0`は`res.wooldridge_overid`（ロバストなscore検定）も返す。`wooldridge_overid`は
+    `fit`の`cov_type`に依存せず、2段階GMMのJと数値的に同じ量（独立な第二の参照）。
+    丁度識別は全て`None`。
+    """
+    from linearmodels.iv import IVGMM
+
+    none = {"overid_statistic": None, "overid_p_value": None}
+    if n_instruments <= n_endog:
+        return none
+    if cov_type == "classical":
+        return {
+            "overid_statistic": float(res.sargan.stat),
+            "overid_p_value": float(res.sargan.pval),
+        }
+
+    weight_config: dict = {}
+    if cov_type in ("hc0", "hc1", "hc2", "hc3"):
+        lm_weight_type = "robust"
+    elif cov_type == "cluster":
+        lm_weight_type = "clustered"
+        weight_config["clusters"] = pdf[cluster]
+        if int(pdf[cluster].nunique()) < n_exog_total + n_instruments:
+            return none
+    elif cov_type == "hac":
+        lm_weight_type = "kernel"
+        weight_config["kernel"] = "bartlett"
+        weight_config["bandwidth"] = (
+            hac_lag if hac_lag is not None else hac_auto_lag(len(pdf))
+        )
+    else:
+        raise ValueError(f"unsupported cov_type: {cov_type}")
+
+    gmm = IVGMM.from_formula(
+        formula, pdf, weight_type=lm_weight_type, **weight_config
+    ).fit(iter_limit=2, cov_type="unadjusted")
+    out = {
+        "overid_statistic": float(gmm.j_stat.stat),
+        "overid_p_value": float(gmm.j_stat.pval),
+    }
+    if cov_type == "hc0":
+        out["overid_statistic_wooldridge"] = float(res.wooldridge_overid.stat)
+    return out
+
+
 def run(
     dataset: str,
     x_exog_cols: list[str],
@@ -395,6 +473,19 @@ def run(
         "wu_hausman_statistic": wu_hausman_statistic,
         "wu_hausman_p_value": wu_hausman_p_value,
     }
+    result.update(
+        _overid_for_cov_type(
+            pdf,
+            formula,
+            res,
+            cov_type,
+            cluster,
+            hac_lag_used,
+            len(x_exog_cols) + (1 if include_intercept else 0),
+            len(instrument_cols),
+            len(x_endog_cols),
+        )
+    )
 
     if x_endog_cols:
         # weak_instrument_f_statisticsは本実装では常にclassical（等分散前提）で
@@ -501,7 +592,7 @@ def run_gmm(
     表通り）と検定統計量に必要な`debiased=False`相当（カイ二乗形式）が両立
     できない。`res.cov`（係数の分散共分散行列）から傾き係数の部分行列を
     切り出し、カイ二乗形式のWald統計量を直接計算し直す（本実装の
-    `gmm_wald_chi2_test`と同じ定義）。
+    `wald_chi2_test`と同じ定義）。
 
     ## Hansen J検定（過剰識別検定）の対応関係
 

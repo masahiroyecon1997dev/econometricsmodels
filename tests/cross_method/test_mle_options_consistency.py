@@ -7,9 +7,10 @@ CLAUDE.md`参照）。フィールド追加・既定値変更のとき1クラス
 値の正しさ（バリデーション等）は`test_option_types.py`等が見る。
 
 - Logit ≡ Probit（クラス名以外は完全一致）。
-- Tobit = Logit + `lower`/`upper`（末尾）。`include_intercept`のdocだけは
-  Tobitが「設計行列の特異性」、Logit/Probitが「ヘッセ行列の特異性」と意図的に
-  異なるため、その1語の差だけを許す。
+- Tobit = Logit + `lower`/`upper`（末尾）。次の2つのdocだけは意図的に異なるため、
+  その差だけを許す。`include_intercept`はTobitが「設計行列の特異性」、
+  Logit/Probitが「ヘッセ行列の特異性」。`tol`はLogit/Probitだけが、完全分離の近くで
+  bfgs/lbfgsとnewtonの一致が悪くなる目安を述べる（Tobitには分離が無い）。
 - 比較は`{クラス名: 値}`の辞書で行い、失敗時にどのクラスがずれたか分かるようにする。
 """
 
@@ -24,8 +25,12 @@ from econometricsmodels import LogitOptions, ProbitOptions, TobitOptions
 BASE_CLASSES = (LogitOptions, ProbitOptions)
 ALL_CLASSES = (LogitOptions, ProbitOptions, TobitOptions)
 TOBIT_ONLY = ("lower", "upper")
-# docが意図的に手法ごとに異なる共通フィールドと、その差（Logit側の語, Tobit側の語）
-DOC_DIFFERS_BY_DESIGN = {"include_intercept": ("Hessian", "design matrix")}
+# docが意図的に手法ごとに異なる共通フィールドと、その差（Logit側の語句, Tobit側の語句）。
+# 比較は空白を1つに畳んで行う（折り返しの位置は語句の長さで変わるため）。
+DOC_DIFFERS_BY_DESIGN = {
+    "include_intercept": ("Hessian", "design matrix"),
+    "tol": (" (about `2e-6` near separation)", ""),
+}
 NEWTON_TOL = 1e-6
 NON_NEWTON_TOL = 1e-8
 # setterの型検査を比べるための探針（型が違えば例外型・メッセージが変わる）
@@ -223,10 +228,13 @@ def test_field_docs_match_across_classes(name: str) -> None:
 
 @pytest.mark.parametrize("name", DOC_DIFFERS_BY_DESIGN)
 def test_docs_differ_only_by_the_intended_words(name: str) -> None:
-    # 意図した1語の差だけを許し、それ以外の乖離は検出する
+    # 意図した語句の差だけを許し、それ以外の乖離は検出する
     logit_word, tobit_word = DOC_DIFFERS_BY_DESIGN[name]
-    logit, probit, tobit = (getattr(cls, name).__doc__ for cls in ALL_CLASSES)
+    logit, probit, tobit = (
+        " ".join(getattr(cls, name).__doc__.split()) for cls in ALL_CLASSES
+    )
     assert logit == probit
+    assert logit_word in logit
     assert logit.replace(logit_word, tobit_word) == tobit
     assert logit != tobit
 

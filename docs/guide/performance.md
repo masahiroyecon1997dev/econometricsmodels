@@ -12,14 +12,15 @@ The second table covers every standard-error type of every method at one sample 
 
 | Method | Standard error | n | econometricsmodels | Reference | Speed-up | Peak RSS (econometricsmodels / reference) |
 |---|---|---|---|---|---|---|
-| OLS | classical | 1,000,000 | 0.0583s vs 0.1468s | statsmodels | 2.5x | 324.1MB / 572.7MB |
-| WLS | classical | 1,000,000 | 0.1070s vs 0.2252s | statsmodels | 2.1x | 340.8MB / 614.3MB |
-| Logit | classical | 1,000,000 | 0.4901s vs 0.5017s | statsmodels | 1.0x | 411.9MB / 512.2MB |
-| Probit | classical | 100,000 | 0.1478s vs 0.1970s | statsmodels | 1.3x | 177.3MB / 265.9MB |
-| Tobit | classical | 1,000,000 | 2.1555s | - | - | 395.8MB |
-| IV | classical | 1,000,000 | 0.4836s vs 12.3919s | linearmodels | 25.6x | 1117.5MB / 3988.7MB |
-| FE | classical | 1,000,000 | 0.2969s vs 3.8888s | linearmodels | 13.1x | 547.4MB / 957.6MB |
-| RE | classical | 1,000,000 | 0.3074s vs 2.9774s | linearmodels | 9.7x | 945.6MB / 1277.5MB |
+| OLS | classical | 1,000,000 | 0.1258s vs 0.2633s | statsmodels | 2.1x | 352.6MB / 764.3MB |
+| WLS | classical | 1,000,000 | 0.1189s vs 0.2195s | statsmodels | 1.8x | 377.0MB / 816.2MB |
+| Logit | classical | 1,000,000 | 0.8641s vs 1.1086s | statsmodels | 1.3x | 446.5MB / 610.2MB |
+| Probit | classical | 100,000 | 0.1026s vs 0.1472s | statsmodels | 1.4x | 208.1MB / 306.8MB |
+| Tobit | classical | 1,000,000 | 2.4658s | - | - | 482.7MB |
+| IV | classical | 1,000,000 | 0.7269s vs 10.9958s | linearmodels | 15.1x | 713.5MB / 4829.5MB |
+| FE | classical | 1,000,000 | 0.2368s vs 3.0090s | linearmodels | 12.7x | 738.4MB / 1257.2MB |
+| FEIV | classical | 1,000,000 | 0.5379s | - | - | 700.0MB |
+| RE | classical | 1,000,000 | 0.9354s vs 5.0051s | linearmodels | 5.4x | 900.9MB / 1538.9MB |
 
 **Speed-up by standard-error type**
 
@@ -27,14 +28,15 @@ Every standard-error type is measured at a single sample size (`n = 100,000`, `k
 
 | Method | classical | hc0 | hc1 | hc2 | hc3 | opg | hac | dk | cluster |
 |---|---|---|---|---|---|---|---|---|---|
-| OLS | 2.6x | 2.2x | 2.0x | 1.8x | 2.0x | - | 2.7x | - | 1.8x |
-| WLS | 2.2x | 1.9x | 1.8x | 2.0x | 1.9x | - | 2.5x | - | 1.6x |
-| Logit | 0.85x | 0.86x | engine only | - | - | engine only | - | - | 0.89x |
-| Probit | 1.4x | 1.3x | engine only | - | - | engine only | - | - | 1.3x |
+| OLS | 2.7x | 3.1x | 2.8x | 2.5x | 2.7x | - | 2.8x | - | 2.4x |
+| WLS | 2.4x | 2.0x | 1.9x | 1.8x | 1.9x | - | 2.4x | - | 2.1x |
+| Logit | 1.2x | 1.2x | engine only | - | - | engine only | - | - | 1.2x |
+| Probit | 1.4x | 1.4x | engine only | - | - | engine only | - | - | 1.4x |
 | Tobit | engine only | engine only | engine only | - | - | engine only | - | - | engine only |
-| IV | 24.2x | 22.3x | 20.8x | engine only | engine only | - | 13.7x | - | 18.1x |
-| FE | 14.0x | - | 13.3x | engine only | engine only | - | - | 12.3x | 17.4x |
-| RE | 10.4x | - | 9.9x | engine only | engine only | - | - | 9.8x | 11.0x |
+| IV | 14.5x | 13.0x | 13.2x | engine only | engine only | - | 10.1x | - | 10.5x |
+| FE | 14.2x | - | 12.8x | engine only | engine only | - | - | 11.8x | 16.0x |
+| FEIV | engine only | - | engine only | engine only | engine only | - | - | engine only | engine only |
+| RE | 6.8x | - | 6.2x | engine only | engine only | - | - | 6.4x | 7.2x |
 
 <!-- END GENERATED SUMMARY -->
 
@@ -52,14 +54,17 @@ Every standard-error type is measured at a single sample size (`n = 100,000`, `k
 
 Performance is a goal rather than a guarantee. The points below are the ones worth knowing about.
 
-- **Driscoll-Kraay for FE and RE is measured with `k = 5` only.** The Driscoll-Kraay covariance has rank at most `T - 1` (the number of time periods minus one), so a joint test of more coefficients than that is not possible. With six periods and `k = 20`, `fit()` rejects `cov_type="dk"` with a `ValidationError`: for FE because of the slope F-test, and for RE because of the Hausman test, which is always included. The standard-error sweep therefore uses `k = 5`, and the regressor sweep uses the classical covariance.
+- **Driscoll-Kraay for FE, RE and FEIV is measured with `k = 5` only.** The Driscoll-Kraay covariance has rank at most `T - 1` (the number of time periods minus one), so a joint test of more coefficients than that is not possible. With six periods and `k = 20`, `fit()` rejects `cov_type="dk"` with a `ValidationError`: for FE because of the slope F-test, for RE because of the Hausman test, which is always included, and for FEIV because of the overall F test of the slope coefficients. The standard-error sweep therefore uses `k = 5`, and the regressor sweep uses the classical covariance.
 - **RE: this package does more work than the reference.** `RE.fit()` always computes the Hausman test (which includes an internal fixed-effects fit), while linearmodels' `RandomEffects` has no equivalent, so the RE speed-up understates the difference in efficiency.
 - **Some standard errors are timed for this package alone.** Where a reference implementation has no equivalent, the row shows only the econometricsmodels time and the speed-up matrix says "engine only": HC2 and HC3 for IV, FE and RE (linearmodels has no equivalent), and the outer-product-of-gradients (`opg`) and `hc1` covariances for Logit and Probit (statsmodels 0.15.0 has no `opg` covariance for these models, and its `hc1` returns the `hc0` values). Cluster-robust errors for FE and RE are clustered by entity only.
+- **FE with three effects is compared with a different reference function.** linearmodels `PanelOLS` absorbs at most two effects, so the three-effect case uses `AbsorbingLS` with its default solver tolerance, and only for the classical covariance (HC2 and HC3 are timed for this package alone). `AbsorbingLS` has no panel R-squared or F statistic, so the statistics that this package always computes add to its time and the speed-up is slightly understated. The third effect is assigned at random, which is a well-connected case; nested or many-level effects are not measured. The unbalanced two-way case keeps about 70% of the rows of the balanced panel, so its times are not comparable with the balanced rows of the same table.
 - **FE and RE `cluster` and `dk` are compared although the standard errors differ.** These covariances use the small-sample corrections and degrees of freedom of fixest/Stata, which differ from linearmodels 7.1 by a scalar factor. For `cluster` the ratio of the standard errors is about 1.01 with 50 clusters, 1.0005 with 1,000 and 1.00005 with 10,000. For `dk` with six periods it is about 1.10, that is `sqrt(6/5)`. The amount of computation is the same, so the rows are compared. `classical` and `hc1` agree to machine precision.
-- **Logit and Probit are on par with statsmodels rather than far ahead.** They are iterative maximum-likelihood fits, so the ratio to statsmodels is close to 1 at the largest sizes measured, and at some sizes and standard-error types this package was slower; the tables above and on [Performance results](performance-results.md) show the current values. Part of the difference is a check this package always runs after convergence: it decides exactly whether the data are separated (complete or quasi-complete separation), which adds to the time of a Newton fit. statsmodels 0.15.0 flags separation heuristically from the fitted values (`PerfectSeparationWarning`, `PerfectSeparationError`) and does not run an exact check. The advantage also shrinks as the number of regressors grows (see the k-axis table of each method on the results page). The default Newton solver is the fastest or tied for fastest; `bfgs` and `lbfgs` are about equal or slower.
+- **Logit and Probit are on par with statsmodels rather than far ahead.** They are iterative maximum-likelihood fits, so the ratio to statsmodels is modest (about 1.2x to 1.4x in the summary tables above) and can be close to 1 at some sizes and standard-error types; the tables above and on [Performance results](performance-results.md) show the current values. Part of the difference is a check this package always runs after convergence: it decides exactly whether the data are separated (complete or quasi-complete separation), which adds to the time of a Newton fit. statsmodels 0.15.0 flags separation heuristically from the fitted values (`PerfectSeparationWarning`, `PerfectSeparationError`) and does not run an exact check. The advantage also shrinks as the number of regressors grows (see the k-axis table of each method on the results page). The default Newton solver is the fastest or tied for fastest; `bfgs` and `lbfgs` are about equal or slower.
 - **Tobit has no reference timing.** There is no suitable Python Tobit implementation to time in the same process (statsmodels 0.15.0 has no Tobit model), so the Tobit rows show this package alone (absolute time and scaling with `n` and `k`). Its correctness is checked against R, see [Verification](verification.md).
+- **FEIV has no reference timing.** linearmodels has no fixed-effects instrumental-variable model, and a stand-in (demeaning in pandas and then `IV2SLS`, or dummy variables) would mostly time the stand-in, so the FEIV rows show this package alone. `k` for FEIV is the number of slope coefficients, endogenous variables included (FE uses the same `k`; IV counts only the exogenous ones). The time includes the diagnostics that `fit()` always computes (Sargan, Wu-Hausman, the weak-instrument partial F) but not `cragg_donald()`, `kleibergen_paap()` and `effective_f()`, which are computed on demand. The GMM variants (`estimator="gmm"`, two-step and iterated) are timed at one representative point and for the standard errors; their `fit()` computes the Hansen J test but has no first stage, Wu-Hausman test or weak-instrument statistics, so it can be faster than 2SLS on the same structure. The `robust` weight matrix is timed only to compare the cost of the weight types; for a short panel it is not a statistically sound choice, and the default is `cluster`. The unbalanced two-way case keeps about 70% of the rows of the balanced panel, so its times are not comparable with the balanced rows. The third effect of the three-effect case is assigned at random, which is a well-connected case; nested or many-level effects are not measured. Driscoll-Kraay errors are measured with `k = 5` only, for the reason given below, and the regressor sweep uses the classical covariance. Its correctness is checked against `fixest`, `plm`, `ivDiag` and a dummy-variable implementation, see [Verification](verification.md).
 - **Probit and Tobit at the largest sizes are measured for this package only.** The reference implementation is not timed at `n = 200,000` and `n = 1,000,000` for Probit, so the largest comparison for Probit is at 100,000 observations.
-- **Instrumental variables: part of the gap is symmetric work.** linearmodels computes its first-stage diagnostics by re-fitting each first stage, and the benchmark includes that, because this package always reports the weak-instrument statistics from the same pass. GMM with a kernel (HAC) weight matrix is not benchmarked, because linearmodels takes tens of seconds even at 100,000 observations.
+- **IV (2SLS) and RE are less far ahead than in version 0.9.0.** At 1,000,000 observations with `k = 5` and classical standard errors, the summary table shows a speed-up over linearmodels of about 15x for IV (2SLS) and about 5x for RE, while version 0.9.0 measured about 26x and about 10x. The speed-ups of OLS and WLS over statsmodels are a little lower too (2.5x to 2.1x and 2.1x to 1.8x), and FE is unchanged. The cause is not yet known.
+- **Instrumental variables: part of the gap is symmetric work.** linearmodels computes its first-stage diagnostics by re-fitting each first stage, and the benchmark includes that, because this package always reports the weak-instrument statistics from the same pass. With a covariance other than classical, 2SLS in this package computes Hansen's J with the weight matrix of that covariance. linearmodels 7.1 `IV2SLS` has no such test, so the benchmark times its `wooldridge_overid` (a heteroskedasticity-robust score test that does not depend on `cov_type`), so that each fit computes one overidentification test. For the cluster and HAC covariances it is not the same statistic, and the two tests do not cost the same. GMM with a kernel (HAC) weight matrix is not benchmarked, because linearmodels takes tens of seconds even at 100,000 observations.
 
 ## Using fits from threads
 
@@ -68,6 +73,7 @@ Performance is a goal rather than a guarantee. The points below are the ones wor
 - The linear algebra of each fit runs on a single thread. Speed-ups on many cores come from running several fits at once, for example a thread pool over bootstrap samples, specifications or groups.
 - Each running fit holds its own copy of the numeric columns it uses, so peak memory grows with the number of fits in flight.
 - A running fit cannot be interrupted with `KeyboardInterrupt`; the interrupt is raised when the fit returns.
+- To run fits in separate processes instead, see [Pickling and copying](pickling.md#sending-results-between-processes).
 - Reading the data from the `polars.DataFrame` happens before the lock is released. The diagnostic tests on OLS results (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) and `marginal_effects()` on Logit, Probit and Tobit results also release the lock while they compute. The other methods on a results object (`predict()`, `augment()` and so on) are cheap and still hold it.
 
 ## Reproducing

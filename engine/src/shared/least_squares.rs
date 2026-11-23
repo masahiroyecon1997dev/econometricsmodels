@@ -1,15 +1,20 @@
-//! 最小二乗の係数・残差・`(X'X)⁻¹`を求める部品。
+//! 残差平方和と、テスト用の最小二乗（`least_squares`）。
 //!
-//! OLS/WLSの`OlsEstimator::fit`と、within変換後のデータに最小二乗をあてはめるFEが共有する。
-//! 推論（標準誤差・検定）は含まない。呼び出し側が[`super::covariance`]等で組み立てる。
+//! 推定量の本体は、設計行列のQR分解（`super::orthonormal::OrthonormalDesign`）から係数・残差・
+//! 共分散を求める。`least_squares`は列ピボットQR（`faer`の`solve_lstsq`）と`X'X`のCholeskyによる、
+//! QRとは独立な参照実装で、テストが係数・残差の照合に使う（本体では使わない）。
 
 use faer::Mat;
+#[cfg(test)]
 use faer::prelude::SolveLstsq;
 
+#[cfg(test)]
 use super::covariance::xtx_inverse;
+#[cfg(test)]
 use super::linear_algebra::{RankDeficient, checked_col_piv_qr};
 
 /// [`least_squares`]の結果。
+#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct LeastSquaresFit {
     /// 係数 (k, 1)
@@ -33,6 +38,7 @@ pub(crate) struct LeastSquaresFit {
 /// `x`がフルカラムランクでない（完全な多重共線性等）、または`X'X`のCholesky分解が
 /// 丸めで失敗した場合に[`RankDeficient`]を返す。後者は前者の判定を通った時点で理論上
 /// 起こらないが、境界的なケースに備えて`Result`にしている。
+#[cfg(test)]
 pub(crate) fn least_squares(x: &Mat<f64>, y: &Mat<f64>) -> Result<LeastSquaresFit, RankDeficient> {
     let qr = checked_col_piv_qr(x)?;
     let params = qr.solve_lstsq(y);

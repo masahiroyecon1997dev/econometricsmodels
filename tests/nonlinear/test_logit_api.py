@@ -27,6 +27,7 @@ import math
 import _binary_choice_checks as _checks
 import pytest
 from _helpers import CASE_SPELLINGS
+from _tolerances import TOLERANCES
 from econometricsmodels import Logit, LogitOptions, LogitResults
 
 from benchmark.nonlinear.constants import MLE_COV_TYPES, MLE_SOLVERS
@@ -137,7 +138,10 @@ def test_predict_new_data_returns_probabilities(binary_dataset):
 
 def test_predict_with_include_intercept_false_and_x_named_const():
     _checks.check_predict_with_include_intercept_false_and_x_named_const(
-        Logit, LogitOptions, link=lambda z: 1.0 / (1.0 + math.exp(-z))
+        Logit,
+        LogitOptions,
+        link=lambda z: 1.0 / (1.0 + math.exp(-z)),
+        rtol=TOLERANCES["logit_api"]["rtol_predict_closed_form"],
     )
 
 

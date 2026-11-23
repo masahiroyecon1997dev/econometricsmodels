@@ -607,7 +607,7 @@ def test_weight_one_matches_ols(unit_weight_dataset, option_kwargs):
     データにそのまま適用する実装であるため（weight=1なら変換が恒等写像になる）
     厳密な`==`で一致する。r_squared・log_likelihood（→aic/bic）・残差は、
     WLS側で元スケールのy・weightsから独立に計算し直す実装のため、加算順序
-    等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls.rs`
+    等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls/`
     の対応するRust単体テストで確認済みの挙動）。
 
     `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラスのため、
@@ -672,7 +672,7 @@ def test_weight_one_matches_ols_predict(unit_weight_dataset):
     OLSの`predict()`と一致すること（予測値は重みに関与しない、
     という設計の帰結を確認する）。
 
-    学習データ（`new_data=None`）の計算経路自体はwls.rs（手動ループ、
+    学習データ（`new_data=None`）の計算経路自体はwls/statistics.rs（手動ループ、
     `original_scale_fitted_and_residuals`）とols.rs（faerの行列演算、
     `OlsEstimator::fitted_values`）で異なるため、丸め誤差レベルでの一致を
     確認する（`test_residuals_are_original_scale_not_weighted`と同じ理由）。

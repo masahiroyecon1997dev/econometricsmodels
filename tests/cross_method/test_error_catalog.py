@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import re
 from pathlib import Path
@@ -20,6 +21,7 @@ from _errors import (
     MIGRATED_CODES,
     RAISED_CODES,
     UNREACHABLE_CODES,
+    approx_param,
     raises_error,
 )
 from econometricsmodels import (
@@ -76,6 +78,25 @@ SAMPLE_SETS = [
         "column_list": ["a", "b", "c"],
         "bool": False,
     },
+    # `float`の`inf`・`-inf`と、`float_or_none`の`nan`（上の組には出ない）。
+    {
+        "int": 1,
+        "float": float("inf"),
+        "float_or_none": float("nan"),
+        "str": "y",
+        "str_list": ["a", "b"],
+        "column_list": ["a"],
+        "bool": True,
+    },
+    {
+        "int": 2,
+        "float": float("-inf"),
+        "float_or_none": 0.25,
+        "str": "z",
+        "str_list": ["a"],
+        "column_list": ["b", "a"],
+        "bool": False,
+    },
 ]
 
 
@@ -95,9 +116,9 @@ def _sample_params(entry: dict[str, Any], sample: dict) -> dict[str, Any]:
 
 
 def _format_float(value: float) -> str:
-    """Rustの`{:?}`と同じ書式（`1.0`・`1e-7`・`NaN`・`inf`）。"""
+    """Rustの`{:?}`と同じ書式（`1.0`・`1e-7`）。非有限は`nan`・`inf`・`-inf`。"""
     if math.isnan(value):
-        return "NaN"
+        return "nan"
     if math.isinf(value):
         return "inf" if value > 0 else "-inf"
     return (
@@ -152,6 +173,31 @@ def test_generator_check_detects_a_stale_error_code_file(
     monkeypatch.setattr(generator, "ERROR_CODES_PATH", stale)
     assert generator.main(["--check"]) == 1
     assert stale.read_text(encoding="utf-8") == "stale\n"
+
+
+def _expected_param(value: object) -> object:
+    """`params`に入る値。非有限の`float`は`"nan"`・`"inf"`・`"-inf"`の文字列。"""
+    if isinstance(value, float) and not math.isfinite(value):
+        return _format_float(value)
+    return value
+
+
+@pytest.mark.parametrize("sample", SAMPLE_SETS)
+def test_params_are_json_serializable_and_non_finite_floats_are_strings(
+    sample: dict,
+) -> None:
+    for entry in CATALOG["codes"]:
+        params = _sample_params(entry, sample)
+        with pytest.raises((ValidationError, ComputationError)) as info:
+            _lib.raise_error_for_test(entry["code"], params)
+        err = info.value
+        # `NaN`・無限大は`json.dumps`が不正なJSONにするので、`params`には文字列で入る。
+        json.dumps(err.params, allow_nan=False)
+        for name, value in params.items():
+            assert err.params[name] == _expected_param(value), (
+                entry["code"],
+                name,
+            )
 
 
 @pytest.mark.parametrize("sample", SAMPLE_SETS)
@@ -366,6 +412,43 @@ class TestRaisesErrorHelper:
             raises_error(ErrorCode.COLUMN_NOT_FOUND),
         ):
             raise ValidationError("COLUMN_NOT_FOUND", "m", None, dict(params))
+
+    @pytest.mark.parametrize(
+        ("value", "label"),
+        [
+            (float("nan"), "nan"),
+            (float("inf"), "inf"),
+            (float("-inf"), "-inf"),
+        ],
+    )
+    def test_accepts_a_non_finite_float_param_as_its_string(
+        self, value: float, label: str
+    ) -> None:
+        entry = BY_CODE["COLUMN_NON_FINITE"]
+        params = _sample_params(entry, SAMPLE_SETS[0])
+        params["value"] = value
+        assert approx_param(value) == label
+        with raises_error(ErrorCode.COLUMN_NON_FINITE, value=label):
+            _lib.raise_error_for_test("COLUMN_NON_FINITE", params)
+        with raises_error(
+            ErrorCode.COLUMN_NON_FINITE, value=approx_param(value)
+        ):
+            _lib.raise_error_for_test("COLUMN_NON_FINITE", params)
+
+    def test_approx_param_compares_a_finite_value_with_a_tolerance(
+        self,
+    ) -> None:
+        assert approx_param(0.5) == pytest.approx(0.5)
+        assert approx_param(0.5) != "nan"
+
+    def test_fails_when_a_non_finite_float_param_is_a_float(self) -> None:
+        params = _sample_params(BY_CODE["COLUMN_NON_FINITE"], SAMPLE_SETS[0])
+        params["value"] = float("nan")
+        with (
+            pytest.raises(AssertionError, match="should be float"),
+            raises_error(ErrorCode.COLUMN_NON_FINITE),
+        ):
+            raise ValidationError("COLUMN_NON_FINITE", "m", None, dict(params))
 
     def test_accepts_pytest_approx_for_a_float_param(self) -> None:
         entry = BY_CODE["COLUMN_NON_FINITE"]

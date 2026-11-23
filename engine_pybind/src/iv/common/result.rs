@@ -1,10 +1,17 @@
 //! `IVResult`（IVの推定結果）と、その`#[pymethods]`（`first_stage`など）。
 
 use crate::linear::ols::OLSResult;
-use crate::shared::errors::guard;
+use crate::shared::errors::{guard, internal_error};
+use crate::shared::option_values::extract_strict_float;
 use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use std::collections::HashMap;
+
+use super::diagnostics::{
+    CStatisticOutput, CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput, run_c_stat,
+    run_cragg_donald, run_effective_f, run_kleibergen_paap,
+};
+use super::options::IVOptions;
 
 /// Estimation results for IV (2SLS/GMM).
 ///
@@ -17,16 +24,17 @@ use std::collections::HashMap;
 ///
 /// The first-stage regressions are not a field: `first_stage()` is a separate method.
 /// `weak_instrument_f_statistics` and `first_stage()` are computed the same way for
-/// both estimators. `wu_hausman_*` is available for `estimator="2sls"` only, and
-/// `overid_*` is the Sargan test (`estimator="2sls"`) or the Hansen J test
-/// (`estimator="gmm"`).
+/// both estimators. `wu_hausman_*` is also computed for both estimators (it follows
+/// `cov_type`, not the GMM weight), and `overid_*` is the overidentification test: for `estimator="2sls"` it follows
+/// `cov_type` (the Sargan test with `"classical"`, Hansen's J test that is robust to
+/// the chosen covariance otherwise), and for `estimator="gmm"` it is Hansen's J test.
 // `first_stage()`（内生変数ごとの第一段階回帰結果）はフィールドに含めず別メソッドとして公開する。
 // `LogitResult`/`ProbitResult`が`predict()`用に推定量そのものを非公開フィールドとして保持する
 // のと同じパターンだが、`IVResult`は`estimator`（2sls/gmm）非依存の非公開フィールド
 // `first_stage: Vec<(String, OLSResult)>`から構築する。`engine::iv::common::compute_first_stage`が
 // `estimator`によらず同じ第一段階回帰を計算するため、`fit`でこの表現に詰め替えるだけで済む。
 // `weak_instrument_f_statistics`・`first_stage`は`compute_first_stage`、`wu_hausman_*`は
-// `TwoSlsEstimator`、`overid_*`は`TwoSlsEstimator::sargan_*`/`GmmEstimator::hansen_j_*`から埋める。
+// `TwoSlsEstimator`・`GmmEstimator`、`overid_*`は`TwoSlsEstimator::overid_*`/`GmmEstimator::hansen_j_*`から埋める。
 // `IVResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IVOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -148,15 +156,23 @@ pub struct IVResult {
     /// because `x_endog` always has at least one variable.
     #[pyo3(get)]
     pub weak_instrument_f_df_denom: Option<usize>,
-    /// Overidentification test statistic: Sargan (`estimator="2sls"`) or Hansen J
-    /// (`estimator="gmm"`). `None` when just-identified (`len(instruments) ==
-    /// len(x_endog)`, degrees of freedom 0).
+    /// Overidentification test statistic. For `estimator="2sls"` it follows `cov_type`:
+    /// the Sargan statistic with `"classical"`, otherwise Hansen's J statistic with the
+    /// weight matrix of the covariance (`"hc0"` to `"hc3"` give the same value: the weight
+    /// is the plain robust one, without small-sample or leverage corrections). For
+    /// `estimator="gmm"` it is Hansen's J statistic. `None` when just-identified
+    /// (`len(instruments) == len(x_endog)`, degrees of freedom 0), and for 2SLS when the
+    /// weight matrix of the covariance is singular (the fit still succeeds): always with
+    /// `cov_type="cluster"` and fewer clusters than the exogenous regressors (including the
+    /// constant) and the excluded instruments together, and rarely for numerical reasons,
+    /// for example with nearly collinear regressors.
     #[pyo3(get)]
     pub overid_statistic: Option<f64>,
     #[pyo3(get)]
     pub overid_p_value: Option<f64>,
     /// Degrees of freedom of the chi-squared overidentification test
-    /// (`len(instruments) - len(x_endog)`); `None` when just identified.
+    /// (`len(instruments) - len(x_endog)`); `None` under the same conditions as
+    /// `overid_statistic`.
     #[pyo3(get)]
     pub overid_df: Option<usize>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous
@@ -168,8 +184,9 @@ pub struct IVResult {
     /// the second-stage regressors and the first-stage residuals, so the augmented regression
     /// fits perfectly; or there are too few observations or clusters for the extra residual
     /// columns) — this does not fail
-    /// `fit()` itself, since the other results remain valid. **Always `None` for
-    /// `estimator="gmm"`** (not implemented for GMM).
+    /// `fit()` itself, since the other results remain valid. Computed for both
+    /// estimators; with the same data and `cov_type` the value is identical for `"2sls"`
+    /// and `"gmm"` (the test uses neither the second-stage coefficients nor the GMM weight).
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
     /// P-value of the Wu-Hausman test. `None` exactly when `wu_hausman_statistic` is `None`.
@@ -187,6 +204,46 @@ pub struct IVResult {
     // `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
     // `estimator`非依存（`engine::iv::common::compute_first_stage`から構築）。
     pub(super) first_stage: Vec<(String, OLSResult)>,
+    // 弱操作変数の診断（`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）が、`fit()`と同じ
+    // `IvInput`を作り直すために保持する。`source_data`は`fit()`に渡された`polars.DataFrame`
+    // （参照を増やすだけでコピーしない）、`options`は`fit()`に渡した`IVOptions`の複製、
+    // `x_exog`・`x_endog`・`instruments`は列名（`y`の列名は`dep_var_name`）。Python側には公開しない。
+    // `source_data`と`options`は`fit`が結果を組み立てた後でGILを持って付ける（`OLSResult`と同じ）。
+    pub(super) source_data: Option<Py<PyAny>>,
+    pub(super) options: Option<IVOptions>,
+    pub(super) x_exog: Vec<String>,
+    pub(super) x_endog: Vec<String>,
+    pub(super) instruments: Vec<String>,
+}
+
+impl IVResult {
+    /// 元のデータ（`fit()`に渡された`polars.DataFrame`）。`fit`が必ず付けるので`None`にはならない
+    /// （pickleにも含まれる）。`None`なら到達不能な状態として`INTERNAL_ERROR`。
+    pub(super) fn retained_source<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.source_data
+            .as_ref()
+            .map(|source| source.bind(py).clone())
+            .ok_or_else(|| internal_error("an IVResult without its training data"))
+    }
+
+    /// `fit()`に渡した`IVOptions`の複製。`retained_source`と同じく`None`にはならない。
+    pub(super) fn retained_options(&self) -> PyResult<IVOptions> {
+        self.options
+            .clone()
+            .ok_or_else(|| internal_error("an IVResult without its options"))
+    }
+}
+
+// 保持するオプション（`IVOptions`）は、それ自身の`__reduce__`でpickleされるオブジェクトとして状態に入れる。
+impl crate::shared::pickle::PickleField for IVOptions {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(Py::new(py, self.clone())?.into_bound(py).into_any())
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        let options = obj.cast::<IVOptions>().ok()?.try_borrow().ok()?;
+        Some(options.clone())
+    }
 }
 
 // 第一段階の結果（`OLSResult`）は、それぞれの`__reduce__`でpickleされるオブジェクトとして状態に入れる。
@@ -252,6 +309,11 @@ crate::shared::pickle::impl_pickle_state!(IVResult {
     wu_hausman_df_num,
     wu_hausman_df_denom,
     first_stage,
+    source_data,
+    options,
+    x_exog,
+    x_endog,
+    instruments,
 });
 
 #[pymethods]
@@ -277,5 +339,87 @@ impl IVResult {
                 .map(|(name, result)| (name.clone(), result.clone_ref(py)))
                 .collect())
         })
+    }
+
+    /// Cragg-Donald statistic for the joint strength of the instruments, with the Stock-Yogo
+    /// critical values where they are tabulated.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. It re-reads the variables from
+    /// the data passed to `fit()`. Homoskedastic, so it does not depend on `cov_type`. With one
+    /// endogenous variable it equals the partial F-statistic in `weak_instrument_f_statistics`.
+    /// The same for `estimator="2sls"` and `estimator="gmm"`.
+    ///
+    /// Raises
+    /// ------
+    /// ComputationError
+    ///     The statistic is undefined for these data (collinear instruments, a perfectly
+    ///     fitted first stage, ...).
+    fn cragg_donald(&self, py: Python<'_>) -> PyResult<CraggDonaldOutput> {
+        guard(|| run_cragg_donald(self, py))
+    }
+
+    /// Kleibergen-Paap rk LM and rk Wald F statistics, robust to the `cov_type` of the fit.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. The covariance of the
+    /// first-stage scores follows `cov_type`, `cluster`, `hac_lags` and `hac_time` of the
+    /// options passed to `fit()`. Either statistic may be `None` when only the other is
+    /// defined.
+    ///
+    /// Raises
+    /// ------
+    /// ComputationError
+    ///     Neither statistic is defined for these data.
+    fn kleibergen_paap(&self, py: Python<'_>) -> PyResult<KleibergenPaapOutput> {
+        guard(|| run_kleibergen_paap(self, py))
+    }
+
+    /// Montiel Olea-Pflueger effective F statistic and its critical values.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. Defined for one endogenous
+    /// variable; the covariance follows the options passed to `fit()`.
+    ///
+    /// Raises
+    /// ------
+    /// TypeError
+    ///     `alpha` is not a real number.
+    /// ValidationError
+    ///     `alpha` is not strictly between 0 and 1, or there is not exactly one endogenous
+    ///     variable.
+    /// ComputationError
+    ///     The statistic is undefined for these data.
+    fn effective_f(&self, py: Python<'_>, alpha: &Bound<'_, PyAny>) -> PyResult<EffectiveFOutput> {
+        guard(|| {
+            let alpha = extract_strict_float(alpha, "alpha")?;
+            run_effective_f(self, py, alpha)
+        })
+    }
+
+    /// C statistic (difference-in-Hansen test) of the exogeneity of endogenous variables
+    /// and of the orthogonality of excluded instruments.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. The model is estimated twice by
+    /// two-step GMM, with and without the tested moment conditions, from the same covariance of
+    /// the moment conditions; the statistic is the difference of the two Hansen J statistics.
+    /// The weight follows `gmm_weight_type` for `estimator="gmm"` (`cluster`, `hac_lags` and
+    /// `hac_time` included) and the `cov_type` family otherwise (also for
+    /// `gmm_type="one_step"`, which has no weight matrix).
+    ///
+    /// Raises
+    /// ------
+    /// TypeError
+    ///     `variables` or `instruments` is not a list of str.
+    /// ValidationError
+    ///     Nothing is tested, a list is empty or repeats a name, a name is not an endogenous
+    ///     variable (instrument) of the model, or too many instruments are tested.
+    /// ComputationError
+    ///     The statistic is undefined for these data.
+    #[pyo3(signature = (variables=None, instruments=None))]
+    fn c_stat(
+        &self,
+        py: Python<'_>,
+        variables: Option<&Bound<'_, PyAny>>,
+        instruments: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<CStatisticOutput> {
+        guard(|| run_c_stat(self, py, variables, instruments))
     }
 }

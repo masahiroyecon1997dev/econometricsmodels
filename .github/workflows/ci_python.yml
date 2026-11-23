@@ -80,8 +80,10 @@ jobs:
       # すべて一度はテストで送出されたこと（tests/support/_errors.py）を確認する。
       # --check-cov-coverage: 全体実行の終了時に、読み込んだ係数の分散共分散行列の
       # フィクスチャが、すべて一度はテストで比較されたこと（tests/support/_fixture_cov.py）を確認する。
+      # --check-no-skips: スキップ・xfailになったテストが1件でもあれば失敗にする
+      # （テストはスキップしない方針。.claude/rules/testing-policy.md）。
       - name: pytest
-        run: uv run --locked --group test pytest tests --check-error-coverage --check-cov-coverage
+        run: uv run --locked --group test pytest tests --check-error-coverage --check-cov-coverage --check-no-skips
 
       - name: ruff check
         run: uv run --locked --group test ruff check .
@@ -99,7 +101,7 @@ jobs:
         run: |
           uv pip install polars==1.38.1
           uv run --no-sync python -c "import polars; assert polars.__version__ == '1.38.1', polars.__version__"
-          uv run --no-sync pytest tests
+          uv run --no-sync pytest tests --check-no-skips
 
   engine_pybind-lint:
     name: cargo test / clippy / fmt (engine_pybind)

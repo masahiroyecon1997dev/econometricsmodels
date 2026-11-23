@@ -90,7 +90,8 @@ def our_fit_cluster(df: pl.DataFrame) -> OLSResults:
 
 
 # `hac_time`の行順入れ替えテスト（OLS/WLS）の時間順データ（n=5）と、行の並べ替え。
-# `engine/src/linear/ols.rs`の`fit_computes_hac_std_errors_respecting_time_order`と
+# `engine/src/linear/ols/cov_params/tests/hc_hac.rs`の
+# `fit_computes_hac_std_errors_respecting_time_order`と
 # 同じデータ（x=[1..5]、y=[2,4,5,4,5]）で、`HAC_REORDER_ORDER`は時間列が
 # [3,1,5,2,4]の順に並ぶ行の取り方。
 HAC_REORDER_ORDER = [2, 0, 4, 1, 3]

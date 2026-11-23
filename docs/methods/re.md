@@ -91,7 +91,7 @@ A time-invariant regressor is allowed. So is a regressor together with its entit
 
 ## Hausman test
 
-`hausman_statistic`, `hausman_p_value` and `hausman_df` are computed by `fit()`; they are `None` only when no slope coefficient can be tested. The test is the regression-based (auxiliary regression) version of Wooldridge (2010, section 10.7.3). It matches `plm::phtest(method = "aux")` when no regressor is time-invariant (see [Inference conventions](../guide/inference-conventions.md#other-diagnostics)). The quasi-demeaned \(y^*\) is regressed on an untransformed constant, the quasi-demeaned regressors \(X^*\) and the within-transformed regressors \(\tilde X\), and the Wald test that the coefficients of \(\tilde X\) are zero is reported:
+`hausman_statistic`, `hausman_p_value` and `hausman_df` are computed by `fit()`; they are `None` only when no slope coefficient can be tested. The test is the regression-based (auxiliary regression) version of Wooldridge (2010, section 10.7.3). It gives the same statistic as `plm::phtest(method = "aux")` when no regressor is time-invariant and the variance components are the same (always on a balanced panel; on an unbalanced panel with `variance_method="swamy_arora"` the components differ from plm's) (see [Inference conventions](../guide/inference-conventions.md#other-diagnostics)). The quasi-demeaned \(y^*\) is regressed on an untransformed constant, the quasi-demeaned regressors \(X^*\) and the within-transformed regressors \(\tilde X\), and the Wald test that the coefficients of \(\tilde X\) are zero is reported:
 
 \[
 H = \hat\delta'\hat\Sigma_\delta^{-1}\hat\delta \sim \chi^2(\mathrm{df}), \qquad \mathrm{df} = \text{number of tested columns of } \tilde X

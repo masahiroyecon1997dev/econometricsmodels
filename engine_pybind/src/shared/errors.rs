@@ -22,7 +22,9 @@
 //! ```
 
 use engine::shared::error::{CommonError, ErrorInfo};
-use engine::shared::error_catalog::{ErrorClass, ErrorCode, ErrorReport, ParamValue};
+use engine::shared::error_catalog::{
+    ErrorClass, ErrorCode, ErrorReport, ParamValue, non_finite_label,
+};
 use pyo3::PyErrArguments;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -137,7 +139,12 @@ fn full_text(message: &str, hint: Option<&str>) -> String {
 fn param_to_py<'py>(py: Python<'py>, value: &ParamValue) -> PyResult<Bound<'py, PyAny>> {
     Ok(match value {
         ParamValue::Int(i) => i.into_pyobject(py)?.into_any(),
-        ParamValue::Float(f) => f.into_pyobject(py)?.into_any(),
+        // 非有限の値は`"nan"`・`"inf"`・`"-inf"`の文字列にする（`params`は`json.dumps`でそのまま
+        // JSONにできる契約で、`float("nan")`は不正なJSONの`NaN`になるため）。
+        ParamValue::Float(f) => match non_finite_label(*f) {
+            Some(label) => label.into_pyobject(py)?.into_any(),
+            None => f.into_pyobject(py)?.into_any(),
+        },
         ParamValue::Str(s) => s.into_pyobject(py)?.into_any(),
         ParamValue::Bool(b) => b.into_pyobject(py)?.to_owned().into_any(),
         ParamValue::StrList(items) => items.into_pyobject(py)?.into_any(),

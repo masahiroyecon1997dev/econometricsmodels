@@ -21,7 +21,8 @@ import polars as pl
 import pytest
 import statsmodels.api as sm
 from _constants import DATA_DIR
-from _errors import raises_error
+from _errors import approx_param, raises_error
+from _helpers import assert_unit_change_invariant
 from _re_oracle import hand_computed
 from econometricsmodels import (
     RE,
@@ -540,37 +541,36 @@ def _baseline() -> pl.DataFrame:
             ("x1", "xt", "xt2"),
             "QUASI_DEMEANED_REGRESSION",
         ),
-        # 説明変数のスケール差が極端でF検定の共分散部分行列がほぼ特異になる。
-        (
-            {"x1": 1e6 * pl.col("x1"), "x2": 1e-3 * pl.col("x2")},
-            ("x1", "x2"),
-            "VARIANCE_COMPONENT_WITHIN_REGRESSION",
-        ),
     ],
     ids=[
         "within_collinear",
         "scaled_duplicate",
         "xi_collinear",
         "xt_collinear",
-        "extreme_scale",
     ],
 )
 def test_two_way_computation_error_paths(columns, x, stage):
     """2-wayは分散成分に内部の2-way FEと2本のbetween回帰を使うため、失敗する経路が
-    1-wayと別になる。どれも`ComputationError`で、`stage`が失敗した回帰を示す
-    （共線は`DESIGN_MATRIX_SINGULAR`、スケール差は内部FEの全体F検定で起きる
-    `MATRIX_NEAR_SINGULAR`）。between回帰は別名の列を落とすため、最終回帰が
-    特異性を検出する。"""
+    1-wayと別になる。どれも`ComputationError`（`DESIGN_MATRIX_SINGULAR`）で、`stage`が
+    失敗した回帰を示す。between回帰は別名の列を落とすため、最終回帰が特異性を検出する。"""
     df = _baseline().with_columns(**columns)
-    if x == ("x1", "x2"):
-        expected = {
-            "code": ErrorCode.MATRIX_NEAR_SINGULAR,
-            "matrix": "COEFFICIENT_COVARIANCE",
-        }
-    else:
-        expected = {"code": ErrorCode.DESIGN_MATRIX_SINGULAR}
-    with raises_error(stage=stage, **expected):
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR, stage=stage):
         _fit(df, REOptions(), x=x)
+
+
+def test_two_way_is_invariant_to_the_units_of_the_regressors():
+    """説明変数のスケールが極端に異なる（x1を`*1e6`、x2を`*1e-3`）2-wayでも失敗せず、
+    単位を揃えたデータと同じ全体F統計量・p値になり、係数と標準誤差は列の倍率に従う。
+    内部の2-way FEの全体F検定が、相関スケール化した部分行列で判定するため単位に依らない。"""
+    df = _baseline().with_columns(
+        x1=1e6 * pl.col("x1"), x2=1e-3 * pl.col("x2")
+    )
+    assert_unit_change_invariant(
+        lambda d: _fit(d, REOptions(), x=("x1", "x2")),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
 def test_two_way_noiseless_data_is_a_perfect_fit():
@@ -782,7 +782,7 @@ def test_non_finite_float_group_key_columns_raise(panel, role, bad):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="key",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
         argument="effects" if role in ("entity", "time") else role,
         data_argument="data",
@@ -835,6 +835,22 @@ def test_unbalanced_panel_raises(panel):
         _fit(df, REOptions())
 
 
+def test_repeated_pair_with_matching_row_count_is_unbalanced(panel):
+    """行数が全組合せの数と同じでも、組合せが重複して別の組合せが欠けて
+    いれば不均衡パネルとして拒否される。"""
+    df = pl.concat([panel.slice(1, panel.height - 1), panel.slice(5, 1)])
+    assert df.height == panel.height
+    with raises_error(
+        ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        n_obs=24,
+        first_column="entity",
+        n_first_groups=6,
+        second_column="time",
+        n_second_groups=4,
+    ):
+        _fit(df, REOptions())
+
+
 def test_unbalanced_panel_is_allowed_for_one_way(panel):
     df = panel.slice(1, panel.height - 1)
     assert (
@@ -849,7 +865,11 @@ def test_singleton_time_raises(panel):
     """最後の時点を1観測だけ残すと、時点のsingletonで`ValidationError`。"""
     keep = (pl.col("time") != 4) | (pl.int_range(pl.len()).over("time") == 0)
     with raises_error(
-        ErrorCode.SINGLETON_GROUP, argument="effects", column="time", group="4"
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        data_argument="data",
+        column="time",
+        group="4",
     ):
         _fit(panel.filter(keep), REOptions(), x=("x1",))
 

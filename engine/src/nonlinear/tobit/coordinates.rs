@@ -1,0 +1,517 @@
+//! 標準化した設計行列の直交座標（`Q = X̃R⁻¹`）。Tobitの最適化・共分散・全体Wald検定をこの座標で行う。
+//!
+//! `-H`は`X'WX`の形で、条件数が設計行列の2乗になる。ほぼ共線な傾きでは、`X`の座標で`H`の各要素を
+//! 倍精度で組む丸めだけで統計量が桁違いにずれ、`-H`の分解も`cond(X)²`を保てない。`X̃ = QR`
+//! （標準化した設計行列のピボットなしQR）として`Q`の座標`b = Rβ̃`で最適化すれば、`Q'Q`が定数倍の
+//! 単位行列なので、`H`の条件数は共線性に依らず重み（打ち切りの度合い）だけで決まる。ニュートン法は
+//! パラメータの線形変換に対して不変なので、厳密な演算では同じ反復になる。
+//!
+//! **`Q`は2の冪（約`√n`）倍する**: 標準化した列のノルムは`√n`で、`Q`の列は単位ノルムなので、そのままだと
+//! 勾配が`√n`分小さくなり、`tol`（勾配のノルムとの比較。`bfgs`・`lbfgs`は`tol·n`）が`X̃`の座標より
+//! `√n`倍ゆるむ。`√n`に近い2の冪を掛けて、勾配の大きさを`X̃`の座標に合わせる。2の冪は丸めなしで掛かる。
+//!
+//! 受け入れ範囲は他の手法と同じ（列を揃えた`R`の条件数、`OrthonormalDesign::new_checked`）。
+
+use faer::Mat;
+
+use crate::nonlinear::common::MleError;
+use crate::shared::error::{CommonError, MatrixKind};
+use crate::shared::linear_algebra::{RankDeficient, collinear_columns, column_names};
+use crate::shared::orthonormal::{OrthonormalDesign, covariance_from_factor, solve_upper};
+
+/// 打ち切りを無視したOLSの残差標準偏差が、`y`のスケールに対しこの割合以下なら、完全な当てはまりとして
+/// `σ = 1`にフォールバックする。
+const PERFECT_FIT_RELATIVE_SIGMA: f64 = 1e-8;
+
+/// 標準化空間の係数`β̃`と`Q`の座標`b`の対応（`b = Rβ̃`、`R`は`Q`の倍率を含めた上三角のk×k）。
+#[derive(Debug, Clone)]
+pub(super) struct DesignCoordinates {
+    /// `Q`の倍率`s`（2の冪）を含む`R/s`。`X̃ = (sQ)(R/s)`。
+    r: Mat<f64>,
+    /// `Q`に掛けた倍率`s`。
+    scale: f64,
+}
+
+impl DesignCoordinates {
+    /// 標準化した設計行列`x_std`（n×k、切片ありなら先頭が切片列）を`QR`に分解し、`s·Q`（n×k）と
+    /// 座標の対応を返す。`x_std`は呼び出し側が先に標準化したもので、ランク判定・条件数のガードも
+    /// この行列に対して行う。
+    ///
+    /// **`x_std`は受け取って、複製せずその場で分解する**（`OrthonormalDesign::new_checked_owned`。
+    /// `x_std`・QRの格納・`Q`の3つが同時に生きる`3·n·k`が`2·n·k`で済む）。呼び出し側は`x_std`を
+    /// その後に使えない（`fit_tobit`も`Q`ができたら不要）。
+    ///
+    /// **共線な列は標準化前の`x`で特定する**: 切片ありの標準化は非切片列の平均を引くので、標準化後の
+    /// 行列ではダミー変数の罠・定数列が切片を含まない形に見える。報告する列名は元の設計の列。
+    ///
+    /// # Errors
+    /// - ランク落ち（完全な多重共線性、列を揃えた条件数が`1e12`超）: `MleError::SingularDesignMatrix`
+    /// - 列を揃えた条件数が`5e7`超: `NearSingularMatrix`（`DESIGN_GRAM`。`CommonError`）
+    pub(super) fn new(
+        x_std: Mat<f64>,
+        x: &Mat<f64>,
+        names: &[String],
+    ) -> Result<(Self, Mat<f64>), MleError> {
+        let (n, k) = (x_std.nrows(), x_std.ncols());
+        let design = OrthonormalDesign::new_checked_owned(x_std).map_err(|err| match err.kind {
+            RankDeficient::Columns => MleError::SingularDesignMatrix {
+                columns: column_names(&collinear_columns(x), names),
+            },
+            RankDeficient::GramMatrix => MleError::Common(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::DesignGram,
+            }),
+        })?;
+        let (mut q, r) = design.into_parts();
+        // `√n`に近い2の冪（`n ≥ 1`なので指数は0以上）。
+        let exponent = (n as f64).sqrt().log2().round() as i32;
+        let scale = 2.0_f64.powi(exponent);
+        for j in 0..k {
+            for i in 0..n {
+                *q.get_mut(i, j) *= scale;
+            }
+        }
+        let r = Mat::from_fn(k, k, |i, j| *r.get(i, j) / scale);
+        Ok((Self { r, scale }, q))
+    }
+
+    /// 打ち切りを無視したOLS（`y`の`Q`への射影）から、最適化の初期値`(b, logσ)`を作る。
+    /// `b = (sQ)'y / s²`、`σ`は残差の標準偏差。完全な当てはまり（残差が`y`のスケールに対して
+    /// 極小）では`logσ`を0にフォールバックする（`log(0) = -∞`で最適化が壊れるのを避ける。
+    /// あくまで初期値のヒューリスティックで、Tobitの推定値ではない）。
+    pub(super) fn initial_params(&self, q: &Mat<f64>, y: &Mat<f64>) -> Vec<f64> {
+        let n = q.nrows();
+        let k = q.ncols();
+        let s2 = self.scale * self.scale;
+        let b: Vec<f64> = (0..k)
+            .map(|j| (0..n).map(|i| *q.get(i, j) * *y.get(i, 0)).sum::<f64>() / s2)
+            .collect();
+        let sse: f64 = (0..n)
+            .map(|i| {
+                let fitted: f64 = (0..k).map(|j| *q.get(i, j) * b[j]).sum();
+                (*y.get(i, 0) - fitted).powi(2)
+            })
+            .sum();
+        let candidate_sigma = (sse / n as f64).sqrt();
+        let y_scale = (0..n)
+            .map(|i| y.get(i, 0).abs())
+            .fold(0.0_f64, f64::max)
+            .max(1.0);
+        let sigma = if candidate_sigma > PERFECT_FIT_RELATIVE_SIGMA * y_scale {
+            candidate_sigma
+        } else {
+            1.0
+        };
+        let mut params = b;
+        params.push(sigma.ln());
+        params
+    }
+
+    /// `Q`の座標のパラメータ`(b, logσ)`（k+1個）を、標準化空間の`(β̃, logσ̃)`に戻す
+    /// （`β̃ = R⁻¹b`の後退代入。`logσ`はそのまま）。
+    pub(super) fn standardized_params(&self, params: &[f64]) -> Vec<f64> {
+        let k = self.r.nrows();
+        let b = Mat::from_fn(k, 1, |i, _| params[i]);
+        let beta = solve_upper(&self.r, b.as_ref());
+        let mut out: Vec<f64> = (0..k).map(|i| *beta.get(i, 0)).collect();
+        out.push(params[k]);
+        out
+    }
+
+    /// `Q`の座標の共分散（`(k+1)×(k+1)`。`b`と`logσ`）を、標準化空間`(β̃, logσ̃)`の共分散に戻す:
+    /// `V_β̃ = R⁻¹ V_b R⁻ᵀ`（`logσ`の行・列は変えない）。三角行列の後退代入で両側から解き、
+    /// `R⁻¹`を明示的に作らない。
+    pub(super) fn standardized_covariance(&self, cov: &Mat<f64>) -> Mat<f64> {
+        let k = self.r.nrows();
+        let full = Mat::from_fn(k + 1, k + 1, |i, j| {
+            if i < k && j < k {
+                *self.r.get(i, j)
+            } else if i == j {
+                1.0
+            } else {
+                0.0
+            }
+        });
+        covariance_from_factor(&full, cov)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn design(n: usize) -> (Mat<f64>, Vec<String>) {
+        let x = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => ((i * 7) % 11) as f64 - 5.0,
+            _ => ((i * 5 + 3) % 13) as f64 * 0.5,
+        });
+        (x, ["const", "a", "b"].map(String::from).to_vec())
+    }
+
+    #[test]
+    fn q_times_r_reconstructs_the_standardized_design() {
+        let (x, names) = design(40);
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
+        let back = &q * &coordinates.r;
+        for i in 0..40 {
+            for j in 0..3 {
+                assert!((back.get(i, j) - x.get(i, j)).abs() < 1e-12);
+            }
+        }
+    }
+
+    /// `Q`の倍率は`√n`に近い2の冪で、`Q'Q`はその2乗倍の単位行列（`X̃`の座標と勾配の大きさを合わせる）。
+    #[test]
+    fn q_is_scaled_by_a_power_of_two_near_the_square_root_of_n() {
+        for n in [4, 40, 600, 100_000] {
+            let (x, names) = design(n);
+            let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
+            let exponent = coordinates.scale.log2();
+            assert_eq!(exponent.fract(), 0.0, "n={n}");
+            assert!(
+                (coordinates.scale / (n as f64).sqrt()).ln().abs() < 0.5,
+                "n={n}"
+            );
+            let gram = q.transpose() * &q;
+            for i in 0..3 {
+                for j in 0..3 {
+                    let expected = if i == j {
+                        coordinates.scale.powi(2)
+                    } else {
+                        0.0
+                    };
+                    assert!(
+                        (gram.get(i, j) - expected).abs() < 1e-10 * coordinates.scale.powi(2),
+                        "n={n} ({i}, {j})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn standardized_params_and_covariance_invert_the_coordinate_map() {
+        let (x, names) = design(40);
+        let (coordinates, _) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
+        // `β̃`から`b = Rβ̃`を作り、戻すと`β̃`。
+        let beta = [0.7, -1.3, 2.1];
+        let b: Vec<f64> = (0..3)
+            .map(|i| (i..3).map(|j| *coordinates.r.get(i, j) * beta[j]).sum())
+            .chain([0.25])
+            .collect();
+        let back = coordinates.standardized_params(&b);
+        for (value, expected) in back.iter().zip(beta) {
+            assert!((value - expected).abs() < 1e-12);
+        }
+        assert_eq!(back[3], 0.25);
+        // `V_b = R V_β̃ Rᵀ`（`logσ`との共分散も`R`だけ掛かる）を戻すと`V_β̃`。
+        let v_beta = Mat::from_fn(4, 4, |i, j| {
+            if i == j {
+                1.0 + i as f64
+            } else {
+                0.1 * (1 + i + j) as f64
+            }
+        });
+        let t = Mat::from_fn(4, 4, |i, j| {
+            if i < 3 && j < 3 {
+                *coordinates.r.get(i, j)
+            } else if i == j {
+                1.0
+            } else {
+                0.0
+            }
+        });
+        let v_b = &t * &v_beta * t.transpose();
+        let recovered = coordinates.standardized_covariance(&v_b);
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!((recovered.get(i, j) - v_beta.get(i, j)).abs() < 1e-11);
+            }
+        }
+    }
+
+    #[test]
+    fn initial_params_are_the_ols_coefficients_in_q_coordinates() {
+        let (x, names) = design(40);
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
+        let beta = [0.5, 0.25, -0.75];
+        let y = Mat::from_fn(40, 1, |i, _| {
+            (0..3).map(|j| *x.get(i, j) * beta[j]).sum::<f64>() + 0.1 * ((i * 3) % 5) as f64
+        });
+        let params = coordinates.initial_params(&q, &y);
+        let back = coordinates.standardized_params(&params);
+        // 通常のOLS（正規方程式）と一致する。
+        let xtx = x.transpose() * &x;
+        let xty = x.transpose() * &y;
+        use faer::Side;
+        use faer::prelude::Solve;
+        let ols = xtx.llt(Side::Lower).unwrap().solve(&xty);
+        for (j, value) in back.iter().take(3).enumerate() {
+            assert!((value - ols.get(j, 0)).abs() < 1e-10, "j={j}");
+        }
+    }
+
+    #[test]
+    fn initial_params_fall_back_to_sigma_one_for_a_perfect_fit() {
+        let (x, names) = design(40);
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
+        let y = Mat::from_fn(40, 1, |i, _| 2.0 * *x.get(i, 1) + 1.0);
+        let params = coordinates.initial_params(&q, &y);
+        assert_eq!(params[3], 0.0);
+    }
+
+    #[test]
+    fn exact_collinearity_is_reported_with_the_columns_of_the_original_design() {
+        let (mut x, names) = design(40);
+        x = Mat::from_fn(40, 3, |i, j| {
+            if j == 2 {
+                2.0 * *x.get(i, 1)
+            } else {
+                *x.get(i, j)
+            }
+        });
+        let err = DesignCoordinates::new(x.clone(), &x, &names).unwrap_err();
+        assert!(
+            matches!(&err, MleError::SingularDesignMatrix { columns } if columns == &["a", "b"]),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_design_beyond_the_condition_limit_is_near_singular_design_gram() {
+        let (mut x, names) = design(40);
+        let a: Vec<f64> = (0..40).map(|i| *x.get(i, 1)).collect();
+        // `b = a + 1e-9·ノイズ`: 列を揃えた条件数が約`1e9`（`5e7`超、`1e12`以下）。
+        x = Mat::from_fn(40, 3, |i, j| match j {
+            2 => a[i] + 1e-9 * (((i * 3) % 7) as f64 - 3.0),
+            _ => *x.get(i, j),
+        });
+        let err = DesignCoordinates::new(x.clone(), &x, &names).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                MleError::Common(CommonError::NearSingularMatrix {
+                    matrix: MatrixKind::DesignGram
+                })
+            ),
+            "{err:?}"
+        );
+    }
+
+    /// `Q`の座標の`H`・スコアから作る全体Wald統計量を有理数演算の厳密値と照合する。
+    /// `has_intercept`で、先頭が切片列の設計（検定しない先頭列が1つ）と、傾きだけの設計
+    /// （`k_constant = 0`）の両方のレイアウトを検証する。
+    ///
+    /// モデルは`情報行列 A = Σ wᵢvᵢvᵢ'`、`vᵢ = ([1,] aᵢ, aᵢ + eps·bᵢ, gᵢ)`（最後が`σ`の方向）、
+    /// スコア`sᵢ = eᵢvᵢ`で、全要素が倍精度で厳密に表せる2進小数。`Q`の座標では`vᵢ`の`X`部分を
+    /// `Q`の行に置き換えて同じ式で組む（`TobitProblem`が`x = Q`で評価するのと同じ構造）。
+    fn assert_exact_wald(has_intercept: bool, cases: &[(i32, [f64; 5])]) {
+        use crate::nonlinear::common::{CovType, cov_params_for_type};
+        use crate::shared::group_codes::GroupCodes;
+        use crate::shared::wald::wald_quadratic_form;
+
+        let n = 40;
+        let k_constant = usize::from(has_intercept);
+        let k = 2 + k_constant;
+        let groups =
+            GroupCodes::from_labels(&(0..n).map(|i| format!("g{}", i % 8)).collect::<Vec<_>>());
+        let cov_types = [
+            CovType::Classical,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            CovType::Opg,
+        ];
+        // `[切片,] x1, x2, logσ`の係数。
+        let theta: Vec<f64> = if has_intercept {
+            vec![0.5, 2.0, -1.0, -0.25]
+        } else {
+            vec![2.0, -1.0, -0.25]
+        };
+        for &(exponent, expected) in cases {
+            let eps = 0.5_f64.powi(exponent);
+            let a = |i: usize| ((7 * i) % 13) as f64 - 6.0;
+            let b = |i: usize| ((5 * i) % 11) as f64 - 5.0;
+            let g = |i: usize| (((3 * i) % 7) as f64 - 3.0) / 8.0;
+            let e = |i: usize| (((i * 5) % 9) as f64 - 4.0) / 4.0 + 0.125;
+            let w = |i: usize| (4 + i % 3) as f64 / 4.0;
+            // 列の並び`[切片, x1, x2]`のうち、切片なしでは先頭を除く。
+            let x = Mat::from_fn(n, k, |i, j| match j + usize::from(!has_intercept) {
+                0 => 1.0,
+                1 => a(i),
+                _ => a(i) + eps * b(i),
+            });
+            let names: Vec<String> = if has_intercept {
+                ["const", "x1", "x2"].map(String::from).to_vec()
+            } else {
+                ["x1", "x2"].map(String::from).to_vec()
+            };
+            let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
+            // `Q`の座標の観測ごとの行`(q_i, g_i)`。
+            let v = Mat::from_fn(n, k + 1, |i, j| if j < k { *q.get(i, j) } else { g(i) });
+            let hessian = Mat::from_fn(k + 1, k + 1, |r, c| {
+                -(0..n)
+                    .map(|i| w(i) * *v.get(i, r) * *v.get(i, c))
+                    .sum::<f64>()
+            });
+            let scores = Mat::from_fn(n, k + 1, |i, j| e(i) * *v.get(i, j));
+            // `θ`の`β`部分に対応する`Q`の座標`b = Rβ`（`Q`の倍率を含む`R`）。
+            let b_mat = Mat::from_fn(k, 1, |i, _| {
+                (i..k)
+                    .map(|j| *coordinates.r.get(i, j) * theta[j])
+                    .sum::<f64>()
+            });
+            for (cov_type, expected) in cov_types.iter().zip(expected) {
+                let cov = cov_params_for_type(cov_type, &hessian, Some(&scores), n, k + 1).unwrap();
+                let wald = wald_quadratic_form(&b_mat, &cov, k_constant, 2).unwrap();
+                assert!(
+                    (wald / expected - 1.0).abs() < 1e-8,
+                    "intercept={has_intercept} eps=2^-{exponent} {cov_type:?}: {wald} vs {expected}"
+                );
+            }
+        }
+    }
+
+    /// 傾きの2列がほぼ共線な設計（`eps = 2⁻¹⁴`〜`2⁻²⁴`。列を揃えた条件数は`1.5e4`〜`1.5e7`）、切片あり。
+    /// `X`の座標で`-H⁻¹`を作って`Ψ`とかけ合わせる式は、同じ入力で`hc0`の相対誤差が`eps = 2⁻¹⁴`で
+    /// 約`4e-6`、`2⁻¹⁸`で約`4e-2`、`2⁻²²`以降は全く合わなくなる。
+    #[test]
+    fn overall_wald_in_q_coordinates_matches_exact_rational_values() {
+        // (指数, [classical, hc0, hc1, cluster, opg])
+        assert_exact_wald(
+            true,
+            &[
+                (
+                    14,
+                    [
+                        717.7934482516522,
+                        2829.7053115066637,
+                        2546.7347803559974,
+                        4106.038910034186,
+                        179.40214877699057,
+                    ],
+                ),
+                (
+                    18,
+                    [
+                        717.7565572618128,
+                        2829.5663118357706,
+                        2546.6096806521937,
+                        4105.836464190011,
+                        179.3934491614713,
+                    ],
+                ),
+                (
+                    22,
+                    [
+                        717.7542516857172,
+                        2829.5576248143907,
+                        2546.6018623329514,
+                        4105.823811961406,
+                        179.39290545505867,
+                    ],
+                ),
+                (
+                    24,
+                    [
+                        717.7541364072546,
+                        2829.5571904647363,
+                        2546.6014714182625,
+                        4105.823179351942,
+                        179.39287826979842,
+                    ],
+                ),
+            ],
+        );
+    }
+
+    /// 切片なし（検定しない先頭の列が無い、`k_constant = 0`）の同じ照合。
+    #[test]
+    fn overall_wald_in_q_coordinates_matches_exact_rational_values_without_an_intercept() {
+        assert_exact_wald(
+            false,
+            &[
+                (
+                    14,
+                    [
+                        718.5145677835646,
+                        2855.62789083642,
+                        2641.455799023689,
+                        4288.8809658127475,
+                        180.66922161576133,
+                    ],
+                ),
+                (
+                    22,
+                    [
+                        718.4752769244974,
+                        2855.472585759808,
+                        2641.312141827823,
+                        4288.654683878729,
+                        180.65926046466674,
+                    ],
+                ),
+                (
+                    24,
+                    [
+                        718.475161368711,
+                        2855.472129004337,
+                        2641.31171932901,
+                        4288.65401837657,
+                        180.65923116844425,
+                    ],
+                ),
+            ],
+        );
+    }
+
+    /// 切片ありの標準化は非切片列の平均を引くので、ダミー変数の罠（`d1 + d2 = 切片`）は標準化後の
+    /// 行列では`const`を含まない形（`d1`と`d2`が逆符号）に見える。報告する列は元の設計の
+    /// `const, d1, d2`（標準化後の行列から特定すると`d1, d2`だけになる）。
+    #[test]
+    fn collinearity_hidden_by_centering_is_reported_with_the_original_columns() {
+        let n = 30;
+        let d1 = |i: usize| f64::from(u8::from(i.is_multiple_of(3)));
+        let x = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => d1(i),
+            _ => 1.0 - d1(i),
+        });
+        let mean = (0..n).map(d1).sum::<f64>() / n as f64;
+        let sd = ((0..n).map(|i| (d1(i) - mean).powi(2)).sum::<f64>() / n as f64).sqrt();
+        let x_std = Mat::from_fn(n, 3, |i, j| match j {
+            0 => 1.0,
+            1 => (d1(i) - mean) / sd,
+            _ => ((1.0 - d1(i)) - (1.0 - mean)) / sd,
+        });
+        let names = ["const", "d1", "d2"].map(String::from);
+        let err = DesignCoordinates::new(x_std.clone(), &x, &names).unwrap_err();
+        assert!(
+            matches!(&err, MleError::SingularDesignMatrix { columns } if columns == &["const", "d1", "d2"]),
+            "{err:?}"
+        );
+    }
+
+    /// 観測数が列数に近い小標本でも、`Q`の倍率は`√n`に近い2の冪（`n = 5`で`2`）で、`Q'Q`が単位行列の
+    /// 定数倍になる。
+    #[test]
+    fn the_scale_is_a_power_of_two_even_for_a_tiny_sample() {
+        let x = Mat::from_fn(5, 3, |i, j| match j {
+            0 => 1.0,
+            1 => i as f64,
+            _ => ((i * i) % 5) as f64,
+        });
+        let names = ["const", "a", "b"].map(String::from);
+        let (coordinates, q) = DesignCoordinates::new(x.clone(), &x, &names).unwrap();
+        assert_eq!(coordinates.scale, 2.0);
+        let gram = q.transpose() * &q;
+        for i in 0..3 {
+            for j in 0..3 {
+                let expected = if i == j { 4.0 } else { 0.0 };
+                assert!((gram.get(i, j) - expected).abs() < 1e-12, "({i}, {j})");
+            }
+        }
+    }
+}

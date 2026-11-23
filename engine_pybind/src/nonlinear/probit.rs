@@ -105,10 +105,17 @@ pub struct ProbitOptions {
     /// target and the line search can no longer make progress because the
     /// log-likelihood has reached floating-point precision (common with very
     /// large samples); this window scales with `tol`, so it widens if you
-    /// loosen `tol`. Note: the solver-dependent default is
-    /// resolved once, at construction time. Changing `solver` afterwards via
-    /// the setter does not re-resolve `tol` — set both together (or set `tol`
-    /// explicitly) if you change `solver` after construction.
+    /// loosen `tol`. For `bfgs`/`lbfgs`, `tol` decides when the iteration
+    /// stops, so the estimate falls short of the exact maximum by roughly the
+    /// Newton step at the stopping point. In the verification scenarios the
+    /// coefficients and standard errors differ from those of `solver="newton"`
+    /// by about `2e-7` in relative terms (about `2e-6` near separation). A
+    /// smaller `tol` often brings them closer, but a run also stops when the
+    /// log-likelihood no longer changes within floating-point precision, and
+    /// then a smaller `tol` changes nothing. Note: the solver-dependent
+    /// default is resolved once, at construction time. Changing `solver`
+    /// afterwards via the setter does not re-resolve `tol` — set both together
+    /// (or set `tol` explicitly) if you change `solver` after construction.
     #[pyo3(get)]
     pub tol: f64,
 

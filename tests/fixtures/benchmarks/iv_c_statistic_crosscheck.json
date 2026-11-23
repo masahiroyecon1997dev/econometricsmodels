@@ -1,0 +1,1367 @@
+{
+  "synthetic": {
+    "baseline": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 52.0900042049595,
+          "p_value": 5.30141097900882e-13,
+          "df": 1,
+          "j_with_tested": 52.4880326053663,
+          "j_without_tested": 0.398028400406794
+        },
+        "orthogonality": {
+          "statistic": 0.328324290876446,
+          "p_value": 0.566647476264724,
+          "df": 1,
+          "j_with_tested": 0.328324290876446,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 39.2240299413167,
+          "p_value": 3.778609951492e-10,
+          "df": 1,
+          "j_with_tested": 39.5515123402009,
+          "j_without_tested": 0.327482398884251
+        },
+        "orthogonality": {
+          "statistic": 0.276767398752792,
+          "p_value": 0.598827848343657,
+          "df": 1,
+          "j_with_tested": 0.276767398752792,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 34.5538412674546,
+          "p_value": 4.14622525999382e-09,
+          "df": 1,
+          "j_with_tested": 34.8899317921192,
+          "j_without_tested": 0.336090524664583
+        },
+        "orthogonality": {
+          "statistic": 0.29735678483438,
+          "p_value": 0.585544243895076,
+          "df": 1,
+          "j_with_tested": 0.29735678483438,
+          "j_without_tested": 0
+        }
+      },
+      "cluster": {
+        "endogeneity": {
+          "statistic": 8.90645045245179,
+          "p_value": 0.00284165077401906,
+          "df": 1,
+          "j_with_tested": 9.13323851095211,
+          "j_without_tested": 0.22678805850032
+        },
+        "orthogonality": {
+          "statistic": 0.18520493612296,
+          "p_value": 0.666937838225736,
+          "df": 1,
+          "j_with_tested": 0.18520493612296,
+          "j_without_tested": 0
+        }
+      },
+      "cluster_imbalanced": {
+        "endogeneity": {
+          "statistic": 9.17403675983319,
+          "p_value": 0.00245472528472344,
+          "df": 1,
+          "j_with_tested": 9.53181792327678,
+          "j_without_tested": 0.35778116344359
+        },
+        "orthogonality": {
+          "statistic": 0.267230344261514,
+          "p_value": 0.605195761009617,
+          "df": 1,
+          "j_with_tested": 0.267230344261514,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "just_identified": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 58.4676330905912,
+          "p_value": 2.06663033854649e-14,
+          "df": 1,
+          "j_with_tested": 58.4676330905912,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 49.7662303580793,
+          "p_value": 1.73199489135405e-12,
+          "df": 1,
+          "j_with_tested": 49.7662303580793,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 42.2002332666675,
+          "p_value": 8.23901909206536e-11,
+          "df": 1,
+          "j_with_tested": 42.2002332666675,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "weak_instruments": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 0.306813102999664,
+          "p_value": 0.579642408770266,
+          "df": 1,
+          "j_with_tested": 0.519084477152321,
+          "j_without_tested": 0.212271374152657
+        },
+        "orthogonality": {
+          "statistic": 0.208012865626843,
+          "p_value": 0.648329377717516,
+          "df": 1,
+          "j_with_tested": 0.208012865626843,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 0.251981608129328,
+          "p_value": 0.615683209674461,
+          "df": 1,
+          "j_with_tested": 0.426525078015086,
+          "j_without_tested": 0.174543469885757
+        },
+        "orthogonality": {
+          "statistic": 0.171282969857082,
+          "p_value": 0.6789740998621,
+          "df": 1,
+          "j_with_tested": 0.171282969857082,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 0.293817128458677,
+          "p_value": 0.587784744319708,
+          "df": 1,
+          "j_with_tested": 0.477887673741956,
+          "j_without_tested": 0.184070545283279
+        },
+        "orthogonality": {
+          "statistic": 0.182096748086813,
+          "p_value": 0.66957748625428,
+          "df": 1,
+          "j_with_tested": 0.182096748086813,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "small_n": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 2.81620506301501,
+          "p_value": 0.093316794056592,
+          "df": 1,
+          "j_with_tested": 4.11090600369662,
+          "j_without_tested": 1.29470094068161
+        },
+        "orthogonality": {
+          "statistic": 0.960888430803749,
+          "p_value": 0.326963139758974,
+          "df": 1,
+          "j_with_tested": 0.960888430803749,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 2.58735041048433,
+          "p_value": 0.107720399462267,
+          "df": 1,
+          "j_with_tested": 3.5080766218307,
+          "j_without_tested": 0.920726211346368
+        },
+        "orthogonality": {
+          "statistic": 0.544232401785118,
+          "p_value": 0.460683955495426,
+          "df": 1,
+          "j_with_tested": 0.544232401785118,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 2.09503757524455,
+          "p_value": 0.147778078442795,
+          "df": 1,
+          "j_with_tested": 2.81627074537489,
+          "j_without_tested": 0.72123317013034
+        },
+        "orthogonality": {
+          "statistic": 0.403734450241064,
+          "p_value": 0.525166906082915,
+          "df": 1,
+          "j_with_tested": 0.403734450241064,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "high_variance": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 46.8600850987492,
+          "p_value": 7.6239757134825e-12,
+          "df": 1,
+          "j_with_tested": 47.2993559270847,
+          "j_without_tested": 0.439270828335448
+        },
+        "orthogonality": {
+          "statistic": 0.362031265863747,
+          "p_value": 0.547380281016144,
+          "df": 1,
+          "j_with_tested": 0.362031265863747,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 38.1654486063842,
+          "p_value": 6.49931293219869e-10,
+          "df": 1,
+          "j_with_tested": 38.5320776476307,
+          "j_without_tested": 0.366629041246463
+        },
+        "orthogonality": {
+          "statistic": 0.31527986222723,
+          "p_value": 0.574458179390823,
+          "df": 1,
+          "j_with_tested": 0.31527986222723,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 35.901261965009,
+          "p_value": 2.07574228188172e-09,
+          "df": 1,
+          "j_with_tested": 36.2877202022194,
+          "j_without_tested": 0.386458237210362
+        },
+        "orthogonality": {
+          "statistic": 0.345016972238349,
+          "p_value": 0.556947546819388,
+          "df": 1,
+          "j_with_tested": 0.345016972238349,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "heteroskedastic": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 27.783858540546,
+          "p_value": 1.35653189881314e-07,
+          "df": 1,
+          "j_with_tested": 27.9446685748203,
+          "j_without_tested": 0.160810034274264
+        },
+        "orthogonality": {
+          "statistic": 0.144452474331683,
+          "p_value": 0.703894167711545,
+          "df": 1,
+          "j_with_tested": 0.144452474331683,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 23.1738616286793,
+          "p_value": 1.47995314002861e-06,
+          "df": 1,
+          "j_with_tested": 23.3151016532662,
+          "j_without_tested": 0.141240024586876
+        },
+        "orthogonality": {
+          "statistic": 0.120809850714605,
+          "p_value": 0.728157795652325,
+          "df": 1,
+          "j_with_tested": 0.120809850714605,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 19.1560171655984,
+          "p_value": 1.2045717301957e-05,
+          "df": 1,
+          "j_with_tested": 19.3012472611587,
+          "j_without_tested": 0.145230095560337
+        },
+        "orthogonality": {
+          "statistic": 0.127941826786649,
+          "p_value": 0.720575641112007,
+          "df": 1,
+          "j_with_tested": 0.127941826786649,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "autocorrelated": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 22.0007928510325,
+          "p_value": 2.72537859746103e-06,
+          "df": 1,
+          "j_with_tested": 22.520780389614,
+          "j_without_tested": 0.519987538581472
+        },
+        "orthogonality": {
+          "statistic": 0.477197971113729,
+          "p_value": 0.489694269397152,
+          "df": 1,
+          "j_with_tested": 0.477197971113729,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 16.1694855203207,
+          "p_value": 5.79196572703269e-05,
+          "df": 1,
+          "j_with_tested": 16.5855266813023,
+          "j_without_tested": 0.416041160981582
+        },
+        "orthogonality": {
+          "statistic": 0.395384124139196,
+          "p_value": 0.529482767714749,
+          "df": 1,
+          "j_with_tested": 0.395384124139196,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 14.8906245990416,
+          "p_value": 0.000113927791734127,
+          "df": 1,
+          "j_with_tested": 15.3100824683157,
+          "j_without_tested": 0.419457869274173
+        },
+        "orthogonality": {
+          "statistic": 0.419010321212061,
+          "p_value": 0.51743128824295,
+          "df": 1,
+          "j_with_tested": 0.419010321212061,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "moderate_multicollinearity": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 84.2982230529751,
+          "p_value": 4.25497436365977e-20,
+          "df": 1,
+          "j_with_tested": 86.2132112274332,
+          "j_without_tested": 1.91498817445814
+        },
+        "orthogonality": {
+          "statistic": 1.48241697106159,
+          "p_value": 0.223396747329444,
+          "df": 1,
+          "j_with_tested": 1.48241697106159,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 68.1600096160859,
+          "p_value": 1.50752274963467e-16,
+          "df": 1,
+          "j_with_tested": 69.9857445734321,
+          "j_without_tested": 1.82573495734623
+        },
+        "orthogonality": {
+          "statistic": 1.52332749266117,
+          "p_value": 0.217116638073994,
+          "df": 1,
+          "j_with_tested": 1.52332749266117,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 52.6167171938358,
+          "p_value": 4.05423547762165e-13,
+          "df": 1,
+          "j_with_tested": 54.5903555007831,
+          "j_without_tested": 1.97363830694726
+        },
+        "orthogonality": {
+          "statistic": 1.60955215485189,
+          "p_value": 0.204554766748888,
+          "df": 1,
+          "j_with_tested": 1.60955215485189,
+          "j_without_tested": 0
+        }
+      },
+      "cluster": {
+        "endogeneity": {
+          "statistic": 8.24901671898888,
+          "p_value": 0.00407740817613021,
+          "df": 1,
+          "j_with_tested": 9.51733849771013,
+          "j_without_tested": 1.26832177872125
+        },
+        "orthogonality": {
+          "statistic": 0.976610737832692,
+          "p_value": 0.323036995285232,
+          "df": 1,
+          "j_with_tested": 0.976610737832692,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "high_condition_number": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 84.2982230529749,
+          "p_value": 4.25497436366011e-20,
+          "df": 1,
+          "j_with_tested": 86.2132112274331,
+          "j_without_tested": 1.91498817445814
+        },
+        "orthogonality": {
+          "statistic": 1.48241697106158,
+          "p_value": 0.223396747329444,
+          "df": 1,
+          "j_with_tested": 1.48241697106158,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 68.1600096160859,
+          "p_value": 1.50752274963468e-16,
+          "df": 1,
+          "j_with_tested": 69.9857445734321,
+          "j_without_tested": 1.82573495734623
+        },
+        "orthogonality": {
+          "statistic": 1.52332749266117,
+          "p_value": 0.217116638073994,
+          "df": 1,
+          "j_with_tested": 1.52332749266117,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 52.616717193836,
+          "p_value": 4.05423547762136e-13,
+          "df": 1,
+          "j_with_tested": 54.5903555007832,
+          "j_without_tested": 1.97363830694727
+        },
+        "orthogonality": {
+          "statistic": 1.6095521548519,
+          "p_value": 0.204554766748887,
+          "df": 1,
+          "j_with_tested": 1.6095521548519,
+          "j_without_tested": 0
+        }
+      },
+      "cluster": {
+        "endogeneity": {
+          "statistic": 8.24901671898883,
+          "p_value": 0.00407740817613032,
+          "df": 1,
+          "j_with_tested": 9.51733849771011,
+          "j_without_tested": 1.26832177872129
+        },
+        "orthogonality": {
+          "statistic": 0.976610737832695,
+          "p_value": 0.323036995285231,
+          "df": 1,
+          "j_with_tested": 0.976610737832695,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "scale_variance_mild": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 84.2982230529751,
+          "p_value": 4.25497436365968e-20,
+          "df": 1,
+          "j_with_tested": 86.2132112274333,
+          "j_without_tested": 1.91498817445814
+        },
+        "orthogonality": {
+          "statistic": 1.48241697106157,
+          "p_value": 0.223396747329446,
+          "df": 1,
+          "j_with_tested": 1.48241697106157,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 68.160009616086,
+          "p_value": 1.50752274963459e-16,
+          "df": 1,
+          "j_with_tested": 69.9857445734322,
+          "j_without_tested": 1.82573495734623
+        },
+        "orthogonality": {
+          "statistic": 1.52332749266115,
+          "p_value": 0.217116638073997,
+          "df": 1,
+          "j_with_tested": 1.52332749266115,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 52.6167171938359,
+          "p_value": 4.05423547762162e-13,
+          "df": 1,
+          "j_with_tested": 54.5903555007831,
+          "j_without_tested": 1.97363830694725
+        },
+        "orthogonality": {
+          "statistic": 1.60955215485188,
+          "p_value": 0.20455476674889,
+          "df": 1,
+          "j_with_tested": 1.60955215485188,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "invalid_instrument": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 1.23309533008289,
+          "p_value": 0.266805913550564,
+          "df": 1,
+          "j_with_tested": 30.7723316186027,
+          "j_without_tested": 29.5392362885199
+        },
+        "orthogonality": {
+          "statistic": 29.4695204524029,
+          "p_value": 5.68030213205595e-08,
+          "df": 1,
+          "j_with_tested": 29.4695204524029,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 0.410638902146399,
+          "p_value": 0.521645401895404,
+          "df": 1,
+          "j_with_tested": 24.3968058405247,
+          "j_without_tested": 23.9861669383783
+        },
+        "orthogonality": {
+          "statistic": 23.9956011504812,
+          "p_value": 9.65560479762562e-07,
+          "df": 1,
+          "j_with_tested": 23.9956011504812,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 1.14170788918677,
+          "p_value": 0.285291731014684,
+          "df": 1,
+          "j_with_tested": 22.2423560759239,
+          "j_without_tested": 21.1006481867371
+        },
+        "orthogonality": {
+          "statistic": 21.0220706640984,
+          "p_value": 4.54023006933674e-06,
+          "df": 1,
+          "j_with_tested": 21.0220706640984,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "many_regressors": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 105.479665452179,
+          "p_value": 9.58767574983959e-25,
+          "df": 1,
+          "j_with_tested": 106.545384679968,
+          "j_without_tested": 1.06571922778988
+        },
+        "orthogonality": {
+          "statistic": 0.865251730426207,
+          "p_value": 0.352273193195704,
+          "df": 1,
+          "j_with_tested": 0.865251730426207,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 78.8298267401548,
+          "p_value": 6.76972152853855e-19,
+          "df": 1,
+          "j_with_tested": 79.8202829586414,
+          "j_without_tested": 0.990456218486576
+        },
+        "orthogonality": {
+          "statistic": 0.775626235126086,
+          "p_value": 0.37848213933795,
+          "df": 1,
+          "j_with_tested": 0.775626235126086,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 63.6952127498073,
+          "p_value": 1.4523709728149e-15,
+          "df": 1,
+          "j_with_tested": 64.7529266471511,
+          "j_without_tested": 1.05771389734375
+        },
+        "orthogonality": {
+          "statistic": 0.819299813136188,
+          "p_value": 0.36538496355774,
+          "df": 1,
+          "j_with_tested": 0.819299813136188,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "outlier_regressor": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 60.7648490206944,
+          "p_value": 6.43161485160683e-15,
+          "df": 1,
+          "j_with_tested": 60.8387793971667,
+          "j_without_tested": 0.0739303764723041
+        },
+        "orthogonality": {
+          "statistic": 0.0541667290485074,
+          "p_value": 0.815965272681293,
+          "df": 1,
+          "j_with_tested": 0.0541667290485074,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 58.2064273529734,
+          "p_value": 2.36006737492789e-14,
+          "df": 1,
+          "j_with_tested": 58.2781748325038,
+          "j_without_tested": 0.0717474795303949
+        },
+        "orthogonality": {
+          "statistic": 0.0495032224855317,
+          "p_value": 0.823929968965391,
+          "df": 1,
+          "j_with_tested": 0.0495032224855317,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 47.029442612054,
+          "p_value": 6.99282880839889e-12,
+          "df": 1,
+          "j_with_tested": 47.108076517075,
+          "j_without_tested": 0.0786339050209598
+        },
+        "orthogonality": {
+          "statistic": 0.0587786153846045,
+          "p_value": 0.808436907410003,
+          "df": 1,
+          "j_with_tested": 0.0587786153846045,
+          "j_without_tested": 0
+        }
+      }
+    },
+    "multi_endog": {
+      "baseline": {
+        "classical": {
+          "endog1": {
+            "statistic": 0.10988354192983,
+            "p_value": 0.740276760608525,
+            "df": 1,
+            "j_with_tested": 0.191566694839178,
+            "j_without_tested": 0.0816831529093479
+          },
+          "endog_both": {
+            "statistic": 288.2451143723,
+            "p_value": 2.56075893227044e-63,
+            "df": 2,
+            "j_with_tested": 288.424071379631,
+            "j_without_tested": 0.178957007331033
+          },
+          "orthogonality": {
+            "statistic": 0.0651290717226385,
+            "p_value": 0.798565556755921,
+            "df": 1,
+            "j_with_tested": 0.0651290717226385,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.191566694839178,
+            "p_value": 0.908660858464434,
+            "df": 2,
+            "j_with_tested": 0.191566694839178,
+            "j_without_tested": 0
+          }
+        },
+        "robust": {
+          "endog1": {
+            "statistic": 0.105565403154847,
+            "p_value": 0.745250475220593,
+            "df": 1,
+            "j_with_tested": 0.180505160978279,
+            "j_without_tested": 0.0749397578234323
+          },
+          "endog_both": {
+            "statistic": 138.607258008237,
+            "p_value": 7.97657306458096e-31,
+            "df": 2,
+            "j_with_tested": 138.803339273327,
+            "j_without_tested": 0.19608126509055
+          },
+          "orthogonality": {
+            "statistic": 0.0602657388036872,
+            "p_value": 0.806076421476474,
+            "df": 1,
+            "j_with_tested": 0.0602657388036872,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.180505160978279,
+            "p_value": 0.913700373235948,
+            "df": 2,
+            "j_with_tested": 0.180505160978279,
+            "j_without_tested": 0
+          }
+        },
+        "hac": {
+          "endog1": {
+            "statistic": 0.106055602801772,
+            "p_value": 0.744680255117025,
+            "df": 1,
+            "j_with_tested": 0.185581383859735,
+            "j_without_tested": 0.079525781057963
+          },
+          "endog_both": {
+            "statistic": 90.8935062638247,
+            "p_value": 1.83115831927195e-20,
+            "df": 2,
+            "j_with_tested": 91.0857248260444,
+            "j_without_tested": 0.192218562219684
+          },
+          "orthogonality": {
+            "statistic": 0.0638746170137668,
+            "p_value": 0.800473554905621,
+            "df": 1,
+            "j_with_tested": 0.0638746170137668,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.185581383859735,
+            "p_value": 0.911384240410231,
+            "df": 2,
+            "j_with_tested": 0.185581383859735,
+            "j_without_tested": 0
+          }
+        },
+        "cluster": {
+          "endog1": {
+            "statistic": 0.103265847255091,
+            "p_value": 0.747945140276423,
+            "df": 1,
+            "j_with_tested": 0.343464839316011,
+            "j_without_tested": 0.24019899206092
+          },
+          "endog_both": {
+            "statistic": 9.38115899289006,
+            "p_value": 0.00918136404649628,
+            "df": 2,
+            "j_with_tested": 9.5473919376026,
+            "j_without_tested": 0.166232944712542
+          },
+          "orthogonality": {
+            "statistic": 0.216744674128577,
+            "p_value": 0.641531586959125,
+            "df": 1,
+            "j_with_tested": 0.216744674128577,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.343464839316011,
+            "p_value": 0.842204500388831,
+            "df": 2,
+            "j_with_tested": 0.343464839316011,
+            "j_without_tested": 0
+          }
+        }
+      },
+      "just_identified": {
+        "classical": {
+          "endog1": {
+            "statistic": 1.38177006469262,
+            "p_value": 0.239799870924796,
+            "df": 1,
+            "j_with_tested": 1.38177006469262,
+            "j_without_tested": 0
+          },
+          "endog_both": {
+            "statistic": 293.191005256748,
+            "p_value": 2.15964384871025e-64,
+            "df": 2,
+            "j_with_tested": 293.191005256748,
+            "j_without_tested": 0
+          }
+        },
+        "robust": {
+          "endog1": {
+            "statistic": 1.24872815432924,
+            "p_value": 0.263795531995187,
+            "df": 1,
+            "j_with_tested": 1.24872815432924,
+            "j_without_tested": 0
+          },
+          "endog_both": {
+            "statistic": 124.164805284616,
+            "p_value": 1.09132752554585e-27,
+            "df": 2,
+            "j_with_tested": 124.164805284616,
+            "j_without_tested": 0
+          }
+        },
+        "hac": {
+          "endog1": {
+            "statistic": 1.23884435038611,
+            "p_value": 0.265693891968894,
+            "df": 1,
+            "j_with_tested": 1.23884435038611,
+            "j_without_tested": 0
+          },
+          "endog_both": {
+            "statistic": 83.7396654241016,
+            "p_value": 6.54881459126708e-19,
+            "df": 2,
+            "j_with_tested": 83.7396654241016,
+            "j_without_tested": 0
+          }
+        }
+      },
+      "weak_instruments": {
+        "classical": {
+          "endog1": {
+            "statistic": 0.067712342849704,
+            "p_value": 0.794697198343661,
+            "df": 1,
+            "j_with_tested": 1.96006573172499,
+            "j_without_tested": 1.89235338887528
+          },
+          "endog_both": {
+            "statistic": 52.6342383826778,
+            "p_value": 3.72066317255871e-12,
+            "df": 2,
+            "j_with_tested": 58.4166360936093,
+            "j_without_tested": 5.78239771093156
+          },
+          "orthogonality": {
+            "statistic": 2.22310243818687,
+            "p_value": 0.135959607433245,
+            "df": 1,
+            "j_with_tested": 2.22310243818687,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 1.96006573172499,
+            "p_value": 0.375298764131129,
+            "df": 2,
+            "j_with_tested": 1.96006573172499,
+            "j_without_tested": 0
+          }
+        },
+        "robust": {
+          "endog1": {
+            "statistic": 0.0536714165952072,
+            "p_value": 0.816793617032509,
+            "df": 1,
+            "j_with_tested": 1.78915876907353,
+            "j_without_tested": 1.73548735247832
+          },
+          "endog_both": {
+            "statistic": 40.8996872179126,
+            "p_value": 1.31445512741953e-09,
+            "df": 2,
+            "j_with_tested": 47.2071815332604,
+            "j_without_tested": 6.30749431534779
+          },
+          "orthogonality": {
+            "statistic": 2.02163129199649,
+            "p_value": 0.155072469048375,
+            "df": 1,
+            "j_with_tested": 2.02163129199649,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 1.78915876907353,
+            "p_value": 0.408779501465191,
+            "df": 2,
+            "j_with_tested": 1.78915876907353,
+            "j_without_tested": 0
+          }
+        },
+        "hac": {
+          "endog1": {
+            "statistic": 0.0743707151278965,
+            "p_value": 0.785076187930148,
+            "df": 1,
+            "j_with_tested": 1.82813324947412,
+            "j_without_tested": 1.75376253434622
+          },
+          "endog_both": {
+            "statistic": 35.8740320541224,
+            "p_value": 1.62200772268147e-08,
+            "df": 2,
+            "j_with_tested": 42.6521587923781,
+            "j_without_tested": 6.77812673825574
+          },
+          "orthogonality": {
+            "statistic": 2.08721366740279,
+            "p_value": 0.148536764849727,
+            "df": 1,
+            "j_with_tested": 2.08721366740279,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 1.82813324947412,
+            "p_value": 0.400890632919217,
+            "df": 2,
+            "j_with_tested": 1.82813324947412,
+            "j_without_tested": 0
+          }
+        }
+      },
+      "heteroskedastic": {
+        "classical": {
+          "endog1": {
+            "statistic": 1.04314340386503,
+            "p_value": 0.307091524627556,
+            "df": 1,
+            "j_with_tested": 1.06526387468053,
+            "j_without_tested": 0.0221204708155074
+          },
+          "endog_both": {
+            "statistic": 190.523934519756,
+            "p_value": 4.24867277475882e-42,
+            "df": 2,
+            "j_with_tested": 190.563311577152,
+            "j_without_tested": 0.0393770573964366
+          },
+          "orthogonality": {
+            "statistic": 0.0115791165501566,
+            "p_value": 0.914307996569554,
+            "df": 1,
+            "j_with_tested": 0.0115791165501566,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 1.06526387468053,
+            "p_value": 0.587057835153651,
+            "df": 2,
+            "j_with_tested": 1.06526387468053,
+            "j_without_tested": 0
+          }
+        },
+        "robust": {
+          "endog1": {
+            "statistic": 0.894569766511496,
+            "p_value": 0.344241941545918,
+            "df": 1,
+            "j_with_tested": 0.912958597954631,
+            "j_without_tested": 0.0183888314431343
+          },
+          "endog_both": {
+            "statistic": 117.618814486251,
+            "p_value": 2.88004285636632e-26,
+            "df": 2,
+            "j_with_tested": 117.657533336602,
+            "j_without_tested": 0.0387188503518828
+          },
+          "orthogonality": {
+            "statistic": 0.010226016552008,
+            "p_value": 0.919452210237767,
+            "df": 1,
+            "j_with_tested": 0.010226016552008,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.912958597954631,
+            "p_value": 0.633510123565227,
+            "df": 2,
+            "j_with_tested": 0.912958597954631,
+            "j_without_tested": 0
+          }
+        },
+        "hac": {
+          "endog1": {
+            "statistic": 0.853028073494713,
+            "p_value": 0.35569711951979,
+            "df": 1,
+            "j_with_tested": 0.873067380423695,
+            "j_without_tested": 0.0200393069289823
+          },
+          "endog_both": {
+            "statistic": 80.258295734381,
+            "p_value": 3.7336406630415e-18,
+            "df": 2,
+            "j_with_tested": 80.3025124425676,
+            "j_without_tested": 0.044216708186647
+          },
+          "orthogonality": {
+            "statistic": 0.0106265148996059,
+            "p_value": 0.917895518813518,
+            "df": 1,
+            "j_with_tested": 0.0106265148996059,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.873067380423695,
+            "p_value": 0.646272724454446,
+            "df": 2,
+            "j_with_tested": 0.873067380423695,
+            "j_without_tested": 0
+          }
+        }
+      },
+      "autocorrelated": {
+        "classical": {
+          "endog1": {
+            "statistic": 0.196818154439133,
+            "p_value": 0.657301491860094,
+            "df": 1,
+            "j_with_tested": 0.265016030486775,
+            "j_without_tested": 0.0681978760476415
+          },
+          "endog_both": {
+            "statistic": 129.012249088677,
+            "p_value": 9.66820969778655e-29,
+            "df": 2,
+            "j_with_tested": 129.116742231551,
+            "j_without_tested": 0.104493142873825
+          },
+          "orthogonality": {
+            "statistic": 0.0835556677606932,
+            "p_value": 0.772535483881079,
+            "df": 1,
+            "j_with_tested": 0.0835556677606932,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.265016030486775,
+            "p_value": 0.875895913559138,
+            "df": 2,
+            "j_with_tested": 0.265016030486775,
+            "j_without_tested": 0
+          }
+        },
+        "robust": {
+          "endog1": {
+            "statistic": 0.177674336043307,
+            "p_value": 0.673379544507197,
+            "df": 1,
+            "j_with_tested": 0.243963466878465,
+            "j_without_tested": 0.066289130835158
+          },
+          "endog_both": {
+            "statistic": 93.6740181112983,
+            "p_value": 4.55979605263083e-21,
+            "df": 2,
+            "j_with_tested": 93.7852022648355,
+            "j_without_tested": 0.111184153537296
+          },
+          "orthogonality": {
+            "statistic": 0.0819817619949213,
+            "p_value": 0.774629537885596,
+            "df": 1,
+            "j_with_tested": 0.0819817619949213,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.243963466878465,
+            "p_value": 0.885164537266762,
+            "df": 2,
+            "j_with_tested": 0.243963466878465,
+            "j_without_tested": 0
+          }
+        },
+        "hac": {
+          "endog1": {
+            "statistic": 0.151902673960002,
+            "p_value": 0.696723685847128,
+            "df": 1,
+            "j_with_tested": 0.225015797974287,
+            "j_without_tested": 0.0731131240142857
+          },
+          "endog_both": {
+            "statistic": 63.2795710671285,
+            "p_value": 1.81558143876623e-14,
+            "df": 2,
+            "j_with_tested": 63.3938525087013,
+            "j_without_tested": 0.114281441572808
+          },
+          "orthogonality": {
+            "statistic": 0.089334476764131,
+            "p_value": 0.765024941528287,
+            "df": 1,
+            "j_with_tested": 0.089334476764131,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.225015797974287,
+            "p_value": 0.893590288622437,
+            "df": 2,
+            "j_with_tested": 0.225015797974287,
+            "j_without_tested": 0
+          }
+        }
+      },
+      "small_n": {
+        "classical": {
+          "endog1": {
+            "statistic": 1.26339056651313,
+            "p_value": 0.261010277051629,
+            "df": 1,
+            "j_with_tested": 1.26829912088366,
+            "j_without_tested": 0.00490855437053135
+          },
+          "endog_both": {
+            "statistic": 27.4232102185861,
+            "p_value": 1.10949554567791e-06,
+            "df": 2,
+            "j_with_tested": 27.4340329308209,
+            "j_without_tested": 0.010822712234828
+          },
+          "orthogonality": {
+            "statistic": 0.00433575312998847,
+            "p_value": 0.94750008587162,
+            "df": 1,
+            "j_with_tested": 0.00433575312998847,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 1.26829912088366,
+            "p_value": 0.530386358111692,
+            "df": 2,
+            "j_with_tested": 1.26829912088366,
+            "j_without_tested": 0
+          }
+        },
+        "robust": {
+          "endog1": {
+            "statistic": 1.02244681718078,
+            "p_value": 0.311939319533784,
+            "df": 1,
+            "j_with_tested": 1.02646197882823,
+            "j_without_tested": 0.00401516164744496
+          },
+          "endog_both": {
+            "statistic": 13.2645406872221,
+            "p_value": 0.0013171692619832,
+            "df": 2,
+            "j_with_tested": 13.2744621473638,
+            "j_without_tested": 0.00992146014168561
+          },
+          "orthogonality": {
+            "statistic": 0.00459310011628211,
+            "p_value": 0.945966803597678,
+            "df": 1,
+            "j_with_tested": 0.00459310011628211,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 1.02646197882823,
+            "p_value": 0.598558514955441,
+            "df": 2,
+            "j_with_tested": 1.02646197882823,
+            "j_without_tested": 0
+          }
+        },
+        "hac": {
+          "endog1": {
+            "statistic": 0.957527708130403,
+            "p_value": 0.327810556946896,
+            "df": 1,
+            "j_with_tested": 0.961456783431982,
+            "j_without_tested": 0.00392907530157863
+          },
+          "endog_both": {
+            "statistic": 9.06251016398507,
+            "p_value": 0.0107671539278122,
+            "df": 2,
+            "j_with_tested": 9.07118161831916,
+            "j_without_tested": 0.00867145433409301
+          },
+          "orthogonality": {
+            "statistic": 0.0033958101425248,
+            "p_value": 0.953530711736188,
+            "df": 1,
+            "j_with_tested": 0.0033958101425248,
+            "j_without_tested": 0
+          },
+          "endog1_and_orthogonality": {
+            "statistic": 0.961456783431982,
+            "p_value": 0.618332839218863,
+            "df": 2,
+            "j_with_tested": 0.961456783431982,
+            "j_without_tested": 0
+          }
+        }
+      }
+    },
+    "no_intercept": {
+      "baseline": {
+        "classical": {
+          "endogeneity": {
+            "statistic": 87.0750745320809,
+            "p_value": 1.04479009284417e-20,
+            "df": 1,
+            "j_with_tested": 87.3560786165285,
+            "j_without_tested": 0.281004084447634
+          },
+          "orthogonality": {
+            "statistic": 0.190279200922643,
+            "p_value": 0.662684342568851,
+            "df": 1,
+            "j_with_tested": 0.190279200922643,
+            "j_without_tested": 0
+          }
+        },
+        "robust": {
+          "endogeneity": {
+            "statistic": 68.8680830488284,
+            "p_value": 1.05274864576164e-16,
+            "df": 1,
+            "j_with_tested": 69.0968903240399,
+            "j_without_tested": 0.228807275211584
+          },
+          "orthogonality": {
+            "statistic": 0.168639644347768,
+            "p_value": 0.681323639299997,
+            "df": 1,
+            "j_with_tested": 0.168639644347768,
+            "j_without_tested": 0
+          }
+        },
+        "hac": {
+          "endogeneity": {
+            "statistic": 54.7928369718039,
+            "p_value": 1.33928008572271e-13,
+            "df": 1,
+            "j_with_tested": 55.0285404611419,
+            "j_without_tested": 0.235703489338067
+          },
+          "orthogonality": {
+            "statistic": 0.186928417655785,
+            "p_value": 0.665485459575396,
+            "df": 1,
+            "j_with_tested": 0.186928417655785,
+            "j_without_tested": 0
+          }
+        }
+      }
+    }
+  },
+  "wooldridge": {
+    "card": {
+      "classical": {
+        "endogeneity": {
+          "statistic": 3.87381577325133,
+          "p_value": 0.0490448978269501,
+          "df": 1,
+          "j_with_tested": 7.06635040084523,
+          "j_without_tested": 3.19253462759389
+        },
+        "orthogonality": {
+          "statistic": 2.6508122448299,
+          "p_value": 0.103497001442218,
+          "df": 1,
+          "j_with_tested": 2.6508122448299,
+          "j_without_tested": 0
+        }
+      },
+      "robust": {
+        "endogeneity": {
+          "statistic": 3.7327537539868,
+          "p_value": 0.0533553613339278,
+          "df": 1,
+          "j_with_tested": 6.95054163063494,
+          "j_without_tested": 3.21778787664813
+        },
+        "orthogonality": {
+          "statistic": 2.65321123811818,
+          "p_value": 0.103340947623107,
+          "df": 1,
+          "j_with_tested": 2.65321123811818,
+          "j_without_tested": 0
+        }
+      },
+      "hac": {
+        "endogeneity": {
+          "statistic": 3.38815377439518,
+          "p_value": 0.0656664386792422,
+          "df": 1,
+          "j_with_tested": 6.28771594456966,
+          "j_without_tested": 2.89956217017448
+        },
+        "orthogonality": {
+          "statistic": 2.38322367196919,
+          "p_value": 0.122644229488517,
+          "df": 1,
+          "j_with_tested": 2.38322367196919,
+          "j_without_tested": 0
+        }
+      },
+      "cluster": {
+        "endogeneity": {
+          "statistic": 0.44367724575789,
+          "p_value": 0.505352924571562,
+          "df": 1,
+          "j_with_tested": 2.93025270390966,
+          "j_without_tested": 2.48657545815177
+        },
+        "orthogonality": {
+          "statistic": 3.14076281350914,
+          "p_value": 0.076358087751117,
+          "df": 1,
+          "j_with_tested": 3.14076281350914,
+          "j_without_tested": 0
+        }
+      }
+    }
+  },
+  "_meta": {
+    "method": "iv_c_statistic",
+    "purpose": "linearmodelsの`c_stat`・`IVGMM`の部品による組み直し・numpyのオラクルを主リファレンスとするC統計量（difference-in-Hansen）の、R（momentfit）の部品によるクロスチェック用",
+    "generated_at": "2026-11-08T10:00:17.895691+00:00",
+    "r_version": "4.5.3",
+    "momentfit_version": "1.0",
+    "note": "RにはC統計量を返すパッケージが無いため、momentfitのモーメント共分散・GMM推定・Hansen Jを使い、Sの部分行列を重みにしてJの差を取る手順は`run_momentfit_c_stat.R`が組む（独立性は部品の範囲）。各エントリは[重み][検定]。重みはclassical/robust/hac（ラグ2、時間順は行順）/cluster（baselineは疑似グループと不均衡グループ、cardは居住地域）。statistic・p_value・df・j_with_tested・j_without_testedを持つ。classicalのSは非中心化の残差分散（momentfitのiid共分散は中心化・n-1なので使わない）。検定の定義は`benchmark/iv/constants.py`の`C_STAT_*`。"
+  }
+}

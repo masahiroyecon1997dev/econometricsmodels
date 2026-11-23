@@ -5,7 +5,7 @@ FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb22
 
 # ベースイメージはタグだけでなくダイジェストでも固定する(同じタグの中身が差し替わっても
 # 検知できる)。ダイジェストの更新はDependabot(docker)が行う。
-FROM python:3.14-slim-bookworm@sha256:945c2676dc2b18e0c1f16879244122c57c0ffede60006bf3df159c507a31bcae
+FROM python:3.15-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9
 
 ARG USERNAME=vscode
 ARG USER_UID=1000

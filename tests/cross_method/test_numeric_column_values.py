@@ -4,7 +4,7 @@
 ループもある。先頭の列だけを調べるループや、特定の列だけ検査を飛ばす経路を見逃さない
 ように、各手法が使う数値列の全てに、nullとNaNと±infを入れて確認する（`fit()`の
 `y`・`x`・IVの各変数、`predict()`・`augment()`の`new_data`の全ての`x`列）。
-キー列（`cluster`・`entity`・`time`）は`test_key_columns.py`が担う。
+キー列（`cluster`・`effects`・`dk_time`）は`test_key_columns.py`が担う。
 """
 
 from __future__ import annotations
@@ -12,14 +12,16 @@ from __future__ import annotations
 import polars as pl
 import pytest
 from _dtype_helpers import make_frame
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     Logit,
     Probit,
     Tobit,
@@ -69,7 +71,8 @@ def _assert_rejected(
         expected = {
             "code": ErrorCode.COLUMN_NON_FINITE,
             "row": row,
-            "value": pytest.approx(bad, nan_ok=True),
+            "value": approx_param(bad),
+            "count": 1,
         }
     with raises_error(**expected, **where):
         call()
@@ -114,11 +117,39 @@ FIT_CASES = {
         ],
     ),
     "FE": (
-        lambda d: FE(d, "y", ["x1", "x2"], "entity").fit(),
+        lambda d: FE(d, "y", ["x1", "x2"], ["entity"]).fit(),
         [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
+    "FEIV": (
+        lambda d: FEIV(d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]).fit(),
+        [
+            ("y", "y"),
+            ("x2", "x_exog"),
+            ("x1", "x_endog"),
+            ("z", "instruments"),
+            ("z2", "instruments"),
+        ],
+    ),
+    "FEIV_GMM": (
+        lambda d: FEIV(
+            d,
+            "y",
+            ["x2"],
+            ["x1"],
+            ["z", "z2"],
+            ["entity"],
+            options=FEIVOptions(estimator="gmm"),
+        ).fit(),
+        [
+            ("y", "y"),
+            ("x2", "x_exog"),
+            ("x1", "x_endog"),
+            ("z", "instruments"),
+            ("z2", "instruments"),
+        ],
+    ),
     "RE": (
-        lambda d: RE(d, "y", ["x1", "x2"], "entity").fit(),
+        lambda d: RE(d, "y", ["x1", "x2"], ["entity"]).fit(),
         [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
 }
@@ -209,3 +240,36 @@ def test_new_data_with_valid_values_is_accepted(frame):
         res = fit(frame)
         assert len(res.predict(new_data=new_data)) == 5
         assert res.augment(new_data=new_data).height == 5
+
+
+# ── 非有限値の件数 ────────────────────────────────────────────────────
+
+
+def test_non_finite_error_counts_every_non_finite_value_of_the_column(frame):
+    """`count`は列内の非有限値の全件数で、`row`・`value`は最初の1件。"""
+    bad = frame["x1"].cast(pl.Float64)
+    bad = bad.scatter(2, float("inf")).scatter(4, float("nan"))
+    bad = bad.scatter(6, float("-inf"))
+    df = frame.with_columns(bad.alias("x1"))
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        argument="x",
+        data_argument="data",
+        row=2,
+        value="inf",
+        count=3,
+    ):
+        OLS(df, "y", ["x1", "x2"]).fit()
+
+
+def test_non_finite_error_counts_only_the_first_bad_column(frame):
+    """列をまたいでは数えない。最初に失敗した列の件数だけを報告する。"""
+    df = frame.with_columns(
+        frame["x1"].cast(pl.Float64).scatter(1, float("nan")).alias("x1"),
+        frame["x2"].cast(pl.Float64).scatter([0, 3], float("inf")).alias("x2"),
+    )
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE, column="x1", row=1, count=1
+    ):
+        OLS(df, "y", ["x1", "x2"]).fit()

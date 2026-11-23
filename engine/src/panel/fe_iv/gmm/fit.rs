@@ -1,0 +1,313 @@
+//! `FeGmmEstimator::fit`の本体。パイプラインの契約はモジュールdoc（`gmm.rs`）が正本。
+//!
+//! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く。
+
+use super::hansen_j::fe_hansen_j;
+use super::{FeGmmEstimator, FeGmmType};
+use crate::panel::common::{
+    PanelCovType, PanelError, PanelMoment, PanelMomentInput, panel_moment_covariance,
+    validate_confidence_level,
+};
+use crate::panel::fe::{
+    FeAbsorption, FeCovType, FeEffects, FeEstimator, fe_r_squared_between, fe_r_squared_overall,
+};
+use crate::panel::fe_iv::common::{
+    FeIvInput, FirstStageArgs, FirstStageWithin, FirstStages, WithinPrepared, WuHausmanContext,
+    effect_names, fe_wu_hausman_test, mat_from_columns, pick_absorbed, prepare_within,
+    run_first_stages, structural_fit_is_perfect,
+};
+use crate::shared::error::CommonError;
+use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
+use crate::shared::gmm_weight::validate_weight_type;
+use crate::shared::inference::{InferenceTable, inference_table};
+use crate::shared::normal::StandardNormal;
+use crate::shared::wald::wald_chi2_test;
+
+/// [`FeGmmEstimator::fit_with_first_stages`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
+///
+/// 第一段階の`FeEstimator`は、GMMの点推定・共分散・Waldの後に内生変数ごとに推定し、部分F統計量と
+/// Wu-Hausmanに要る量を取り出した直後に`consume`へ渡して手放す（FE-2SLSと同じ。`common/first_stage.rs`）。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fit_fe_gmm<T>(
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: FeGmmType,
+    raise_on_non_convergence: bool,
+    cov_type: FeCovType,
+    confidence_level: f64,
+    absorption: &FeAbsorption,
+    consume: impl FnMut(&str, FeEstimator) -> T,
+) -> Result<(FeGmmEstimator, Vec<T>), PanelError> {
+    // faerのグローバル並列度を`Par::Seq`に固定する（`FeEstimator::fit`と同じ理由）。
+    crate::shared::parallelism::ensure_serial();
+
+    // 吸収する次元の解決を先に評価する（`FeEstimator::fit`・`FeTwoSlsEstimator::fit`と同じ順序。2-wayで
+    // `time`が無い入力などを、設定値の検査より先に弾く）。
+    effects.levels(input.index().effect_codes())?;
+    // 設定値は、データを見る検査より先に、`confidence_level` → `max_iter` → `tol` →
+    // `gmm_max_iter` → `gmm_tol`の順に調べる（前の3つは`prepare_within`も同じ順で調べるので、ここでの検査と
+    // 重複するが、反復の設定を`prepare_within`の前に挟むために先に行う）。
+    validate_confidence_level(confidence_level)?;
+    absorption.validate()?;
+    // 共有の反復コアが受け取る型に直して検証する。`FeGmmType`は`Hac`の重みを持たない。
+    let shared_type = gmm_type.to_gmm_type();
+    shared_type.validate()?;
+    let weight_type = shared_type.weight_type();
+
+    let n = input.nobs();
+    let (k_exog, k_instruments) = (input.k_exog(), input.k_instruments());
+    let k = input.k();
+    let l = k_exog + k_instruments;
+
+    let WithinPrepared {
+        levels,
+        tilde,
+        absorbed,
+        noise,
+        n_groups,
+        neffects,
+        df_model,
+        exog_range,
+        endog_range,
+        instrument_range,
+    } = prepare_within(
+        &input,
+        effects,
+        absorption,
+        Some(confidence_level),
+        false,
+        false,
+    )?;
+
+    // `weight_type=Cluster`のグループ（検証して返す）。丁度識別の閾値の違いは`validate_weight_type`が持つ。
+    let weight_cluster_codes = match weight_type {
+        Some(weight_type) => validate_weight_type(weight_type, n, k, l)?,
+        None => None,
+    };
+
+    // Z̃ = [x̃_exog, z̃]（全操作変数）、X̃ = [x̃_exog, x̃_endog]（実際の内生変数）、ỹ。
+    let column = |range: &std::ops::Range<usize>| -> Vec<&[f64]> {
+        tilde[range.clone()].iter().map(Vec::as_slice).collect()
+    };
+    let (exog, endog, instruments) = (
+        column(&exog_range),
+        column(&endog_range),
+        column(&instrument_range),
+    );
+    let z = mat_from_columns(n, &[exog.as_slice(), instruments.as_slice()].concat());
+    let x = mat_from_columns(n, &[exog.as_slice(), endog.as_slice()].concat());
+    let y = mat_from_columns(n, &[tilde[0].as_slice()]);
+
+    let mut param_names = input.x_exog_names().to_vec();
+    param_names.extend(input.x_endog_names().iter().cloned());
+
+    // 初期推定: W₀ = (Z̃'Z̃)⁻¹（2SLSと同じ重み）。
+    let GmmInitialStep {
+        ztz,
+        solution: solution0,
+        beta: beta0,
+        residuals: residuals0,
+        classical_s,
+    } = gmm_initial_step(&z, &x, &y)?;
+
+    // 初期推定の残差が丸め誤差の範囲で0なら完全適合。重み行列`S`が0になって後段の逆行列が
+    // 特異になる前に、原因が分かるエラーで止める。
+    let sst_within: f64 = tilde[0].iter().map(|v| v * v).sum();
+    let ssr0: f64 = (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum();
+    if structural_fit_is_perfect(&input, &beta0, ssr0, sst_within, noise) {
+        // GMMに第二段階は無いので、`stage`を付けずに返す（`iv::gmm`と同じ）。
+        return Err(CommonError::PerfectFit.into());
+    }
+
+    // 方式（`gmm_type`）に応じた回数の再推定。
+    let GmmIteration {
+        beta,
+        solution,
+        residuals,
+        s_used,
+        n_iter,
+        converged,
+        hac_lags_used: _,
+    } = gmm_iterate(
+        &shared_type,
+        weight_type,
+        weight_cluster_codes,
+        &z,
+        &x,
+        &y,
+        &ztz,
+        solution0,
+        beta0,
+        residuals0,
+        classical_s,
+    )?;
+
+    if !converged && raise_on_non_convergence {
+        return Err(CommonError::GmmNonConvergence {
+            n_iter: n_iter as usize,
+        }
+        .into());
+    }
+    // 点推定に使った行列は、以降の共分散・診断では使わない（共分散は`solution`の白色化した`Z̃`から作る）。
+    // 第一段階を回す前に手放して、ピークメモリを増やさない。
+    drop((z, x, y, ztz));
+
+    // Hansen J過剰識別検定（内生変数が無い・丁度識別のときは検定しない）。`Classical`・`OneStep`の`S`は
+    // `σ̂²Z̃'Z̃`なので、`σ̂²`の分母を`n − neffects`に直す（`hansen_j.rs`）。
+    let (k_endog, k_instruments) = (input.k_endog(), input.k_instruments());
+    let hansen_j = if k_endog > 0 && k_instruments > k_endog {
+        let homoskedastic_weight = gmm_type.has_homoskedastic_weight();
+        Some(fe_hansen_j(
+            &solution,
+            &residuals,
+            homoskedastic_weight,
+            neffects,
+            k_instruments - k_endog,
+        )?)
+    } else {
+        None
+    };
+
+    // 標準誤差。`Ω̂`は`cov_type`ごとの小標本補正込み（`FeTwoSlsEstimator`と同じ`df_resid`・`K`）。
+    let df_resid = n - df_model;
+    let residual_values: Vec<f64> = (0..n).map(|i| *residuals.get(i, 0)).collect();
+    let groups = input.index().effect_codes();
+    // `Ω̂`は白色化した`Z̃ = Z L⁻ᵀ`から組み立てて、直接`Ω̃ = L⁻¹Ω̂L⁻ᵀ`を得る（`iv::gmm`と同じ。
+    // HC2・HC3のレバレッジ`z_i'(Z'Z)⁻¹z_i`は`Z`の列の線形変換で変わらない）。
+    let z_tilde = solution.z_tilde();
+    // `Z̃'Z̃`は古典的な`Ω̂`にだけ使う（他では作らない。HC2・HC3のレバレッジは`Z̃`のQRから）。
+    let ztz_tilde = if matches!(cov_type, PanelCovType::Classical) {
+        z_tilde.transpose() * z_tilde
+    } else {
+        faer::Mat::zeros(0, 0)
+    };
+    let PanelMoment {
+        omega: omega_tilde,
+        dk_bandwidth_used,
+    } = panel_moment_covariance(
+        &cov_type,
+        &PanelMomentInput {
+            z: z_tilde,
+            ztz: &ztz_tilde,
+            residuals: &residual_values,
+            df_resid,
+            df_model,
+            n_slopes: k,
+            entity: &groups[0],
+            levels: &levels,
+        },
+    )?;
+    let (cov_params, wald_coordinates) = solution.covariance(&omega_tilde);
+
+    let normal = StandardNormal;
+    let InferenceTable {
+        std_errors,
+        test_stats,
+        p_values,
+        conf_lower,
+        conf_upper,
+    } = inference_table(&beta, &cov_params, &normal, confidence_level);
+    // `k = 0`（`x_exog`も`x_endog`も無い）はバインディングが拒否するので、通常は`Some`。
+    let wald = if k == 0 {
+        None
+    } else {
+        Some(
+            wald_chi2_test(&wald_coordinates.coordinates, &wald_coordinates.meat, 0, k).map_err(
+                |source| PanelError::FTestFailed {
+                    source: source.into(),
+                },
+            )?,
+        )
+    };
+
+    // 共分散・Waldに使った行列（白色化した`Z̃`を持つ`solution`、`Ω̃`、直交座標）は、以降の第一段階・診断では
+    // 使わない。第一段階を回す前に手放して、ピークメモリを増やさない。
+    drop((solution, omega_tilde, wald_coordinates, ztz_tilde));
+
+    // R²は構造残差ベース。between・overallは変換前の`y`と実際の`X`で`FeEstimator`と同じ式。
+    let ssr: f64 = residual_values.iter().map(|r| r * r).sum();
+    let mut structural_x: Vec<Vec<f64>> = input.x_exog().to_vec();
+    structural_x.extend(input.x_endog().iter().cloned());
+    let r_squared_within = 1.0 - ssr / sst_within;
+    let r_squared_between = fe_r_squared_between(input.y(), &structural_x, &beta, &groups[0]);
+    let r_squared_overall = fe_r_squared_overall(input.y(), &structural_x, &beta);
+    drop((structural_x, residual_values));
+
+    // 第一段階と、第一段階だけに依存する診断（弱操作変数・Wu-Hausman）。GMMの点推定・共分散・Waldの後に
+    // 回す（GMMのエラーを先に返す。Wu-Hausmanは構造式のエラーが補助回帰のエラーに隠れないよう最後）。
+    let effect_names = effect_names(&input);
+    let FirstStages {
+        consumed,
+        weak_instrument_f,
+        summaries: mut first_stage_summaries,
+    } = run_first_stages(
+        &FirstStageArgs {
+            input: &input,
+            effects,
+            cov_type: &cov_type,
+            confidence_level,
+            effect_names: &effect_names,
+            tilde: &tilde,
+            absorbed: &absorbed,
+            noise,
+            neffects,
+            exog_range: &exog_range,
+            instrument_range: &instrument_range,
+        },
+        consume,
+    )?;
+    let wu_hausman = fe_wu_hausman_test(WuHausmanContext {
+        input: &input,
+        effects,
+        cov_type: &cov_type,
+        confidence_level,
+        groups,
+        effect_names: &effect_names,
+        tilde: &tilde,
+        first_stages: &mut first_stage_summaries,
+        noise,
+    })?;
+    drop(first_stage_summaries);
+    // 弱操作変数診断（Cragg-Donald・Kleibergen-Paap・有効F）が使う、第一段階のwithin変換済みの行列。
+    let first_stage_within =
+        FirstStageWithin::from_tilde(n, &tilde, &exog_range, &endog_range, &instrument_range);
+    drop(tilde);
+    let structural_absorbed = pick_absorbed(&absorbed, 0, 1..1 + k);
+    drop(absorbed);
+
+    let estimator = FeGmmEstimator {
+        input,
+        effects,
+        gmm_type,
+        param_names,
+        params: beta,
+        residuals,
+        s_used,
+        n_iter,
+        converged,
+        df_model,
+        df_resid,
+        n_groups,
+        cov_type,
+        dk_bandwidth_used,
+        std_errors,
+        cov_params,
+        test_stats,
+        p_values,
+        conf_lower,
+        conf_upper,
+        wald,
+        r_squared_within,
+        r_squared_between,
+        r_squared_overall,
+        hansen_j,
+        first_stage_within,
+        weak_instrument_f,
+        wu_hausman,
+        absorbed: structural_absorbed,
+    };
+    Ok((estimator, consumed))
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,7 +1,7 @@
 //! `augment()`（ソースデータに予測値の列を1列付加したDataFrameを返す）の共通処理。
 //!
-//! OLS/WLS/Logit/Probit/Tobitの`augment()`が、列名衝突の検査→列の付加→`DataFrame`化を
-//! 同じ手順で重複して書いていたため、ここに集約した。
+//! OLS/WLS/Logit/Probit/Tobitの`augment()`に共通する、列名衝突の検査→列の付加→
+//! `DataFrame`化の手順をここに置く。
 
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use polars::prelude::{NamedFrom, Series};

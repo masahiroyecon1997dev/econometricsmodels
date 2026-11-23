@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import polars as pl
@@ -32,6 +31,7 @@ from _assertions import (
     assert_inference_close,
 )
 from _constants import DATA_DIR, MARGEFF_AT
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _nonlinear_helpers import assert_margeff_names, slope_param_names
 from econometricsmodels import Tobit, TobitOptions
@@ -92,7 +92,7 @@ _CLUSTER_GROUP_BUILDERS = {
 
 
 def load_fixtures(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return load_fixtures_with_cov(path)
 
 
 def _load_dataset(scenario: str) -> tuple[pl.DataFrame, str]:

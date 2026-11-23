@@ -1,7 +1,6 @@
 //! REの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::re`（Swamy-Arora分散成分推定・準偏差変換・`cov_type`対応・ハウスマン検定）
-//! を呼び出すところまでの一連の処理（データ抽出・pyclass定義、
-//! `ReEstimator::fit`への実際の配線・`#[pymodule]`登録を段階的に実装した）。
+//! を呼び出すところまでの一連の処理（データ抽出・pyclass定義、`ReEstimator::fit`への配線）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -11,31 +10,19 @@
 //! 公開API（`REOptions`/`REResult`）のdocコメントと、`ValidationError`のメッセージ文字列は
 //! 英語。それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 //!
-//! ## 実装フェーズの分割方針（FE・IV・Logitと同じ3段階、`engine_pybind/src/panel/CLAUDE.md`
-//! 「実装フェーズの分割方針」参照）
-//!
-//! 1. **データ抽出・pyclass定義（完了）**: `REOptions`/`REResult`のpyclass定義、
-//!    列抽出・バリデーション・`engine::panel::re::ReInput`構築までを行う`build_re_input`を
-//!    実装した。この時点では`#[pymodule]`への登録・実際の`ReEstimator::fit`呼び出しは
-//!    行わなかった（FEの1段階目と同じ分割）。
-//! 2. **本対応**: `build_re_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
-//!    `#[pyfunction] fit_re`を新設して`#[pymodule]`に登録する（FEの2段階目相当）。
-//!    `build_re_input`/`resolve_re_cov_type`の`#[allow(dead_code)]`属性はこの時点で削除する
-//!    （本番経路（`fit_re`）から実際に呼ばれるようになったため）。
-//!
 //! RE自身に`fixed_effects()`のような追加メソッドは無い（ハウスマン検定は`fit()`内で自動
-//! 計算し`REResult`のフィールドに直接含める、`panel-common.md`2.4節）ため、FEの
-//! `fixed_effects()`段階（`fixed_effects()`メソッド）に相当する3段目は存在しない。
-//! 本対応でこの系統の実装は完結する。
+//! 計算し`REResult`のフィールドに直接含める、`panel-common.md`2.4節）。
 //!
-//! ## `REOptions.time`と`REOptions.dk_time`は別物（`FEOptions`と同じ規約）
+//! ## `effects`と`REOptions.dk_time`は別物（`FEOptions`と同じ規約）
 //!
-//! `time`（bareネーミング）は2-way RE（entity + time、バランスパネル）の指定に使う: `Some`なら
-//! 2-way・`None`なら1-way（`FEOptions.time`と同じ意味）。`dk_time`はDriscoll-Kraay型パネルHAC
-//! （`cov_type="dk"`）専用の時点列で、`time`とは独立に指定できる（`FEOptions.dk_time`と同じ
-//! 名前・同じ意味）。**`cov_type="dk"`では`dk_time`が必須**で、`time`にフォールバックしない
-//! （意図と違う列が選ばれても気づけない状況を避けるため）。`dk_time`は
-//! `ReCovType::Dk { time }`に渡り、RE自身の準偏差変換（`time`）には影響しない。`cov_type`が
+//! ランダム効果の次元は必須引数`effects`（`list[str]`、1〜2要素）で指定する。1要素が1-way、
+//! 2要素が2-way（`effects[0]`が個体、`effects[1]`が時点、バランスパネルのみ）。2-wayは順序に
+//! 意味がある（`sigma2_u`・`theta_entity`が個体、`sigma2_lambda`・`theta_time`が時点）。
+//! 3要素以上は標準的な推定量ではないため`EFFECTS_TOO_MANY`の`ValidationError`にする。
+//! `dk_time`はDriscoll-Kraay型パネルHAC（`cov_type="dk"`）専用の時点列で、`effects`とは独立に
+//! 指定できる（`FEOptions.dk_time`と同じ名前・同じ意味）。**`cov_type="dk"`では`dk_time`が
+//! 必須**で、`effects`の列にフォールバックしない（意図と違う列が選ばれても気づけない状況を
+//! 避けるため）。`dk_time`は`ReCovType::Dk { time }`に渡り、RE自身の準偏差変換には影響しない。`cov_type`が
 //! `"dk"`以外で`dk_time`を指定すると黙って無視されるため`ValidationError`にする
 //! （`parse_panel_cov_kind`）。
 //!
@@ -46,49 +33,53 @@
 //! REも`hc0`を**サポートしない**（`ReCovType` enumから除外済み、FEと同じ理由・同じ
 //! `hc0`専用エラーメッセージ）。
 //!
-//! ## `x`の空リストを許容しない（ユーザー確認済み・2026-09-20）
+//! ## `x`の空リストを許容しない
 //!
-//! FEと同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
+//! FEと同じ`validate_role_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
 //! 「分散成分（ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
 //! （パネル・混合モデル分析の"null model"）だが、`panel-common.md`にこの点の明示的な
-//! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させる方針をユーザーが
-//! 選択した。nullモデル・ICC推定のサポートは別途検討する。
+//! 決定が無いため、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させて拒否する。
+//! nullモデル・ICC推定のサポートは別途検討する。
 
 use std::collections::BTreeMap;
 
-use engine::panel::common::TimeKeys;
 use engine::panel::re::{ReCovType, ReEffects, ReEstimator, ReInput, VarianceMethod};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    PanelCovKind, PanelModel, check_panel_cov_options, panel_error_to_pyerr, parse_panel_cov_kind,
-    require_dk_time, validate_dk_time_role,
+    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, extract_time_keys,
+    group_counts, groups_dict, panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time,
+    validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    SelectedData, extract_entity_groups, extract_f64_column, extract_f64_columns,
-    extract_optional_cluster_groups, extract_time_keys,
+    SelectedData, extract_f64_column, extract_f64_columns, extract_optional_cluster_groups,
 };
-use crate::shared::errors::unknown_option_value;
-use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
-};
-use crate::shared::validation::{
-    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
+    parse_choice,
 };
 
 /// Estimation options for RE (random effects panel regression).
+///
+/// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
+/// - Variance components: `variance_method`.
+/// - Confidence intervals: `confidence_level`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`・`docs/spec/re-spec.md`。
-// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
+// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols/options.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct REOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
-    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (no reference
-    /// implementation offers it for panel/RE regressions; see the module docstring).
+    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported.
     #[pyo3(get)]
     pub cov_type: String,
 
@@ -97,25 +88,18 @@ pub struct REOptions {
     #[pyo3(get)]
     pub confidence_level: f64,
 
-    /// Column name of the time identifier. When set, requests two-way random effects
-    /// (entity + time; balanced panels only, an unbalanced panel raises `ValidationError`);
-    /// when `None` (default), one-way (entity only). It only defines the random-effects
-    /// structure: it is never used as the Driscoll-Kraay time periods (set `dk_time` for
-    /// that). The results do not depend on the order of the periods.
-    #[pyo3(get)]
-    pub time: Option<String>,
-
     /// Column name to use as the cluster group key when `cov_type="cluster"`. When
-    /// `None`, the `entity` argument's column is used automatically. Specifying it with
+    /// `None`, the first column of `effects` is used automatically. Specifying it with
     /// any other `cov_type` raises `ValidationError`.
     #[pyo3(get)]
     pub cluster: Option<String>,
 
     /// Column name that defines the time periods of the Driscoll-Kraay HAC when
     /// `cov_type="dk"` (required there, as in `FEOptions.dk_time`). Specifying it with any other
-    /// `cov_type` raises `ValidationError`. It may not be the same column as `y` or
-    /// `entity` (`ValidationError`), but may be one of the regressors or the same column as
-    /// `time`. The periods are ordered by the values of the
+    /// `cov_type` raises `ValidationError`. It may not be the same column as `y` or the
+    /// first column of `effects` (`ValidationError`), but may be one of the regressors or
+    /// the second column of `effects`. It is independent of `effects`: the columns of
+    /// `effects` are never used as the Driscoll-Kraay periods. The periods are ordered by the values of the
     /// column: numerically for integers and floats, chronologically for `Date` and
     /// `Datetime`, in the order of the categories for `Enum`, and alphabetically for
     /// strings and `Categorical`.
@@ -128,7 +112,7 @@ pub struct REOptions {
     #[pyo3(get)]
     pub dk_bandwidth: Option<i64>,
 
-    /// Estimator of the variance components `sigma_eps^2`, `sigma_u^2` (and `sigma_lambda^2`
+    /// Estimator of the variance components `σ_ε²`, `σ_u²` (and `σ_λ²`
     /// for two-way effects), one of "swamy_arora" (default), "wallace_hussain", "amemiya"
     /// (case-insensitive; `plm`'s `random.method` "swar", "walhus", "amemiya"). Applies to
     /// one-way and two-way effects alike. "swamy_arora" on an unbalanced one-way panel is the
@@ -140,26 +124,34 @@ pub struct REOptions {
     pub variance_method: String,
 }
 
+crate::shared::pickle::impl_pickle_state!(REOptions {
+    cov_type,
+    confidence_level,
+    cluster,
+    dk_time,
+    dk_bandwidth,
+    variance_method,
+});
+
 impl REOptions {
-    /// このオプションが指名するデータの列（`time`・`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
+    /// このオプションが指名するデータの列（`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
     pub(crate) fn data_columns(&self) -> Vec<String> {
-        self.time
-            .iter()
-            .chain(&self.cluster)
-            .chain(&self.dk_time)
-            .cloned()
-            .collect()
+        self.cluster.iter().chain(&self.dk_time).cloned().collect()
     }
 }
 
 #[pymethods]
 impl REOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
-        time = None,
         cluster = None,
         dk_time = None,
         dk_bandwidth = None,
@@ -168,7 +160,6 @@ impl REOptions {
     fn new(
         #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::shared::option_values::time_arg)] time: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::dk_time_arg)] dk_time: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<
@@ -180,7 +171,6 @@ impl REOptions {
         Self {
             cov_type,
             confidence_level,
-            time,
             cluster,
             dk_time,
             dk_bandwidth,
@@ -213,12 +203,6 @@ impl REOptions {
     }
 
     #[setter]
-    fn set_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.time = extract_strict_opt_column(value, "time")?;
-        Ok(())
-    }
-
-    #[setter]
     fn set_dk_time(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.dk_time = extract_strict_opt_column(value, "dk_time")?;
         Ok(())
@@ -232,11 +216,10 @@ impl REOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "REOptions(cov_type={}, confidence_level={}, time={}, cluster={}, dk_time={}, \
+            "REOptions(cov_type={}, confidence_level={}, cluster={}, dk_time={}, \
              dk_bandwidth={}, variance_method={})",
             self.cov_type.py_repr(),
             self.confidence_level.py_repr(),
-            self.time.py_repr(),
             self.cluster.py_repr(),
             self.dk_time.py_repr(),
             self.dk_bandwidth.py_repr(),
@@ -247,15 +230,13 @@ impl REOptions {
 
 /// Estimation results for RE.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/panel-common.md`
-/// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same order
-/// as `param_names` (`param_names[0]` is always `"const"`, since RE — unlike FE — has an
-/// intercept).
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names` (`param_names[0]` is always
+/// `"const"`, since RE — unlike FE — has an intercept).
 ///
 /// The Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is computed
-/// automatically inside `fit()` and included directly here (unlike FE's
-/// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
-/// section 2.4). All three are `None` when there is no regressor left to test: every
+/// automatically inside `fit()` and included directly here (RE has no separate
+/// diagnostic method). All three are `None` when there is no regressor left to test: every
 /// regressor is time-invariant, or varies only over time on a balanced panel, or the
 /// within-transformed copy of every time-varying regressor is aliased (its entity or time mean
 /// is also a regressor, as in a correlated-random-effects specification); for two-way effects,
@@ -274,13 +255,18 @@ pub struct REResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`; always `"t"` for RE.
     #[pyo3(get)]
     pub stat_dist: String,
     /// Degrees of freedom of the t distribution (always `Some`). May differ from
-    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    /// `df_resid`: cluster-robust inference uses `G - 1`, where `G` is the number of
+    /// clusters, and Driscoll-Kraay uses the number of `dk_time` periods minus 1.
     #[pyo3(get)]
     pub stat_df: Option<i64>,
     #[pyo3(get)]
@@ -301,58 +287,52 @@ pub struct REResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Number of panel entities (`panel-common.md` section 2.1, following the
-    /// pyfixest/plm precedent).
-    #[pyo3(get)]
-    pub n_entities: usize,
-    /// Number of unique time periods for two-way random effects (`REOptions.time` set);
-    /// `None` for one-way, also when only `dk_time` is given. Two-way requires a balanced
-    /// panel, so this equals the number of observations per entity.
-    #[pyo3(get)]
-    pub n_periods: Option<usize>,
+    /// The columns of `effects`, in the order they were given.
+    effects: Vec<String>,
+    /// Number of groups (unique values) of each column of `effects`, in the same order.
+    group_counts: Vec<usize>,
     /// Estimator of the variance components actually used (echoes `REOptions.variance_method`,
     /// normalized to lowercase): "swamy_arora", "wallace_hussain" or "amemiya". `sigma2_eps`,
     /// `sigma2_u`, `sigma2_lambda` and the weights `theta*` are the values of this estimator.
     #[pyo3(get)]
     pub variance_method: String,
-    /// Estimated variance of the idiosyncratic error, `sigma_eps^2`. Swamy-Arora: the residual
+    /// Estimated variance of the idiosyncratic error, `σ_ε²`. Swamy-Arora: the residual
     /// variance of the internal fixed-effects regression with the same effect structure as the
     /// model (entity for one-way, entity and time for two-way), whose degrees of freedom exclude
-    /// the regressors without within variation, as in `plm` (`docs/spec/re-spec.md` section
-    /// 3.1). Wallace-Hussain and Amemiya: from the within-transformed first-stage residuals, see
-    /// section 3.1.2.
+    /// the regressors without within variation, as in `plm`. Wallace-Hussain and Amemiya:
+    /// from the within-transformed first-stage residuals.
     #[pyo3(get)]
     pub sigma2_eps: f64,
-    /// Estimated variance of the entity effect, `sigma_u^2` (a negative estimate is raised to
+    /// Estimated variance of the entity effect, `σ_u²` (a negative estimate is raised to
     /// 0). Swamy-Arora on an unbalanced panel is the `linearmodels` estimator, which differs
     /// from `plm`'s.
     #[pyo3(get)]
     pub sigma2_u: f64,
-    /// Estimated variance of the time effect, `sigma_lambda^2`, for two-way effects (a negative
+    /// Estimated variance of the time effect, `σ_λ²`, for two-way effects (a negative
     /// estimate is raised to 0); `None` for one-way.
     #[pyo3(get)]
     pub sigma2_lambda: Option<f64>,
     /// One-way quasi-demeaning weight of each entity,
-    /// `theta_i = 1 - sqrt(sigma_eps^2 / (T_i * sigma_u^2 + sigma_eps^2))` with `T_i` the number
-    /// of observations of the entity (0 when `sigma_u^2` is 0; different across entities only on
+    /// `θ_i = 1 - sqrt(σ_ε² / (T_i * σ_u² + σ_ε²))` with `T_i` the number
+    /// of observations of the entity (0 when `σ_u²` is 0; different across entities only on
     /// an unbalanced panel). The keys are the entity ids as strings, in lexicographic order (so
     /// `"10"` precedes `"2"` for integer ids); `None` for two-way.
     #[pyo3(get)]
     pub theta: Option<BTreeMap<String, f64>>,
     /// Two-way weight of the entity means in the GLS transformation
-    /// `x - theta_1 * mean_i(x) - theta_2 * mean_t(x) + theta_3 * mean(x)`:
-    /// `theta_1 = 1 - sigma_eps / sigma_1` with `sigma_1^2 = sigma_eps^2 + T * sigma_u^2`;
+    /// `x - θ₁ * mean_i(x) - θ₂ * mean_t(x) + θ₃ * mean(x)`:
+    /// `θ₁ = 1 - σ_ε / σ₁` with `σ₁² = σ_ε² + T * σ_u²`;
     /// `None` for one-way.
     #[pyo3(get)]
     pub theta_entity: Option<f64>,
-    /// Two-way weight of the time means: `theta_2 = 1 - sigma_eps / sigma_2` with
-    /// `sigma_2^2 = sigma_eps^2 + N * sigma_lambda^2`; `None` for one-way.
+    /// Two-way weight of the time means: `θ₂ = 1 - σ_ε / σ₂` with
+    /// `σ₂² = σ_ε² + N * σ_λ²`; `None` for one-way.
     #[pyo3(get)]
     pub theta_time: Option<f64>,
     /// Two-way weight of the overall mean:
-    /// `theta_3 = theta_1 + theta_2 - 1 + sigma_eps / sigma_4` with
-    /// `sigma_4^2 = sigma_eps^2 + T * sigma_u^2 + N * sigma_lambda^2`. It is not the product
-    /// `theta_1 * theta_2`, and it is exactly 0 when `sigma_u^2` or `sigma_lambda^2` is 0;
+    /// `θ₃ = θ₁ + θ₂ - 1 + σ_ε / σ₄` with
+    /// `σ₄² = σ_ε² + T * σ_u² + N * σ_λ²`. It is not the product
+    /// `θ₁ * θ₂`, and it is exactly 0 when `σ_u²` or `σ_λ²` is 0;
     /// `None` for one-way.
     #[pyo3(get)]
     pub theta_total: Option<f64>,
@@ -375,9 +355,11 @@ pub struct REResult {
     /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). Follows
-    /// `cov_type` like the t-tests (`G - 1` for cluster, `T - 1` for Driscoll-Kraay,
-    /// `df_resid` otherwise).
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
+    /// Follows `cov_type` like the t-tests, so it equals `stat_df` whenever `f_statistic` is
+    /// not `None`: the number of clusters minus 1 for `"cluster"`, the number of `dk_time`
+    /// periods minus 1 for `"dk"`, and `df_resid` otherwise. Use it to recompute the p-value
+    /// from `f_statistic`.
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
     #[pyo3(get)]
@@ -397,8 +379,7 @@ pub struct REResult {
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// Regression-based Hausman test statistic (chi-squared version, Wald test that the
-    /// within-transformed regressors are jointly zero in the auxiliary regression;
-    /// `docs/spec/re-spec.md` section 3.7). The comparison is against FE with the same
+    /// within-transformed regressors are jointly zero in the auxiliary regression). The comparison is against FE with the same
     /// structure as the RE model (entity for one-way, entity and time for two-way). The Wald
     /// test's covariance follows `cov_type`. Always non-negative. `None` when no slope
     /// coefficient can be tested: a regressor that does not vary after the within
@@ -421,11 +402,70 @@ pub struct REResult {
     pub hausman_df: Option<usize>,
 }
 
+crate::shared::pickle::impl_pickle_state!(REResult {
+    params,
+    std_errors,
+    cov_params,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    df_resid,
+    df_model,
+    effects,
+    group_counts,
+    variance_method,
+    sigma2_eps,
+    sigma2_u,
+    sigma2_lambda,
+    theta,
+    theta_entity,
+    theta_time,
+    theta_total,
+    cov_type,
+    dk_bandwidth_used,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    log_likelihood,
+    aic,
+    bic,
+    r_squared_within,
+    r_squared_between,
+    r_squared_overall,
+    hausman_statistic,
+    hausman_p_value,
+    hausman_df,
+});
+
+#[pymethods]
+impl REResult {
+    /// Number of groups (unique values) of each column of `effects`, as a `dict[str, int]`
+    /// keyed by column name, in the order the columns were given. One entry for a one-way
+    /// model, two for a two-way model. A two-way model requires a balanced panel, so the
+    /// count of the second column equals the number of observations per group of the first.
+    #[getter]
+    fn n_groups<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        groups_dict(py, &self.effects, &self.group_counts)
+    }
+
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+}
+
 /// [`PanelCovKind`]に対応する列（`cluster`・`dk_time`）をDataFrameから抽出して
 /// `engine::panel::re::ReCovType`を組み立てる。
 ///
 /// `cov_type="dk"`では`dk_time`（必須）の列から`TimeKeys`を抽出して`ReCovType::Dk`に渡す
-/// （`FeCovType::Dk`と同じ。2-wayの`time`とは独立、モジュールdoc参照）。使われない
+/// （`FeCovType::Dk`と同じ。2-wayの時点（`effects`の2つ目）とは独立、モジュールdoc参照）。使われない
 /// オプションの検査は`check_panel_cov_options`の責務。
 ///
 /// # Errors
@@ -464,43 +504,54 @@ fn resolve_re_cov_type(
 /// # Errors
 /// 未知の値は`ValidationError`。
 fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
-    match value.to_lowercase().as_str() {
-        "swamy_arora" => Ok(VarianceMethod::SwamyArora),
-        "wallace_hussain" => Ok(VarianceMethod::WallaceHussain),
-        "amemiya" => Ok(VarianceMethod::Amemiya),
-        _ => Err(unknown_option_value(
-            "variance_method",
-            value,
-            &["swamy_arora", "wallace_hussain", "amemiya"],
-        )),
-    }
+    parse_choice(
+        "variance_method",
+        value,
+        &[
+            ("swamy_arora", VarianceMethod::SwamyArora),
+            ("wallace_hussain", VarianceMethod::WallaceHussain),
+            ("amemiya", VarianceMethod::Amemiya),
+        ],
+    )
 }
 
-/// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
-/// `engine::panel::re::ReInput::from_columns`を呼び出すところまでを行う。
-/// `ReEstimator::fit`の呼び出し・`REResult`の構築は後続issueの`fit`関数が行う
-/// （モジュールdoc「実装フェーズの分割方針」参照）。
+/// [`build_re_input`]の戻り値。
+#[derive(Debug)]
+pub(crate) struct BuiltReInput {
+    pub(crate) input: ReInput,
+    pub(crate) effects: ReEffects,
+    /// エンジンに渡す`cov_type`（`cluster`のグループや`dk`の時点を持つ）。
+    pub(crate) cov_type: ReCovType,
+    /// `REResult.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+    pub(crate) variance_method: VarianceMethod,
+}
+
+/// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
+/// `engine::panel::re::ReInput::from_group_codes`を呼び出すところまでを行う。
+/// 戻り値の[`BuiltReInput`]を`fit`関数が受け取り、`ReEstimator::fit`を呼んで
+/// `REResult`を組み立てる。
 ///
-/// `options.time`は2-wayの時間次元として`ReInput`に渡し、`ReEffects::TwoWay`を選ぶ
-/// （`None`なら`OneWay`）。`options.dk_time`は`resolve_re_cov_type`が`ReCovType::Dk`に渡す
+/// `effects`の1つ目を個体、2つ目（あれば）を時間次元として`ReInput`に渡し、2要素なら
+/// `ReEffects::TwoWay`、1要素なら`OneWay`を選ぶ。`options.dk_time`は`resolve_re_cov_type`が`ReCovType::Dk`に渡す
 /// （`"dk"`以外で指定された場合は`ValidationError`）。
 ///
 /// # Errors
 /// - `x`が空リストの場合は`ValidationError`（モジュールdoc「`x`の空リストを許容しない」
-///   参照）。`y`/`entity`/`dk_time`/`x`間の重複・`x`内部の重複も同じく`validation.rs`の
+///   参照）。`y`/`effects`/`dk_time`/`x`間の重複・`x`・`effects`内部の重複も同じく`validation.rs`の
 ///   責務で`ValidationError`
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_panel_cov_kind`参照）
-/// - それ以外（`y`/`entity`/`dk_time`間の行数不一致等）は`engine::panel::common::PanelError`
+/// - それ以外（`y`/`effects`/`dk_time`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
 pub(crate) fn build_re_input(
     df: &DataFrame,
     y: String,
     x: Vec<String>,
-    entity: String,
+    effects: Vec<String>,
     options: &REOptions,
-) -> PyResult<(ReInput, ReEffects, ReCovType, String, VarianceMethod)> {
+) -> PyResult<BuiltReInput> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値（`cov_type` →
     // `variance_method`）→ オプションの組合せ → ロール構造 → `y`/`x`の列 →
@@ -514,34 +565,17 @@ pub(crate) fn build_re_input(
         options.dk_bandwidth,
     )?;
 
-    validate_x_non_empty("x", &x)?;
-    let mut roles = vec![
-        ("y", RoleValue::Single(&y)),
-        ("entity", RoleValue::Single(&entity)),
-    ];
-    if let Some(time) = &options.time {
-        roles.push(("time", RoleValue::Single(time)));
-    }
-    roles.push(("x", RoleValue::Multi(&x)));
-    validate_no_duplicate_roles(&roles)?;
-    validate_no_duplicate_within_role("x", &x)?;
-    // `dk_time`は`y`・`entity`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
-    validate_dk_time_role(&y, &entity, options.dk_time.as_deref())?;
+    // `effects`の列数・`x`が空（モジュールdoc参照）・列の役割の重複・`dk_time`の役割を検査する。
+    validate_panel_roles(PanelModel::Re, &y, &x, &effects, options.dk_time.as_deref())?;
 
-    // ── y/x/entity列の抽出 ─────────────────────────────────────────────
+    // ── y/x/effects列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
-    let entity_groups = extract_entity_groups(df, &entity, ColumnSource::new("entity", "data"))?;
-
-    // ── `time`列の抽出（2-way REを指定した場合のみ）───────────────────────
-    let time_keys: Option<TimeKeys> = options
-        .time
-        .as_ref()
-        .map(|col_name| extract_time_keys(df, col_name, ColumnSource::new("time", "data")))
-        .transpose()?;
-    let effects = if time_keys.is_some() {
+    // ── `effects`の列の抽出（1つ目が個体、2つ目があれば時点）──────────────
+    let (entity_groups, time_keys) = extract_effects(df, &effects)?;
+    let re_effects = if time_keys.is_some() {
         ReEffects::TwoWay
     } else {
         ReEffects::OneWay
@@ -551,23 +585,24 @@ pub(crate) fn build_re_input(
     let cov_type = resolve_re_cov_type(df, cov_kind, options)?;
 
     let input = ReInput::from_group_codes(&y_slice, &x_slices, x, entity_groups, time_keys, y)
-        .map_err(panel_error_to_pyerr)?;
+        .map_err(panel_error_to_pyerr)?
+        .with_effect_names(effects[0].clone(), effects.get(1).cloned());
 
-    Ok((
+    Ok(BuiltReInput {
         input,
-        effects,
+        effects: re_effects,
         cov_type,
-        cov_kind.name().to_string(),
+        cov_type_name: cov_kind.name().to_string(),
         variance_method,
-    ))
+    })
 }
 
-/// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
+/// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
 /// `build_re_input`で構築した`ReInput`に対して`engine::panel::re::ReEstimator::fit`を
 /// 呼び出し、`REResult`として返す。
 ///
-/// `n_entities`は`ReEstimator::input().n_entities()`（`ReInput`が構築時に一度だけ作った
-/// エンティティコードのユニーク数）から取得する。
+/// `n_groups`の元になる`group_counts`は、`ReEstimator::input().n_entities()`（`ReInput`が構築時に
+/// 一度だけ作ったエンティティコードのユニーク数）と`n_periods()`（2-wayのみ）から作る。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`/`aic`/`bic`は
 /// `ReEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する。FEと異なり
@@ -582,26 +617,47 @@ pub(crate) fn build_re_input(
 /// なる、`FeEstimator`と同じ理由）。
 ///
 /// # Errors
-/// - `build_re_input`が返すエラー（列抽出・y/x/entity/dk_timeの重複・`cov_type`文字列の
+/// - `build_re_input`が返すエラー（列抽出・y/x/effects/dk_timeの重複・`cov_type`文字列の
 ///   検証等）は`ValidationError`
 /// - `ReEstimator::fit`が返す`engine::panel::common::PanelError`（Swamy-Arora分散成分
 ///   推定の失敗——内部FE推定のsingleton検出・自由度不足、between回帰の失敗——、
 ///   準偏差変換済みデータへの委譲失敗、クラスター数不足、HAC関連のバリデーション等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
-    entity: String,
+    effects: Vec<String>,
     options: &REOptions,
 ) -> PyResult<REResult> {
-    let df: DataFrame = data.frame;
-    let (input, effects, cov_type, cov_type_lower, variance_method) =
-        build_re_input(&df, y, x, entity, options)?;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は使わず、
+    // 関数の末尾（`detach`から戻ってGILを持った状態）で`data`ごとdropされる。
+    let SelectedData { frame, .. } = data;
+    py.detach(|| fit_frame(&frame, y, x, effects, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    effects: Vec<String>,
+    options: &REOptions,
+) -> PyResult<REResult> {
+    let BuiltReInput {
+        input,
+        effects: re_effects,
+        cov_type,
+        cov_type_name,
+        variance_method,
+    } = build_re_input(df, y, x, effects.clone(), options)?;
 
     let estimator = ReEstimator::fit_with_variance_method(
         input,
-        effects,
+        re_effects,
         cov_type,
         variance_method,
         options.confidence_level,
@@ -609,10 +665,12 @@ pub(crate) fn fit(
     .map_err(panel_error_to_pyerr)?;
     let ols = estimator.estimator();
     let two_way_theta = estimator.two_way_theta();
+    let group_counts = group_counts(estimator.input().n_entities(), estimator.n_periods());
 
     Ok(REResult {
         params: mat_to_vec(ols.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),
@@ -625,8 +683,8 @@ pub(crate) fn fit(
         n_obs: ols.input().nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
-        n_entities: estimator.input().n_entities(),
-        n_periods: estimator.n_periods(),
+        effects,
+        group_counts,
         variance_method: variance_method.as_str().to_string(),
         sigma2_eps: estimator.sigma2_eps(),
         sigma2_u: estimator.sigma2_u(),
@@ -643,7 +701,7 @@ pub(crate) fn fit(
         theta_entity: two_way_theta.map(|t| t.0),
         theta_time: two_way_theta.map(|t| t.1),
         theta_total: two_way_theta.map(|t| t.2),
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
@@ -664,6 +722,7 @@ pub(crate) fn fit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panel::common::well_formed_df;
     use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
@@ -676,19 +735,8 @@ mod tests {
             None,
             None,
             None,
-            None,
             "swamy_arora".to_string(),
         )
-    }
-
-    fn well_formed_df() -> DataFrame {
-        df!(
-            "y" => [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            "x1" => [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
-            "id" => ["a", "a", "b", "b", "c", "c"],
-            "t" => ["1", "2", "1", "2", "1", "2"],
-        )
-        .unwrap()
     }
 
     #[test]
@@ -696,11 +744,17 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, cov_type, cov_type_lower, _) = build_re_input(
+        let BuiltReInput {
+            input,
+            effects,
+            cov_type,
+            cov_type_name,
+            ..
+        } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
-            "id".to_string(),
+            vec!["id".to_string()],
             &options,
         )
         .unwrap();
@@ -714,7 +768,7 @@ mod tests {
             ReCovType::Cluster { groups: None },
             "cluster未指定時はNone（engine側でentity列にフォールバック）"
         );
-        assert_eq!(cov_type_lower, "cluster");
+        assert_eq!(cov_type_name, "cluster");
     }
 
     #[test]
@@ -726,11 +780,16 @@ mod tests {
         options.cov_type = "dk".to_string();
         options.dk_time = Some("t".to_string());
 
-        let (input, effects, cov_type, _, _) = build_re_input(
+        let BuiltReInput {
+            input,
+            effects,
+            cov_type,
+            ..
+        } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
-            "id".to_string(),
+            vec!["id".to_string()],
             &options,
         )
         .unwrap();
@@ -745,16 +804,15 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_selects_two_way_effects_when_time_is_set() {
+    fn build_re_input_selects_two_way_effects_for_two_columns() {
         let df = well_formed_df();
-        let mut options = default_options();
-        options.time = Some("t".to_string());
+        let options = default_options();
 
-        let (input, effects, ..) = build_re_input(
+        let BuiltReInput { input, effects, .. } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
-            "id".to_string(),
+            vec!["id".to_string(), "t".to_string()],
             &options,
         )
         .unwrap();
@@ -764,43 +822,6 @@ mod tests {
             input.time_keys().map(|t| t.periods().to_vec()),
             Some(vec!["1".to_string(), "2".to_string()])
         );
-    }
-
-    #[test]
-    fn build_re_input_rejects_time_that_duplicates_another_role() {
-        let df = well_formed_df();
-        for column in ["y", "id", "x1"] {
-            let mut options = default_options();
-            options.time = Some(column.to_string());
-            let result = build_re_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string()],
-                "id".to_string(),
-                &options,
-            );
-            assert!(result.is_err(), "time={column}");
-        }
-    }
-
-    #[test]
-    fn build_re_input_allows_dk_time_to_equal_time() {
-        // 2-wayの時間次元とDKの時点列に同じ列を使うのは自然（`FEOptions`と同じ）。
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "dk".to_string();
-        options.time = Some("t".to_string());
-        options.dk_time = Some("t".to_string());
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            "id".to_string(),
-            &options,
-        );
-
-        assert!(result.is_ok());
     }
 
     #[test]
@@ -816,7 +837,7 @@ mod tests {
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
-            "id".to_string(),
+            vec!["id".to_string()],
             &options,
         );
 
@@ -824,97 +845,20 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_returns_error_for_empty_x() {
-        // `x=[]`を拒否する（モジュールdoc「`x`の空リストを許容しない」参照。
-        // FE・OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(&df, "y".to_string(), vec![], "id".to_string(), &options);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_y_overlaps_entity() {
+    fn build_re_input_rejects_empty_x() {
+        // 列の役割の検査が`validate_panel_roles`経由で配線されていることの確認
+        // （検査の中身は`panel/common.rs`のテストが持つ）。
         let df = well_formed_df();
         let options = default_options();
 
         let result = build_re_input(
             &df,
             "y".to_string(),
-            vec!["x1".to_string()],
-            "y".to_string(),
+            vec![],
+            vec!["id".to_string()],
             &options,
         );
-        assert!(result.is_err());
-    }
 
-    #[test]
-    fn build_re_input_returns_error_when_x_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "id".to_string()],
-            "id".to_string(),
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_allows_x_to_overlap_dk_time() {
-        // 年トレンドを説明変数に入れつつDKの時点にも使う、等は正当な使い方
-        // （`validate_dk_time_role`参照）。
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "dk".to_string();
-        options.dk_time = Some("x1".to_string());
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            "id".to_string(),
-            &options,
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn build_re_input_rejects_dk_time_that_is_y_or_entity() {
-        let df = well_formed_df();
-        for column in ["y", "id"] {
-            let mut options = default_options();
-            options.cov_type = "dk".to_string();
-            options.dk_time = Some(column.to_string());
-
-            let result = build_re_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string()],
-                "id".to_string(),
-                &options,
-            );
-            assert!(result.is_err(), "dk_time={column}");
-        }
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_x_contains_duplicate() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "x1".to_string()],
-            "id".to_string(),
-            &options,
-        );
         assert!(result.is_err());
     }
 
@@ -928,7 +872,7 @@ mod tests {
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
-            "id".to_string(),
+            vec!["id".to_string()],
             &options,
         );
         assert!(result.is_err());
@@ -944,7 +888,7 @@ mod tests {
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
-            "id".to_string(),
+            vec!["id".to_string()],
             &options,
         );
         assert!(result.is_err());
@@ -962,11 +906,11 @@ mod tests {
         let mut options = default_options();
         options.cluster = Some("state".to_string());
 
-        let (_, _, cov_type, _, _) = build_re_input(
+        let BuiltReInput { cov_type, .. } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
-            "id".to_string(),
+            vec!["id".to_string()],
             &options,
         )
         .unwrap();
@@ -986,18 +930,17 @@ mod tests {
 
     #[test]
     fn build_re_input_dk_requires_dk_time_and_uses_bandwidth() {
-        // `cov_type="dk"`は`dk_time`が必須で、`time`にはフォールバックしない。
+        // `cov_type="dk"`は`dk_time`が必須で、`effects`の列にはフォールバックしない。
         let df = well_formed_df();
         let mut options = default_options();
         options.cov_type = "dk".to_string();
         options.dk_bandwidth = Some(2);
-        options.time = Some("t".to_string());
         let build = |options: &REOptions| {
             build_re_input(
                 &df,
                 "y".to_string(),
                 vec!["x1".to_string()],
-                "id".to_string(),
+                vec!["id".to_string(), "t".to_string()],
                 options,
             )
         };
@@ -1005,7 +948,7 @@ mod tests {
         assert!(build(&options).is_err(), "dk_time unset must be rejected");
 
         options.dk_time = Some("t".to_string());
-        let (_, _, cov_type, _, _) = build(&options).unwrap();
+        let BuiltReInput { cov_type, .. } = build(&options).unwrap();
         let ReCovType::Dk { bandwidth, .. } = cov_type else {
             panic!("expected ReCovType::Dk");
         };

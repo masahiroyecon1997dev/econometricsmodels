@@ -9,8 +9,10 @@ name: Benchmark (performance)
 #  - タグpush（v*）: リリースごとに性能を記録する（従来どおり）。
 #  - main を base とするPR（＝dev⇒mainのリリースPR）: リリース作業時に、
 #    大標本で推定量が例外を投げる等の回帰をタグを切る前に検知する。
-#    Tobitは compare_tobit.py の n_sweep_engine_only=(200_000, 1_000_000) を回し、
+#    ProbitとTobitは n_sweep_engine_only=(200_000, 1_000_000) を回し、
 #    _run_isolated が check=True のため .fit() が例外を投げるとジョブが失敗する。
+#    加えて max_n_iter（n=1,000,000・newtonの反復回数の上限）を超えても、結果JSONを
+#    書いた後にジョブが失敗する（収束はするが遅くなる退行の検知）。
 #    実効的なゲートにするには main のブランチ保護で
 #    「Benchmark (performance) / benchmark gate」1個だけを required status check に
 #    設定すること（下記 benchmark-gate 集約ジョブ。matrix に手法を足しても登録の
@@ -41,15 +43,15 @@ jobs:
       # 1手法が失敗しても他手法の計測は続行する（手法ごとに独立した記録のため）。
       fail-fast: false
       matrix:
-        method: [ols, wls, logit, probit, iv, tobit, fe, re]
+        method: [ols, wls, logit, probit, iv, tobit, fe, fe_iv, re]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.12"
 
@@ -72,11 +74,15 @@ jobs:
             python -m performance.compare_${{ matrix.method }} --repeats 3 --output results.json
 
       - name: render job summary
+        # compare_<method>.py が反復回数の上限超過（max_n_iter）で落ちても、結果JSONが
+        # あれば summary と artifact を残す（例外で results.json が無いときは飛ばす）。
+        if: ${{ !cancelled() && hashFiles('results.json') != '' }}
         run: |
           uv run --locked --group test --group dev \
             python -m performance.render_performance_summary results.json >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('results.json') != '' }}
         with:
           name: ${{ matrix.method }}-performance-results
           path: results.json

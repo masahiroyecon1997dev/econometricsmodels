@@ -2,8 +2,15 @@
 //! 線形代数ユーティリティ（`.claude/rules/rust-style.md`「全手法で共有するロジック」参照）。
 
 use super::error::{CommonError, MatrixKind};
+use faer::dyn_stack::{MemBuffer, MemStack};
+use faer::linalg::householder::{
+    apply_block_householder_sequence_transpose_on_the_left_in_place_scratch,
+    apply_block_householder_sequence_transpose_on_the_left_in_place_with_conj,
+};
+use faer::linalg::qr::col_pivoting::factor::{qr_in_place, qr_in_place_scratch};
+use faer::linalg::qr::no_pivoting::factor::recommended_block_size;
 use faer::linalg::solvers::ColPivQr;
-use faer::{Mat, Side};
+use faer::{Conj, Mat, Side};
 
 /// [`checked_col_piv_qr`]がランク落ちを検出したことを表す、系統に依存しないエラー。
 /// 呼び出し側が`map_err`で自系統のエラー（`LeastSquaresError::SingularMatrix`・
@@ -16,9 +23,11 @@ use faer::{Mat, Side};
 /// 求める（エラーを捨てる経路で余計な計算をしないため）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankDeficient {
-    /// 列ピボットQRが、行列がフルカラムランクでないと判定した。
+    /// 列ピボットQRが、行列がフルカラムランクでないと判定した。または`OrthonormalDesign::new_checked`が、
+    /// 列を単位ノルムに揃えた設計行列の条件数が、完全な共線とみなす上限を超えると判定した。
     Columns,
-    /// Gram行列`X'X`のCholesky分解が失敗した。
+    /// Gram行列`X'X`のCholesky分解が失敗した。または、`OrthonormalDesign::new_checked`が、列を
+    /// 単位ノルムに揃えた設計行列の条件数が上限を超えると判定した（同じ受け入れ範囲を保つため）。
     GramMatrix,
 }
 
@@ -43,15 +52,99 @@ pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> 
     }
     let qr = a.col_piv_qr();
     let r = qr.thin_R();
-    let max_abs_diag = (0..n).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
+    validate_pivoted_diagonal(n, |i| *r.get(i, i))?;
+    Ok(qr)
+}
+
+/// 列ピボットQRの`R`の対角成分（`diagonal(i)`、`i < n`）がフルカラムランクを示すかを判定する
+/// （[`checked_col_piv_qr`]と[`col_piv_qr_in_place_lstsq`]が同じ判定を共有する）。
+fn validate_pivoted_diagonal(
+    n: usize,
+    diagonal: impl Fn(usize) -> f64,
+) -> Result<(), RankDeficient> {
+    let max_abs_diag = (0..n).map(|i| diagonal(i).abs()).fold(0.0_f64, f64::max);
     let threshold = (n as f64) * f64::EPSILON * max_abs_diag;
     for i in 0..n {
-        let diag = (*r.get(i, i)).abs();
+        let diag = diagonal(i).abs();
         if diag.is_nan() || diag <= threshold {
             return Err(RankDeficient::Columns);
         }
     }
-    Ok(qr)
+    Ok(())
+}
+
+/// [`checked_col_piv_qr`]して`solve_lstsq(y)`した結果（最小二乗解、k×1）と同じ判定・同じ解を、
+/// `a`（n×k）を**複製せずその場で**列ピボットQR分解して返す。`a`は壊れる（呼び出し側は
+/// その後に使えない）。
+///
+/// `checked_col_piv_qr(a)`は`a`の複製を作るため、`a`と複製が同時に生きる。標準化した設計行列を
+/// 最適化に使い続けるLogit/Probitは、初期値のためだけに`n·k`の複製を持つことになるので、
+/// ランクチェックと最小二乗解をこの関数で済ませ、呼び出し側が`a`を作り直す。
+///
+/// 解は`Q'y`にHouseholder列を適用し、`R γ = (Q'y)[..k]`を後退代入して`β[perm[j]] = γ[j]`と
+/// する（`ColPivQr::solve_lstsq`と同じ）。`y`はn×1。
+///
+/// # Errors
+/// [`checked_col_piv_qr`]と同じ判定（`n < k`・`R`の対角が相対閾値以下・NaN）で
+/// [`RankDeficient::Columns`]。
+pub fn col_piv_qr_in_place_lstsq(a: Mat<f64>, y: &Mat<f64>) -> Result<Mat<f64>, RankDeficient> {
+    let (n, k) = (a.nrows(), a.ncols());
+    if n < k {
+        return Err(RankDeficient::Columns);
+    }
+    if k == 0 {
+        return Ok(Mat::zeros(0, 1));
+    }
+    let par = faer::get_global_parallelism();
+    let block_size = recommended_block_size::<f64>(n, k);
+    let mut packed = a;
+    let mut coefficients = Mat::<f64>::zeros(block_size, k);
+    let mut perm = vec![0usize; k];
+    let mut perm_inv = vec![0usize; k];
+    qr_in_place::<usize, f64>(
+        packed.as_mut(),
+        coefficients.as_mut(),
+        &mut perm,
+        &mut perm_inv,
+        par,
+        MemStack::new(&mut MemBuffer::new(qr_in_place_scratch::<usize, f64>(
+            n,
+            k,
+            block_size,
+            par,
+            Default::default(),
+        ))),
+        Default::default(),
+    );
+    validate_pivoted_diagonal(k, |i| *packed.get(i, i))?;
+
+    let mut rotated = y.clone();
+    apply_block_householder_sequence_transpose_on_the_left_in_place_with_conj(
+        packed.as_ref(),
+        coefficients.as_ref(),
+        Conj::No,
+        rotated.as_mut(),
+        par,
+        MemStack::new(&mut MemBuffer::new(
+            apply_block_householder_sequence_transpose_on_the_left_in_place_scratch::<f64>(
+                n, block_size, 1,
+            ),
+        )),
+    );
+    // `R γ = (Q'y)[..k]`の後退代入（`R`は`packed`の上三角）。
+    let mut gamma = vec![0.0; k];
+    for j in (0..k).rev() {
+        let mut value = *rotated.get(j, 0);
+        for (i, solved) in gamma.iter().enumerate().skip(j + 1) {
+            value -= *packed.get(j, i) * solved;
+        }
+        gamma[j] = value / *packed.get(j, j);
+    }
+    let mut beta = Mat::<f64>::zeros(k, 1);
+    for (&column, &value) in perm.iter().zip(&gamma) {
+        *beta.get_mut(column, 0) = value;
+    }
+    Ok(beta)
 }
 
 /// 列の添字を設計の列名に直す。名前が足りない（呼び出し側の契約違反）場合は添字で示す。
@@ -193,11 +286,13 @@ fn qr_flagged_columns(a: &Mat<f64>) -> Option<Vec<usize>> {
 /// （`SelfAdjointEigen`）による相対閾値判定で確認する。
 ///
 /// 非ピボットCholesky分解（`Llt`）のL因子対角成分は、行列の成分間のスケール差に
-/// 起因する数値的なほぼ特異性を検出できない（OLSの`wald_f_test`で実測確認済み。
+/// 起因する数値的なほぼ特異性を検出できない（列のスケール差が極端な行列で実測確認済み。
+/// `ensure_well_conditioned_symmetric_matrix_rejects_extreme_scale_difference`参照。
 /// `col_piv_qr`のR対角成分を使う`checked_col_piv_qr`とは異なり、
 /// Choleskyはピボットしないため）。分散共分散行列（傾き係数の同時共分散部分行列、
 /// 観測情報行列の逆行列、OPG行列の逆行列等）にCholesky分解を適用する前は、
-/// この関数で固有値ベースの判定を先に行う必要がある。
+/// この関数で固有値ベースの判定を先に行う必要がある。係数の共分散のWald検定は、列の単位に
+/// 依らないよう、相関スケール化した行列に対してこの関数を呼ぶ（`shared::wald`）。
 ///
 /// `matrix`はどの行列を検査しているか（エラーの`matrix`パラメータになる）。
 ///
@@ -363,6 +458,54 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     lanes.iter().sum::<f64>() + tail
 }
 
+/// 列`j`のユークリッドノルム。
+pub(crate) fn column_norm(m: &Mat<f64>, j: usize) -> f64 {
+    (0..m.nrows())
+        .map(|i| m.get(i, j).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// 各列をノルム1にそろえる(ノルムが0または非有限の列はそのまま。後段のランク判定が弾く)。
+pub(crate) fn unit_columns(m: &Mat<f64>) -> Mat<f64> {
+    let norms: Vec<f64> = (0..m.ncols()).map(|j| column_norm(m, j)).collect();
+    Mat::from_fn(m.nrows(), m.ncols(), |i, j| {
+        if norms[j] > 0.0 && norms[j].is_finite() {
+            *m.get(i, j) / norms[j]
+        } else {
+            *m.get(i, j)
+        }
+    })
+}
+
+/// 下三角行列`l`(k×k)について`L⁻¹ b`を前進代入で求める(`b`はk×m)。
+pub(crate) fn forward_substitute(l: faer::mat::MatRef<'_, f64>, b: &Mat<f64>) -> Mat<f64> {
+    let (k, m) = (b.nrows(), b.ncols());
+    let mut x = Mat::<f64>::zeros(k, m);
+    for col in 0..m {
+        for i in 0..k {
+            let mut value = *b.get(i, col);
+            for j in 0..i {
+                value -= *l.get(i, j) * *x.get(j, col);
+            }
+            *x.get_mut(i, col) = value / *l.get(i, i);
+        }
+    }
+    x
+}
+
+/// 対称正定値行列`q`のCholesky分解`q = CC'`の下三角因子`C`の逆行列`C⁻¹`。`C⁻¹ q C⁻ᵀ = I`なので、
+/// `q`がGram行列(二乗平均)の列を直交正規化する白色化の係数になる。
+///
+/// 非ピボットのCholeskyは共線を検出できないので、固有値でも条件を確かめる。`q`が特異に近い・
+/// 正定値でないとき`None`。
+pub(crate) fn inverse_cholesky_factor(q: &Mat<f64>) -> Option<Mat<f64>> {
+    let k = q.nrows();
+    ensure_well_conditioned_symmetric_matrix(q, k, MatrixKind::DesignGram).ok()?;
+    let llt = q.llt(Side::Lower).ok()?;
+    Some(forward_substitute(llt.L(), &Mat::<f64>::identity(k, k)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,6 +630,92 @@ mod tests {
             vec![true, false, false]
         );
         assert!(independent_columns_in_order(&[], COLLINEARITY_TOLERANCE).is_empty());
+    }
+
+    /// 乱数（決定的）の設計行列と`y`。
+    fn pseudo_random_design(n: usize, k: usize, seed: u64) -> (Mat<f64>, Mat<f64>) {
+        let mut state = seed;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
+        };
+        let x = Mat::from_fn(n, k, |_, _| next());
+        let y = Mat::from_fn(n, 1, |_, _| next());
+        (x, y)
+    }
+
+    #[test]
+    fn col_piv_qr_in_place_lstsq_matches_solve_lstsq_of_the_checked_decomposition() {
+        use faer::prelude::SolveLstsq;
+        for &(n, k, seed) in &[
+            (40, 1, 1),
+            (40, 5, 2),
+            (300, 6, 3),
+            (1000, 12, 4),
+            (7, 7, 5),
+        ] {
+            let (x, y) = pseudo_random_design(n, k, seed);
+            let expected = checked_col_piv_qr(&x).unwrap().solve_lstsq(&y);
+            let actual = col_piv_qr_in_place_lstsq(x.clone(), &y).unwrap();
+            assert_eq!((actual.nrows(), actual.ncols()), (k, 1));
+            for j in 0..k {
+                assert!(
+                    (actual.get(j, 0) - expected.get(j, 0)).abs()
+                        <= 1e-12 * (1.0 + expected.get(j, 0).abs()),
+                    "n={n} k={k} j={j}: {} vs {}",
+                    actual.get(j, 0),
+                    expected.get(j, 0)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn col_piv_qr_in_place_lstsq_rejects_like_checked_col_piv_qr() {
+        let y = Mat::from_fn(8, 1, |i, _| i as f64);
+        let cases: Vec<(&str, Mat<f64>)> = vec![
+            (
+                "duplicate column",
+                Mat::from_fn(8, 3, |i, j| {
+                    if j == 2 {
+                        (i % 3) as f64
+                    } else {
+                        [1.0, (i % 3) as f64][j]
+                    }
+                }),
+            ),
+            ("all zeros", Mat::<f64>::zeros(8, 2)),
+            (
+                "fewer rows than columns",
+                Mat::from_fn(2, 3, |i, j| (i + j) as f64),
+            ),
+        ];
+        for (name, x) in cases {
+            assert_eq!(
+                checked_col_piv_qr(&x).err(),
+                Some(RankDeficient::Columns),
+                "{name}: precondition"
+            );
+            let y = if x.nrows() == y.nrows() {
+                y.clone()
+            } else {
+                Mat::from_fn(x.nrows(), 1, |i, _| i as f64)
+            };
+            assert_eq!(
+                col_piv_qr_in_place_lstsq(x, &y).unwrap_err(),
+                RankDeficient::Columns,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn col_piv_qr_in_place_lstsq_accepts_matrix_without_columns() {
+        let beta =
+            col_piv_qr_in_place_lstsq(Mat::<f64>::zeros(5, 0), &Mat::<f64>::zeros(5, 1)).unwrap();
+        assert_eq!((beta.nrows(), beta.ncols()), (0, 1));
     }
 
     #[test]

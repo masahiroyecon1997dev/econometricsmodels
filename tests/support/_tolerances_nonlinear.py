@@ -50,6 +50,9 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # 一致は実測で係数 ~3e-9・標準誤差 ~1e-9・対数尤度 ~1e-12と
     # RTOL_MACHINE_PRECISION を満たす。ATOL は Logit/Probit と同じ 1e-9
     # （反復最適化由来の 0 近傍ノイズが閉形式解より1桁大きい）。
+    # 係数とσの分散共分散行列（`tobit_cov.json`）も同じ`rtol_inference`で比べる。要素ごとの
+    # 尺度は`sqrt(V_ii·V_jj)`。実測の最大は4.97e-9（interval_wide_spread/hc1）。
+    # bfgs/lbfgsのケースは各solverの許容誤差で比べ、実測の最大は8.5e-8。
     "tobit_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 1e-9,
@@ -71,26 +74,27 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         # `two_loop_recursion`のゼロ除算未ガード）は修正済みで、この1点の乖離量
         # （`diff=3.361856272532382e-09`）は両方の修正の前後で**完全に不変**だった。
         # したがって既知の実装不具合とは無関係と判断した。
-        # **再測定**: baseline相当のsolverシナリオで、`tol`を1e-8から1e-14、`max_iter`を
-        # 2000まで締めても、newton解（survregと6.9e-12で一致）との係数の最大相対差は
-        # bfgsが1.44e-8、lbfgsが2.32e-8のまま全く変わらず、反復数も11→12・9→10しか増えない。
-        # つまり収束基準の緩さが原因ではなく、準Newton法がコスト関数の丸め誤差の床で
-        # line searchの停滞検出により止まるため（`engine/src/nonlinear/CLAUDE.md`
-        # 「line search停滞を検出して終了する」）。到達できる精度の下限であり、
-        # 参照実装との差ではない。mroz（hours生スケール）で`tol`を締めても差が縮まない
-        # 同じ挙動も、同じ機序と整合する（未確認: 勾配ノルムの直接測定）。
+        # **機序（計装で確認）**: 既定の`tol`では、bfgs/lbfgsは勾配基準（`‖g‖ < tol·n`）で
+        # 止まる。停滞検出は発火しない。newton解（survregと6.9e-12で一致）との差は、停止点の
+        # `|H⁻¹g|`そのもの（実測で3桁一致）で、係数の最大相対差はbfgsが1.44e-8、lbfgsが
+        # 2.32e-8。`tol`を締めて止まるのは`|Δcost| < ε`の判定で、勾配の床ではない（この判定を
+        # 外すと勾配は4e-12まで下がる）。argminの`best_param`はコストが厳密に下がったときしか
+        # 更新されないため、返却点は最終反復点のコストが最良点と区別できないとき最終反復点にした
+        # （`engine/src/nonlinear/CLAUDE.md`「bfgs/lbfgsの返却点と、newtonとの差の機序」）。
+        # 既定`tol`の出力は変わらないので、この許容誤差の値も変えていない。
         "rtol_solver": 2e-7,
         # solver="bfgs"/"lbfgs"を打ち切り重い・区間打ち切りシナリオ、opg/hc0/hc1、
         # クラスターと掛け合わせた組み合わせ（`_tobit_checks.SOLVER_COMBINATION_CASES`）。
         # 実測最大相対誤差5e-7（heavy_censoring/lbfgs、値の小さい予測値）。反復解法の
         # OS・BLAS差の揺れに備え約4倍（2e-6）のマージンを置く。
         "rtol_solver_combination": 2e-6,
-        # 実データmroz（hours生スケール）× solver="bfgs"/"lbfgs"。tolを1e-10まで締めても
-        # bfgs/lbfgsはline searchの停滞で打ち切られ、newtonとの差が縮まない（実測最大
-        # 相対誤差1e-4、lbfgs×hc0の標準誤差系。classicalは2e-6〜1e-5）。生スケールの
-        # yと大きなスケール差の説明変数が絡む精度の下限。点推定（係数・σ・対数尤度・
-        # 予測値・限界効果の点推定）は実測最大1e-6、推論（SE・z・p値・信頼区間・Wald・
-        # 限界効果のSE系）は実測最大1e-4で、それぞれ約3倍のマージンを置く。
+        # 実データmroz（hours生スケール）× solver="bfgs"/"lbfgs"。上の`rtol_solver`と同じ機序
+        # （勾配基準の停止点の`|H⁻¹g|`）で、newtonとの差は残る。点推定（係数・σ・対数尤度・
+        # 予測値・限界効果の点推定）は実測最大2e-7、推論（SE・z・p値・信頼区間・Wald・
+        # 限界効果のSE系）は実測最大2e-5（いずれも`AER::tobit`との比較で、返却点の改善後の
+        # 実測。マージンは点推定で約15倍（3e-6÷2e-7）、推論で約15倍（3e-4÷2e-5。実測は1.5e-5））。newton解との比較では、係数・SE・Waldの最大相対差は約1e-8で、最大の
+        # 1.6e-5は限界効果の信頼区間端点（参照値がゼロ近傍で、絶対誤差は2e-11〜4e-8）。
+        # 相対誤差の増幅であり、解の精度の限界ではない。
         "rtol_mroz_solver_point": 3e-6,
         "rtol_mroz_solver_inference": 3e-4,
     },
@@ -117,6 +121,10 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # rtolを超えていても検知できない（同じ係数のz値を厳密に比べて担保している）。
     # 基本rtol=2e-7は、信頼区間などの最大値に約5.7倍、p値を含む最大値（Probit）に
     # 約3倍のマージン（固定フィクスチャとの比較で、OS・BLAS差の揺れに備える）。
+    # 係数の分散共分散行列（`<手法>_cov_crosscheck.json`）も同じrtolで比べる。要素ごとの尺度は
+    # `sqrt(V_ii·V_jj)`（`assert_cov_params_close`）。実測の最大はこの尺度で
+    # Logit 5.3e-10・Probit 6.8e-9（どちらも主リファレンスのstatsmodelsとRの両方、bfgs/lbfgsを除く）。
+    # statsmodels自身のbfgs/lbfgsとの比較（`rtol_solver`）はLogit 1.6e-5・Probit 1.3e-5。
     "logit_crosscheck": {
         "rtol": 2e-7,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
@@ -129,6 +137,9 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # 完全に独立（`nonlinear-common.md` 8章）。censReg 側の maxLik 収束を
     # reltol=1e-14 まで詰めた上で、合成シナリオは点推定・SE・限界効果とも
     # 相対 ~2e-9 で一致するため RTOL_MACHINE_PRECISION を適用する。
+    # 行列（`tobit_cov_crosscheck.json`）も同じ許容誤差で比べる。実測の最大は
+    # mroz/hc1の2.7e-7（`rtol_mroz`以内。censRegの収束限界による）。mroz以外の合成
+    # シナリオは1e-8以内。
     "tobit_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
@@ -166,6 +177,23 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         # `cdf`/`pdf`）で組み立てた値と比べる。`expected_latent`は同じ線形結合で相対差0、
         # `prob_uncensored`・`expected_observed`は正規分布の関数の実装差が出て、実測最大
         # 相対差は2.4e-11。約40倍のマージンを置く。
+        "rtol_predict_closed_form": 1e-9,
+    },
+    # `predict(new_data=...)`を、同じ推定結果の係数からリンク関数（Logitは`1/(1+e^-z)`、
+    # Probitは`scipy.stats.norm.cdf`）で組み立てた値と比べる
+    # （`check_predict_with_include_intercept_false_and_x_named_const`）。
+    # 確率が極小（実測で1e-3〜1e-16）なので、絶対誤差では裾の誤りを見逃す。
+    # 相対誤差だけで比べる（`atol`は0）。
+    # Logitは同じ式で、実測最大相対差は2.0e-16（丸め誤差）。
+    "logit_api": {
+        "rtol_predict_closed_form": 1e-12,
+    },
+    # Probitは正規分布の累積分布関数の実装差（本実装と`scipy.stats.norm.cdf`）が出て、
+    # 実測最大相対差は8.0e-11。約12倍のマージンを置く。
+    # 基準に`statistics.NormalDist().cdf`は使わない。Python 3.12・3.13では
+    # `0.5 * (1 + erf(x))`で実装されていて、確率が1e-16近くまで小さいと桁落ちで
+    # `2**-53`に丸まり、3.14（`erfc`）と値が変わる。
+    "probit_api": {
         "rtol_predict_closed_form": 1e-9,
     },
 }

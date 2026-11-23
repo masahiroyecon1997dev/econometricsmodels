@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -41,9 +43,18 @@ RAISED_CODES: set[str] = set()
 # 全`code`を対象にする。
 MIGRATED_CODES: frozenset[str] = frozenset(
     {
+        ErrorCode.ALPHA_OUT_OF_RANGE,
+        ErrorCode.EFFECTIVE_F_ENDOGENOUS_COUNT,
+        ErrorCode.WEAK_INSTRUMENT_STATISTIC_UNDEFINED,
+        ErrorCode.C_STATISTIC_NOTHING_TO_TEST,
+        ErrorCode.C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS,
+        ErrorCode.C_STATISTIC_UNKNOWN_VARIABLE,
+        ErrorCode.C_STATISTIC_UNDEFINED,
+        ErrorCode.C_STATISTIC_COV_TYPE_NOT_SUPPORTED,
         ErrorCode.COLUMN_NOT_FOUND,
         ErrorCode.COLUMN_CONTAINS_NULL,
         ErrorCode.COLUMN_NON_FINITE,
+        ErrorCode.COLUMN_BLANK_LABEL,
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
         ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
         ErrorCode.COLUMN_VALUES_TIED,
@@ -93,6 +104,10 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
         ErrorCode.SINGLETON_GROUP,
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        ErrorCode.ABSORPTION_NOT_CONVERGED,
+        ErrorCode.LEVERAGE_DIMENSION_TOO_LARGE,
+        ErrorCode.EFFECTS_TOO_MANY,
+        ErrorCode.REGRESSOR_CONSTANT,
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
         ErrorCode.DK_PERIODS_TOO_FEW,
         ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
@@ -103,6 +118,9 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.OUTCOME_CONSTANT,
         ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY,
         ErrorCode.PERFECT_FIT,
+        ErrorCode.UNIT_LEVERAGE_OBSERVATION,
+        ErrorCode.UNIT_LEVERAGE_SLOPE_COVARIANCE,
+        ErrorCode.PICKLE_FORMAT_MISMATCH,
         ErrorCode.INTERNAL_ERROR,
     }
 )
@@ -113,8 +131,15 @@ MIGRATED_CODES: frozenset[str] = frozenset(
 # どちらかに入っていなければならない（`tests/cross_method/test_error_catalog.py`が検査する）。
 # 文面・形式はカタログ全体の検査（`_lib.raise_error_for_test`）とRustの単体テストが固定する。
 # `MATRIX_NEAR_SINGULAR`の`matrix`のうち、Pythonから構成できているのは
-# `COEFFICIENT_COVARIANCE`だけ（`DESIGN_GRAM`・`HESSIAN`・`OPG`・`GMM_WEIGHT`は、前段の
-# 検査や分解が先に失敗するため、極端なスケール差のデータでも構成できていない）。
+# `COEFFICIENT_COVARIANCE`と`DESIGN_GRAM`（列を揃えた条件数が上限を超える設計。
+# `tests/cross_method/test_collinearity_boundary.py`）。`GMM_BREAD`（`Ĝ`の条件数超過）と
+# `GMM_WEIGHT`（操作変数・重みの因子の条件数超過。FEIVのGMMは第一段階が無く`Z`で止まる）も、
+# 同じファイルで構成できている。`HESSIAN`・`OPG`は、前段の検査や分解が先に失敗するため、極端な
+# スケール差のデータでも構成できていない。
+# 共分散が実際に特異なときの契約（FEの`FTestFailed`・REの`HausmanTestFailed`・FE-IVの
+# Wu-Hausmanが`None`）は、特異性の判定が丸め誤差の大きさで決まり、データから堅牢に構成できない
+# ため、手組みの特異な`M̃`でRustの単体テストが固定する（`panel/common/overall_wald.rs`・
+# `panel/fe_iv/wu_hausman.rs`・`panel/re/hausman/tests/undefined.rs`）。
 UNREACHABLE_CODES: dict[str, str] = {
     ErrorCode.BREUSCH_GODFREY_MATRIX_TOO_LARGE: (
         "補助回帰の行列を確保できない大きさのときだけ。`n <= k_aux`の検査が先に"
@@ -152,14 +177,35 @@ def _expected_param_names(code: str, params: dict[str, object]) -> set[str]:
     return names
 
 
+# 非有限の`float`の`params`での表記。`params`はJSONにできる契約なので、`NaN`・無限大は
+# `float`ではなくこの文字列で返る。
+NON_FINITE_LABELS = ("nan", "inf", "-inf")
+
+
+def _is_float_param(value: object) -> bool:
+    """有限の`float`、または非有限を表す文字列（`"nan"`・`"inf"`・`"-inf"`）。"""
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return isinstance(value, str) and value in NON_FINITE_LABELS
+
+
+def approx_param(value: float) -> object:
+    """`float`の`params`の期待値。非有限は`"nan"`・`"inf"`・`"-inf"`、有限は`pytest.approx`。"""
+    if math.isnan(value):
+        return "nan"
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    return pytest.approx(value)
+
+
 def _type_matches(type_name: str, value: object) -> bool:
     match type_name:
         case "int":
             return isinstance(value, int) and not isinstance(value, bool)
         case "float":
-            return isinstance(value, float)
+            return _is_float_param(value)
         case "float_or_none":
-            return value is None or isinstance(value, float)
+            return value is None or _is_float_param(value)
         case "str":
             return isinstance(value, str)
         case "str_list" | "column_list":
@@ -196,6 +242,13 @@ def _check_error(
             f"{expected}: param {spec['name']!r} should be {spec['type']}, "
             f"got {value!r}"
         )
+    # `params`はJSONにできる（`NaN`・無限大は文字列で返る）。
+    try:
+        json.dumps(err.params, allow_nan=False)
+    except ValueError as exc:
+        raise AssertionError(
+            f"{expected}: params are not JSON-serializable: {err.params!r}"
+        ) from exc
     for name, value in params.items():
         assert name in err.params, f"{expected}: no param {name!r}"
         assert err.params[name] == value, (

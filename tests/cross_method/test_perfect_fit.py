@@ -5,7 +5,9 @@
   データの丸め誤差で決まるため、`cov_type`・手法・`y`の作り方によらず同じ`code`になることを見る。
 - 定数の被説明変数: 切片のあるモデルで`y`が（丸め誤差の範囲で）全行で同じ値なら
   `OUTCOME_CONSTANT`（`ValidationError`）。FE・REでは個体内の変動が無い場合が
-  `OUTCOME_CONSTANT_WITHIN_ENTITY`（`ValidationError`）。
+  `OUTCOME_CONSTANT_WITHIN_ENTITY`（`ValidationError`）。Logit・Probit・Tobitも、切片ありで
+  `y`が全行で同じ値なら、完全分離（`SEPARATION_DETECTED`）や収束失敗（`NOT_CONVERGED`）にせず
+  `OUTCOME_CONSTANT`にする（Tobitは全行が打ち切り境界と一致する場合のみ`NO_UNCENSORED_OBSERVATIONS`）。
 """
 
 from __future__ import annotations
@@ -20,11 +22,19 @@ from econometricsmodels import (
     OLS,
     RE,
     WLS,
+    ComputationError,
     ErrorCode,
     FEOptions,
     IVOptions,
+    Logit,
+    LogitOptions,
     OLSOptions,
+    Probit,
+    ProbitOptions,
     REOptions,
+    Tobit,
+    TobitOptions,
+    ValidationError,
     WLSOptions,
 )
 
@@ -91,16 +101,18 @@ def _fit(
     cov_type: str = "classical",
     include_intercept: bool = True,
     gmm_type: str | None = None,
+    two_way: bool = False,
     **kw,
 ):
     """`model`で`y`を`x`・`x2`（IVは`x`を外生変数、`endog`を内生変数、`z`・`z2`を操作変数）に回帰する。"""
     opts = _cov_options(cov_type)
+    effects = ["entity", "time"] if two_way else ["entity"]
     if model == "OLS":
         return OLS(
             df,
             "y",
             ["x", "x2"],
-            OLSOptions(include_intercept=include_intercept, **opts),
+            options=OLSOptions(include_intercept=include_intercept, **opts),
         ).fit()
     if model == "WLS":
         return WLS(
@@ -108,15 +120,15 @@ def _fit(
             "y",
             ["x", "x2"],
             "w",
-            WLSOptions(include_intercept=include_intercept, **opts),
+            options=WLSOptions(include_intercept=include_intercept, **opts),
         ).fit()
     if model == "FE":
         return FE(
-            df, "y", ["x", "x2"], "entity", FEOptions(**kw, **opts)
+            df, "y", ["x", "x2"], effects, options=FEOptions(**kw, **opts)
         ).fit()
     if model == "RE":
         return RE(
-            df, "y", ["x", "x2"], "entity", REOptions(**kw, **opts)
+            df, "y", ["x", "x2"], effects, options=REOptions(**kw, **opts)
         ).fit()
     estimator = "gmm" if model == "IV-GMM" else "2sls"
     gmm = {"gmm_type": gmm_type} if gmm_type else {}
@@ -126,7 +138,7 @@ def _fit(
         ["x"],
         ["endog"],
         ["z", "z2"],
-        IVOptions(
+        options=IVOptions(
             estimator=estimator,
             include_intercept=include_intercept,
             **opts,
@@ -186,7 +198,7 @@ def test_perfect_fit_in_a_two_way_fixed_effects_model(cov_type, df):
         - 0.5 * pl.col("time")
     )
     with raises_error(ErrorCode.PERFECT_FIT, stage="WITHIN_REGRESSION"):
-        _fit("FE", data, cov_type, time="time")
+        _fit("FE", data, cov_type, two_way=True)
 
 
 @pytest.mark.parametrize("model", ["OLS", "WLS"])
@@ -259,7 +271,7 @@ def test_perfect_first_stage_is_reported_with_the_first_stage_context(df):
                 ["x"],
                 ["endog"],
                 ["z", "z2"],
-                IVOptions(estimator=estimator),
+                options=IVOptions(estimator=estimator),
             ).fit()
 
 
@@ -290,7 +302,7 @@ def test_only_the_second_endogenous_regressor_has_a_perfect_first_stage(df):
             ["x"],
             ["endog", "endog2"],
             ["z", "z2", "noise"],
-            IVOptions(),
+            options=IVOptions(),
         ).fit()
 
 
@@ -300,7 +312,7 @@ def test_wu_hausman_is_none_when_only_the_augmented_regression_is_exact(
 ):
     """`y = 1 + 2*endog + 3*v`（`v`は第一段階残差）は、構造残差も第一段階も完全フィット
     ではないが、Wu-Hausmanの拡張回帰だけが厳密に成り立つ。`fit()`は成功し、
-    2SLSの検定統計量は無意味な値ではなく`None`になる。"""
+    検定統計量は無意味な値ではなく`None`になる。"""
     first_stage = (
         IV(
             df.with_columns(y=pl.col("x") + pl.col("noise")),
@@ -308,7 +320,7 @@ def test_wu_hausman_is_none_when_only_the_augmented_regression_is_exact(
             ["x"],
             ["endog"],
             ["z", "z2"],
-            IVOptions(estimator=estimator),
+            options=IVOptions(estimator=estimator),
         )
         .fit()
         .first_stage()["endog"]
@@ -323,7 +335,7 @@ def test_wu_hausman_is_none_when_only_the_augmented_regression_is_exact(
         ["x"],
         ["endog"],
         ["z", "z2"],
-        IVOptions(estimator=estimator),
+        options=IVOptions(estimator=estimator),
     ).fit()
     assert result.wu_hausman_statistic is None
     assert result.wu_hausman_p_value is None
@@ -339,7 +351,7 @@ def test_the_second_stage_regression_is_not_judged_for_a_perfect_fit(df):
             ["x"],
             ["endog"],
             ["z", "z2"],
-            IVOptions(),
+            options=IVOptions(),
         )
         .fit()
         .first_stage()["endog"]
@@ -348,7 +360,9 @@ def test_the_second_stage_regression_is_not_judged_for_a_perfect_fit(df):
     data = df.with_columns(
         y=pl.Series(1.0 + 2.0 * (df["endog"].to_numpy() - v))
     )
-    result = IV(data, "y", ["x"], ["endog"], ["z", "z2"], IVOptions()).fit()
+    result = IV(
+        data, "y", ["x"], ["endog"], ["z", "z2"], options=IVOptions()
+    ).fit()
     assert all(np.isfinite(list(result.std_errors.values())))
 
 
@@ -421,7 +435,7 @@ def test_constant_outcome_is_reported_before_the_first_stage(df):
                 ["x"],
                 ["endog"],
                 ["z", "z2"],
-                IVOptions(estimator=estimator),
+                options=IVOptions(estimator=estimator),
             ).fit()
 
 
@@ -441,7 +455,7 @@ def test_constant_outcome_is_reported_before_the_cluster_count(df):
             data,
             "y",
             ["x", "x2", "z"],
-            OLSOptions(cov_type="cluster", cluster="few"),
+            options=OLSOptions(cov_type="cluster", cluster="few"),
         ).fit()
 
 
@@ -450,10 +464,16 @@ def test_a_constant_endogenous_regressor_is_reported_in_its_first_stage(df):
     data = df.with_columns(
         endog=pl.lit(2.0), y=1.0 + pl.col("x") + pl.col("noise")
     )
+    # 第一段階の被説明変数は内生変数なので、`argument`は`y`ではなく`x_endog`。
     with raises_error(
-        ErrorCode.OUTCOME_CONSTANT, stage="FIRST_STAGE", endog_name="endog"
+        ErrorCode.OUTCOME_CONSTANT,
+        stage="FIRST_STAGE",
+        endog_name="endog",
+        column="endog",
+        argument="x_endog",
+        data_argument="data",
     ):
-        IV(data, "y", ["x"], ["endog"], ["z", "z2"], IVOptions()).fit()
+        IV(data, "y", ["x"], ["endog"], ["z", "z2"], options=IVOptions()).fit()
 
 
 def test_a_constant_endogenous_regressor_without_an_intercept_is_allowed(df):
@@ -466,7 +486,7 @@ def test_a_constant_endogenous_regressor_without_an_intercept_is_allowed(df):
         ["x"],
         ["endog"],
         ["z", "z2"],
-        IVOptions(include_intercept=False),
+        options=IVOptions(include_intercept=False),
     ).fit()
     assert all(np.isfinite(list(result.std_errors.values())))
 
@@ -482,8 +502,19 @@ def test_outcome_constant_within_every_entity(model, cov_type, df):
 
 
 @pytest.mark.parametrize("model", ["FE", "RE"])
-def test_a_globally_constant_outcome_is_constant_within_entity(model, df):
+def test_a_globally_constant_outcome_is_reported_as_constant(model, df):
+    """全ての行で同じ値のyは、固定効果を除く前に分かるので`OUTCOME_CONSTANT`。"""
     data = df.with_columns(y=pl.lit(4.0))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit(model, data)
+
+
+@pytest.mark.parametrize("model", ["FE", "RE"])
+def test_an_outcome_constant_within_every_entity_is_reported_as_such(
+    model, df
+):
+    """個体ごとには定数でも個体間で違うyは、固定効果を除くと変動が残らない。"""
+    data = df.with_columns(y=2.0 * pl.col("entity"))
     with raises_error(ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY):
         _fit(model, data)
 
@@ -495,7 +526,7 @@ def test_outcome_explained_by_entity_and_time_effects_in_a_two_way_model(
     """2-wayでは、`y = 個体効果 + 時点効果`も2方向のwithin変換後に0になる。"""
     data = df.with_columns(y=2.0 * pl.col("entity") - 0.5 * pl.col("time"))
     with raises_error(ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY):
-        _fit(model, data, time="time")
+        _fit(model, data, two_way=True)
 
 
 @pytest.mark.parametrize("model", ["FE", "RE"])
@@ -517,17 +548,165 @@ def test_the_regressor_check_comes_before_the_outcome_check_in_fe(df):
     data = df.with_columns(
         y=0.1 * (pl.col("entity") + 1), x2=pl.col("entity") * 1.0
     )
-    with raises_error(ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, column="x2"):
+    with raises_error(
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
+        argument="x",
+        data_argument="data",
+        columns=["x2"],
+    ):
         _fit("FE", data)
 
 
 def test_outcome_constant_within_entity_is_not_staged_in_re(df):
     """REの内部FEが報告するが、入力の事実なので文脈句（`stage`）は付けない。"""
-    data = df.with_columns(y=pl.lit(4.0))
+    data = df.with_columns(y=2.0 * pl.col("entity"))
     with pytest.raises(Exception) as info:
-        RE(data, "y", ["x"], "entity").fit()
+        RE(data, "y", ["x"], ["entity"]).fit()
     assert getattr(info.value, "code", None) == (
         ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY
     )
     assert getattr(info.value, "params", {}).get("stage") is None
     assert not str(info.value).startswith("In the ")
+
+
+# --- Logit・Probit・Tobit: 定数の被説明変数 ---
+
+NONLINEAR_MODELS = ["Logit", "Probit", "Tobit"]
+NONLINEAR_SOLVERS = ["newton", "bfgs", "lbfgs"]
+
+
+def _fit_nonlinear(
+    model: str,
+    df: pl.DataFrame,
+    include_intercept: bool = True,
+    solver: str = "newton",
+    **kw,
+):
+    """`model`で`y`を`x`・`x2`に回帰する（Tobitは`lower=0`の左側打ち切りを既定にする）。"""
+    x = ["x", "x2"]
+    if model == "Logit":
+        return Logit(
+            df,
+            "y",
+            x,
+            options=LogitOptions(
+                include_intercept=include_intercept, solver=solver, **kw
+            ),
+        ).fit()
+    if model == "Probit":
+        return Probit(
+            df,
+            "y",
+            x,
+            options=ProbitOptions(
+                include_intercept=include_intercept, solver=solver, **kw
+            ),
+        ).fit()
+    kw.setdefault("lower", 0.0)
+    return Tobit(
+        df,
+        "y",
+        x,
+        options=TobitOptions(
+            include_intercept=include_intercept, solver=solver, **kw
+        ),
+    ).fit()
+
+
+def _constant_value(model: str, value: float) -> float:
+    """二値モデルでは0か1、Tobitでは境界（0）より上の`value`。"""
+    return value if model == "Tobit" else float(value > 0)
+
+
+@pytest.mark.parametrize("solver", NONLINEAR_SOLVERS)
+@pytest.mark.parametrize("value", [1.0, 5.0])
+@pytest.mark.parametrize("model", NONLINEAR_MODELS)
+def test_nonlinear_constant_outcome_with_an_intercept_is_a_validation_error(
+    model, value, solver, df
+):
+    """分離や収束失敗ではなく、原因の`y`を指す`OUTCOME_CONSTANT`にする。"""
+    data = df.with_columns(y=pl.lit(_constant_value(model, value)))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit_nonlinear(model, data, solver=solver)
+
+
+@pytest.mark.parametrize("model", ["Logit", "Probit"])
+def test_binary_constant_zero_outcome_is_a_validation_error(model, df):
+    data = df.with_columns(y=pl.lit(0.0))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit_nonlinear(model, data)
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc1", "opg"])
+@pytest.mark.parametrize("model", NONLINEAR_MODELS)
+def test_nonlinear_constant_outcome_for_every_cov_type(model, cov_type, df):
+    data = df.with_columns(y=pl.lit(_constant_value(model, 1.0)))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit_nonlinear(model, data, cov_type=cov_type)
+
+
+@pytest.mark.parametrize("model", NONLINEAR_MODELS)
+def test_nonlinear_constant_outcome_ignores_raise_on_non_convergence(
+    model, df
+):
+    """入力だけから分かる誤りなので、`raise_on_non_convergence=False`でも結果を返さず弾く。"""
+    data = df.with_columns(y=pl.lit(_constant_value(model, 1.0)))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit_nonlinear(model, data, raise_on_non_convergence=False)
+
+
+@pytest.mark.parametrize("model", NONLINEAR_MODELS)
+def test_nonlinear_constant_outcome_with_clustered_errors(model, df):
+    """クラスター数が足りていれば、`cov_type="cluster"`でも`OUTCOME_CONSTANT`を返す。"""
+    data = df.with_columns(y=pl.lit(_constant_value(model, 1.0)))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit_nonlinear(model, data, cov_type="cluster", cluster="entity")
+
+
+@pytest.mark.parametrize("model", NONLINEAR_MODELS)
+def test_nonlinear_constant_outcome_without_an_intercept_is_estimated(
+    model, df
+):
+    """切片なしでは定数の`y`にも説明する対象があり、`OUTCOME_CONSTANT`にならない。"""
+    data = df.with_columns(y=pl.lit(_constant_value(model, 1.0)))
+    result = _fit_nonlinear(model, data, include_intercept=False)
+    assert result.converged
+
+
+def test_tobit_outcome_that_differs_by_one_ulp_is_constant(df):
+    """OLS・WLS・IVと同じ相対閾値で、1 ulpの違いは定数とみなす（二値の`y`に1 ulpは無い）。"""
+    values = np.where(np.arange(N) % 2 == 0, 0.1 + 0.2, 0.3)
+    assert len(set(values)) == 2
+    data = df.with_columns(y=pl.Series(values))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit_nonlinear("Tobit", data)
+
+
+def test_tobit_outcome_at_the_censoring_bound_keeps_its_own_error(df):
+    """全行が同じ境界値に一致する`y`は定数でもあるが、より具体的な`NO_UNCENSORED_OBSERVATIONS`を返す
+    （`y`が許される形か → `y`が定数か、の順）。"""
+    data = df.with_columns(y=pl.lit(0.0))
+    with raises_error(
+        ErrorCode.NO_UNCENSORED_OBSERVATIONS, lower=0.0, upper=None
+    ):
+        _fit_nonlinear("Tobit", data, lower=0.0)
+    with raises_error(
+        ErrorCode.NO_UNCENSORED_OBSERVATIONS, lower=None, upper=0.0
+    ):
+        _fit_nonlinear("Tobit", data, lower=None, upper=0.0)
+
+
+def test_tobit_outcome_constant_among_uncensored_rows_is_not_reported_as_constant(
+    df,
+):
+    """非打ち切りの値が全て同じでも、打ち切られた行があれば`y`は定数ではないので対象外。
+
+    この場合の扱い自体は未決で、ここでは`OUTCOME_CONSTANT`にならないことだけを固定する
+    （扱いを決めたら、このテストを結論に合わせて更新する）。
+    """
+    values = np.where(np.arange(N) % 2 == 0, 5.0, 0.0)
+    data = df.with_columns(y=pl.Series(values))
+    try:
+        _fit_nonlinear("Tobit", data, lower=0.0)
+    except (ValidationError, ComputationError) as error:  # 成否は問わない
+        assert getattr(error, "code", None) != ErrorCode.OUTCOME_CONSTANT

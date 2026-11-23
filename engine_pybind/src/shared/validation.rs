@@ -1,19 +1,19 @@
 //! 全手法で共有する、列名レベルの入力バリデーション（`ValidationError`）。
 //!
 //! `.claude/rules/rust-style.md`「全手法で共有するロジックは系統ディレクトリの外、
-//! `shared/`に置く」の方針、`column_extraction.rs`と同じ位置づけ。
+//! `shared/`に置く」の方針、`column_extraction/`と同じ位置づけ。
 //!
-//! OLS/WLS/Logitの`fit`/`build_logit_input`冒頭で、メッセージ文言まで
-//! ほぼ同一のまま重複していたバリデーション（xが空・yやweight等のロール間の重複・
-//! x内の重複・`include_intercept=true`時の`"const"`列衝突）をここに集約する。
+//! OLS/WLS/Logit等の`fit`/`build_*_input`冒頭で共通に行うバリデーション（xが空・
+//! yやweight等のロール間の重複・x内の重複・`include_intercept=true`時の`"const"`列衝突）
+//! をここに置く。
 //! `validate_common_roles`は、このうち`x`が空・`y`と`x`の重複・`x`内の重複・
-//! `const`衝突の4つを決まった順序でまとめて呼ぶ束ねるヘルパー（`refactoring-
-//! candidates.md`項目61）。
+//! `const`衝突の4つを決まった順序でまとめて呼ぶ束ねるヘルパー。`weight`を持つWLSは、
+//! `y`と`weight`の重複を`y`と`x`の重複の次に足した`validate_weighted_roles`を使う。
 //!
 //! `cov_type`/`method`文字列のパースはここに含めない（戻り値の型が系統ごとに異なる
 //! ため。`engine::linear::ols::CovType`は`Hc2`/`Hc3`/`Hac`を持つが
 //! `engine::nonlinear::common::CovType`にはなく代わりに`Opg`を持つ、`method`は
-//! nonlinear系統にしかない。無理な抽象化は複雑度が上がるだけのため見送った）。
+//! nonlinear系統にしかない。無理に共通化すると複雑度が上がるだけのため、系統ごとに持つ）。
 
 use std::collections::HashSet;
 
@@ -26,7 +26,7 @@ use super::errors::user_error;
 /// `validate_no_duplicate_roles`に渡す1ロール分の値。単一列（`y`/`weight`等）と
 /// 複数列（`x`/`x_exog`/`instruments`等）の両方を同じ関数で扱えるようにするための
 /// 判別共用体（IVの`instruments`が`x_exog`/`x_endog`という複数列ロールと
-/// 重複していないかを検証する必要があるため導入）。
+/// 重複していないかも検証する必要があるため）。
 pub enum RoleValue<'a> {
     /// `y`/`weight`のような単一列ロール。
     Single(&'a str),
@@ -37,12 +37,11 @@ pub enum RoleValue<'a> {
 /// 複数列ロール（`x`/`x_endog`/`instruments`等）が空リストでないことを検証する。
 /// `role_name`はエラーメッセージに使う。
 ///
-/// 元は`x`専用の関数だったが、IVの`x_endog`/`instruments`（`x_exog`とは
-/// 異なり空リストを許容しない）でも同じ検証が必要になったため`validate_no_duplicate_
-/// within_role`と同じ形で汎用化した。既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は
-/// `role_name="x"`で呼ぶ。
-pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
-    if x.is_empty() {
+/// ロールごとに空を許すかが違う（IVの`x_exog`は空でもよいが、`x_endog`/`instruments`は
+/// 空を許さない）ため、`validate_no_duplicate_within_role`と同じくロール名を引数で受ける。
+/// OLS/WLS/Logit/Probit/Tobitは`role_name="x"`で呼ぶ。
+pub fn validate_role_non_empty(role_name: &str, columns: &[String]) -> PyResult<()> {
+    if columns.is_empty() {
         return Err(user_error(
             ErrorCode::RoleEmpty,
             vec![("argument", ParamValue::from(role_name))],
@@ -54,9 +53,8 @@ pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
 /// 単一の複数列ロール（`x`/`x_exog`/`x_endog`/`instruments`等）の内部に、重複した列名が
 /// 無いことを検証する。`role_name`はエラーメッセージに使う。
 ///
-/// 元は`validate_no_duplicate_x`という`x`専用の関数だったが、IVの`x_exog`/`x_endog`/
-/// `instruments`という3つの複数列ロールそれぞれで同じ検証が必要になったため汎用化した。
-/// 既存の呼び出し元（OLS/WLS/Logit/Probit）は`role_name="x"`で呼ぶ
+/// IVの`x_exog`/`x_endog`/`instruments`という3つの複数列ロールそれぞれで同じ検証が
+/// 必要なため、ロール名を引数で受ける。OLS/WLS/Logit/Probitは`role_name="x"`で呼ぶ
 /// （`role_name`は`ROLE_*`の`argument`になる）。
 pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) -> PyResult<()> {
     let mut seen = HashSet::new();
@@ -78,12 +76,11 @@ pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) ->
 /// `instruments`等）に`"const"`という列名が含まれていないことを検証する
 /// （自動追加する定数項名との衝突を防ぐ）。`role_name`はエラーメッセージに使う。
 ///
-/// 元は`x`専用の関数だったが、IVでは`x_exog`だけでなく`x_endog`/`instruments`に
-/// `"const"`という列名が含まれていても同じ衝突が起き結果がサイレントに破損する
-/// ため（`first_stage()`/構造方程式本体の`param_names`に`"const"`が重複し、
-/// 後勝ちで真の切片係数が上書きされる）、`validate_x_non_empty`/
-/// `validate_no_duplicate_within_role`と同じ形で`role_name`を引数化した。
-/// 既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は`role_name="x"`で呼ぶ。
+/// IVでは`x_exog`だけでなく`x_endog`/`instruments`に`"const"`という列名が含まれて
+/// いても同じ衝突が起き結果がサイレントに破損する（`first_stage()`/構造方程式本体の
+/// `param_names`に`"const"`が重複し、後勝ちで真の切片係数が上書きされる）ため、
+/// `validate_role_non_empty`/`validate_no_duplicate_within_role`と同じくロール名を
+/// 引数で受ける。OLS/WLS/Logit/Probit/Tobitは`role_name="x"`で呼ぶ。
 pub fn validate_no_const_collision(
     role_name: &str,
     x: &[String],
@@ -99,22 +96,53 @@ pub fn validate_no_const_collision(
 }
 
 /// `y`/`x`/`include_intercept`に関する4つの共通バリデーションを、この順序でまとめて
-/// 実行する（`validate_x_non_empty`→`validate_no_duplicate_roles`（`y`と`x`の重複）→
+/// 実行する（`validate_role_non_empty`→`validate_no_duplicate_roles`（`y`と`x`の重複）→
 /// `validate_no_duplicate_within_role`（`x`内部の重複）→`validate_no_const_collision`）。
 ///
-/// OLS/Logit/Probit/Tobitの`fit`/`build_*_input`冒頭でこの4行が完全に同一のまま
-/// 重複していたため集約した。Tobitは本関数の
-/// 呼び出し後に`validate_no_sigma_collision`を追加で呼ぶ。WLSは`weight`ロールとの
-/// 重複チェックが追加で必要なため、本関数の呼び出し後に`validate_no_duplicate_roles`で
-/// `weight`用のチェックを別途呼ぶ（`y`/`x`両方の検証を1関数にまとめたことで、`weight`
-/// チェックの実行順序が従来より後にずれるが、複合違反時のメッセージ優先順位に依存する
-/// テストは無いことを確認済み）。
+/// OLS/Logit/Probit/Tobitの`fit`/`build_*_input`冒頭で共通に呼ぶ。Tobitは本関数の
+/// 呼び出し後に`validate_no_sigma_collision`を追加で呼ぶ。`weight`を持つWLSは
+/// [`validate_weighted_roles`]を使う。
 ///
 /// `panel::fe`/`panel::re`は`entity`/`time`という動的なロール構成を持ち`const`衝突
 /// チェックも無いため対象外（呼び出し元で個別にロールリストを組み立てる）。
 pub fn validate_common_roles(y: &str, x: &[String], include_intercept: bool) -> PyResult<()> {
-    validate_x_non_empty("x", x)?;
+    validate_roles(y, x, None, include_intercept)
+}
+
+/// [`validate_common_roles`]に、`weight`と`y`の重複の検証を足したもの（WLS用）。
+///
+/// 順序は`validate_role_non_empty`→`validate_no_duplicate_roles`（`y`と`x`の重複、
+/// 次に`y`と`weight`の重複）→`validate_no_duplicate_within_role`（`x`内部の重複）→
+/// `validate_no_const_collision`。ロール間の重複を`x`内の重複・`"const"`の衝突より
+/// 先に報告するのは、`docs/guide/validation.md`「Order in which errors are reported」の
+/// 順序を全手法で揃えるため。`weight`と`x`の重複は許容する（重みに使った列を説明変数
+/// にも入れる利用があるため。`docs/spec/wls-spec.md`「API引数」）ので、`weight`は`y`
+/// とだけ照合する。
+pub fn validate_weighted_roles(
+    y: &str,
+    x: &[String],
+    weight: &str,
+    include_intercept: bool,
+) -> PyResult<()> {
+    validate_roles(y, x, Some(weight), include_intercept)
+}
+
+/// `validate_common_roles`と`validate_weighted_roles`の共通の本体。`weight`が`Some`のとき
+/// だけ、`y`と`weight`の重複を`y`と`x`の重複の次に検証する（`None`は`weight`を持たない手法）。
+fn validate_roles(
+    y: &str,
+    x: &[String],
+    weight: Option<&str>,
+    include_intercept: bool,
+) -> PyResult<()> {
+    validate_role_non_empty("x", x)?;
     validate_no_duplicate_roles(&[("y", RoleValue::Single(y)), ("x", RoleValue::Multi(x))])?;
+    if let Some(weight) = weight {
+        validate_no_duplicate_roles(&[
+            ("y", RoleValue::Single(y)),
+            ("weight", RoleValue::Single(weight)),
+        ])?;
+    }
     validate_no_duplicate_within_role("x", x)?;
     validate_no_const_collision("x", x, include_intercept)?;
     Ok(())
@@ -262,22 +290,22 @@ mod tests {
     }
 
     #[test]
-    fn validate_x_non_empty_ok_for_non_empty() {
-        assert!(validate_x_non_empty("x", &["x1".to_string()]).is_ok());
+    fn validate_role_non_empty_ok_for_non_empty() {
+        assert!(validate_role_non_empty("x", &["x1".to_string()]).is_ok());
     }
 
     #[test]
-    fn validate_x_non_empty_returns_error_for_empty() {
-        assert!(validate_x_non_empty("x", &[]).is_err());
+    fn validate_role_non_empty_returns_error_for_empty() {
+        assert!(validate_role_non_empty("x", &[]).is_err());
     }
 
     #[test]
-    fn validate_x_non_empty_returns_error_using_custom_role_name() {
+    fn validate_role_non_empty_returns_error_using_custom_role_name() {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
         // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
-        // `role_name`が異なっても（`x`専用だった旧実装から汎用化した後も）挙動そのもの
+        // `role_name`が異なっても挙動そのもの
         // （空リスト検出）が変わらないことのみ確認する。
-        assert!(validate_x_non_empty("x_endog", &[]).is_err());
+        assert!(validate_role_non_empty("x_endog", &[]).is_err());
     }
 
     #[test]
@@ -296,7 +324,7 @@ mod tests {
     fn validate_no_duplicate_within_role_returns_error_using_custom_role_name() {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
         // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
-        // `role_name`が異なっても（`x`専用だった旧実装から汎用化した後も）挙動そのもの
+        // `role_name`が異なっても挙動そのもの
         // （重複検出）が変わらないことのみ確認する。
         let instruments = ["z1".to_string(), "z1".to_string()];
         assert!(validate_no_duplicate_within_role("instruments", &instruments).is_err());
@@ -324,7 +352,7 @@ mod tests {
     fn validate_no_const_collision_returns_error_using_custom_role_name() {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
         // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
-        // `role_name`が異なっても（`x`専用だった旧実装から汎用化した後も）挙動そのもの
+        // `role_name`が異なっても挙動そのもの
         // （衝突検出）が変わらないことのみ確認する。
         let instruments = ["const".to_string()];
         assert!(validate_no_const_collision("instruments", &instruments, true).is_err());
@@ -363,6 +391,36 @@ mod tests {
     fn validate_common_roles_ok_for_const_column_when_include_intercept_is_false() {
         let x = ["const".to_string()];
         assert!(validate_common_roles("y", &x, false).is_ok());
+    }
+
+    #[test]
+    fn validate_weighted_roles_ok_for_well_formed_input() {
+        let x = ["x1".to_string(), "x2".to_string()];
+        assert!(validate_weighted_roles("y", &x, "w", true).is_ok());
+    }
+
+    #[test]
+    fn validate_weighted_roles_ok_when_weight_is_also_in_x() {
+        let x = ["x1".to_string(), "w".to_string()];
+        assert!(validate_weighted_roles("y", &x, "w", true).is_ok());
+    }
+
+    #[test]
+    fn validate_weighted_roles_returns_error_when_weight_is_y() {
+        let x = ["x1".to_string()];
+        assert!(validate_weighted_roles("y", &x, "y", true).is_err());
+    }
+
+    #[test]
+    fn validate_weighted_roles_keeps_the_common_checks() {
+        assert!(validate_weighted_roles("y", &[], "w", true).is_err());
+        let y_in_x = ["y".to_string()];
+        assert!(validate_weighted_roles("y", &y_in_x, "w", true).is_err());
+        let duplicate = ["x1".to_string(), "x1".to_string()];
+        assert!(validate_weighted_roles("y", &duplicate, "w", true).is_err());
+        let collision = ["const".to_string()];
+        assert!(validate_weighted_roles("y", &collision, "w", true).is_err());
+        assert!(validate_weighted_roles("y", &collision, "w", false).is_ok());
     }
 
     #[test]

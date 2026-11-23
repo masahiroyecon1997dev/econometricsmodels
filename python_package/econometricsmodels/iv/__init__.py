@@ -1,11 +1,7 @@
 """Instrumental variables methods (2SLS, GMM).
 
-Mirrors the `iv/` directory structure of `engine`/`engine_pybind` (see
-`.claude/rules/rust-style.md` "ファイル・ディレクトリ構成"). Unlike
-`linear/`/`nonlinear/`, a single `iv.py` module covers both 2SLS and
-GMM (selected via `IVOptions.estimator`) rather than one file per estimator,
-mirroring `engine_pybind/src/iv/common.rs`'s single `fit_iv` entry
-point.
+A single `iv.py` module covers both 2SLS and GMM (selected via
+`IVOptions.estimator`) rather than one module per estimator.
 """
 
 from __future__ import annotations

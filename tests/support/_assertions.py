@@ -10,6 +10,8 @@
   `_assert_dict_close`は辞書版で統一）。
 - `assert_inference_close`: 推論の5ブロック（`params`・`std_errors`・`test_stats`・
   `p_values`・`conf_int`）の比較。許容誤差を係数・信頼区間端点・p値で分けられる。
+  リファレンスに`cov_params`（`_fixture_cov.load_fixtures_with_cov`が合流させる）があれば、
+  `assert_cov_params_close`で分散共分散行列も比べる。
 - `assert_fields_close`: 結果の属性（適合度統計量等）をフィクスチャの同名キーと
   まとめて比較する。属性名とキーが異なるときは`(属性名, キー)`で渡す。
 
@@ -26,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 
 import polars as pl
+from _fixture_cov import mark_cov_consumed
 from _helpers import respell
 
 
@@ -98,6 +101,10 @@ def assert_inference_close(
         )
     else:
         p_value_check(res.p_values, ref["p_values"], f"{label}/p_values")
+    if "cov_params" in ref:
+        assert_cov_params_close(
+            res.cov_params, ref["cov_params"], label, rtol=rtol
+        )
     assert_same_keys(res.conf_int, ref["conf_int"], f"{label}/conf_int")
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
@@ -115,6 +122,37 @@ def assert_inference_close(
             rtol=rtol_ci,
             atol=atol,
         )
+
+
+def assert_cov_params_close(
+    ours: dict[str, dict[str, float]],
+    ref: dict[str, dict[str, float]],
+    label: str,
+    *,
+    rtol: float,
+) -> None:
+    """係数の分散共分散行列（`{名前: {名前: 値}}`）を比較する。
+
+    行・列の名前の集合と並び（`param_names`の順）が一致することを確認してから、
+    要素ごとに`|ours - ref| <= rtol * sqrt(ref_ii * ref_jj)`で比べる。非対角成分は0に近い
+    ことがあり、その要素自身の大きさを基準にした相対誤差は意味を持たないため、両方の
+    係数の分散から決まる尺度（対角成分なら`rtol * ref_ii`）で割る。絶対誤差の下限は置かない
+    （係数のスケールが違うモデルでも、どの成分も同じ精度で比べるため）。
+    """
+    mark_cov_consumed(ref)
+    assert_same_keys(ours, ref, f"{label}/cov_params")
+    assert list(ours) == list(ref), f"{label}/cov_params: 行の並びが違う"
+    for row, ref_row in ref.items():
+        assert list(ours[row]) == list(ref_row), (
+            f"{label}/cov_params/{row}: 列の並びが違う"
+        )
+        for col, ref_val in ref_row.items():
+            scale = (ref_row[row] * ref[col][col]) ** 0.5
+            diff = abs(ours[row][col] - ref_val)
+            assert diff <= rtol * scale, (
+                f"{label}/cov_params/{row}/{col}: ours={ours[row][col]!r}, "
+                f"ref={ref_val!r}, diff={diff!r} > tol={rtol * scale!r}"
+            )
 
 
 def assert_fields_close(

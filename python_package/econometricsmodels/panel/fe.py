@@ -1,24 +1,15 @@
 """Python wrapper for FE (fixed effects panel regression).
 
 A thin wrapper around `econometricsmodels._lib.fit_fe` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — `entity`/`time` as bare
-column-name arguments, `x` as a list, an options object for estimation
-settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
-"設計方針との整合性", `docs/spec/panel-common.md` section 1).
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+`effects` and `x` as lists of column names, and an options object for
+the estimation settings.
 
-`FEOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `OLSOptions`/`IVOptions`).
-
-`fixed_effects()` (the fixed effects themselves, `α_i`/`γ_t`) is
-provided as a separate method rather than a field on `FEResults`
-(`docs/spec/fe-spec.md` section 3.5, the same
-"additional results are a separate method" policy as IV's
-`first_stage()`).
-
-`summary()` is not implemented (structured-data-only output policy; see
-the `OLSResults`/`IVResults` precedent).
+`FEOptions` is re-exported as-is from `_lib`. The fixed effects
+themselves (`α_i`, `γ_t` and the effects of further columns) come from
+the separate method `FEResults.fixed_effects()`. There is no `summary()`: results are
+returned as structured data.
 """
 
 from __future__ import annotations
@@ -32,7 +23,9 @@ from .._lib import FEOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     params_table_rows,
+    results_repr,
 )
 
 __all__ = ["FE", "FEOptions", "FEResults"]
@@ -41,21 +34,36 @@ __all__ = ["FE", "FEOptions", "FEResults"]
 class FE:
     """Fixed effects (within) panel regression estimator.
 
-    Supports one-way (entity) and two-way (entity + time) fixed
-    effects, selected via `FEOptions.time`.
+    Supports one-way, two-way and higher-dimensional fixed effects,
+    selected by the number of columns in `effects`: one column (the
+    entity identifier) for one-way effects, two columns (the entity
+    identifier, then the time identifier) for two-way effects, and three
+    to five columns for higher-dimensional effects (for example firm,
+    year and industry).
 
     Args:
         data: A polars DataFrame containing the dependent variable,
-            independent variables, entity identifier, and (if
-            specified) time/cluster/HAC time columns.
+            independent variables, the `effects` columns, and (if
+            specified) the `cluster` and `dk_time` columns of the
+            options.
         y: Column name of the dependent variable.
         x: List of column names of the independent variables. Must
             contain at least one column name.
-        entity: Column name of the entity (individual/panel unit)
-            identifier.
+        effects: List of one to five column names that define the fixed
+            effects. The first is the entity (individual/panel unit)
+            identifier; the optional second is the time period, which
+            makes the model two-way; the optional third to fifth are
+            further grouping columns of the same kind as the first. The
+            same combination of values may repeat in several rows.
+            Two-way effects on an unbalanced panel, and three or more
+            columns, are estimated by alternating projections. The order
+            matters: the first column is the default cluster key, and
+            the first period of the second column (in time order) is
+            the reference period of `fixed_effects()`. Swapping the
+            columns leaves the coefficients unchanged.
         options: Estimation options. Defaults to `FEOptions()`
-            (`cov_type="cluster"` on `entity`, one-way,
-            confidence_level=0.95) when omitted.
+            (`cov_type="cluster"` on the first column of `effects`,
+            `confidence_level=0.95`) when omitted.
 
     Examples:
         >>> import polars as pl
@@ -67,8 +75,39 @@ class FE:
         ...         "id": ["a", "a", "b", "b", "c", "c"],
         ...     }
         ... )
-        >>> result = FE(df, y="y", x=["x1"], entity="id").fit()
-        >>> result.params["x1"]
+        >>> result = FE(df, y="y", x=["x1"], effects=["id"]).fit()
+        >>> round(result.params["x1"], 3)
+        0.31
+
+        Two-way effects take a second column, the time period:
+
+        >>> panel = pl.DataFrame(
+        ...     {
+        ...         "y": [1.2, 2.1, 2.9, 2.0, 3.2, 3.9]
+        ...         + [0.5, 1.7, 2.2, 3.1, 3.8, 5.2],
+        ...         "x1": [1.0, 2.0, 3.0, 1.5, 2.5, 3.0]
+        ...         + [0.5, 1.0, 2.0, 2.0, 3.0, 4.0],
+        ...         "id": ["a"] * 3 + ["b"] * 3 + ["c"] * 3 + ["d"] * 3,
+        ...         "t": [1, 2, 3] * 4,
+        ...     }
+        ... )
+        >>> two_way = FE(
+        ...     panel, y="y", x=["x1"], effects=["id", "t"]
+        ... ).fit()
+        >>> two_way.n_groups
+        {'id': 4, 't': 3}
+        >>> list(two_way.fixed_effects())
+        ['id', 't']
+
+        Three to five columns add further sets of effects, here an
+        industry:
+
+        >>> panel = panel.with_columns(industry=pl.Series(["p", "q"] * 6))
+        >>> three_way = FE(
+        ...     panel, y="y", x=["x1"], effects=["id", "t", "industry"]
+        ... ).fit()
+        >>> three_way.n_groups
+        {'id': 4, 't': 3, 'industry': 2}
     """
 
     def __init__(
@@ -76,13 +115,14 @@ class FE:
         data: pl.DataFrame,
         y: str,
         x: list[str],
-        entity: str,
+        effects: list[str],
+        *,
         options: FEOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x = x
-        self._entity = entity
+        self._effects = effects
         self._options = options if options is not None else FEOptions()
 
     def fit(self) -> FEResults:
@@ -93,36 +133,53 @@ class FE:
 
         Raises:
             TypeError: An argument has the wrong type (for example
-                `x` is a string instead of a list of column names). A
-                builtin exception, not a `ValidationError`.
-            ValidationError: The input or options are invalid (`x` is
-                empty, a column is missing, contains missing values or
-                NaN/infinity, `y`/`x`/`entity`/`time` overlap,
-                insufficient observations, `confidence_level` out of
-                range, an unknown `cov_type` (or `cov_type="hc0"`,
-                unsupported for FE), an unbalanced panel with two-way
-                effects, a singleton entity/time group, or an
-                explanatory variable with zero variance after the
-                within transformation, an outcome with no variation
-                left after the fixed effects are removed,
-                `cov_type="dk"` without `dk_time` (the Driscoll-Kraay
-                time periods are never taken from `time`), `cov_type="dk"` with no more
-                unique time periods than regressors: the
-                Driscoll-Kraay covariance has rank at most T-1, so the
-                slope F-test cannot be computed, or `cov_type="dk"` with
-                2 time periods / `cov_type="cluster"` with 2 clusters
-                where every entity (or, with two-way effects, every
-                time period) is observed exactly once in each: the
-                covariance is then identically zero). A subclass of
-                `ValueError`.
+                `x` or `effects` is a string instead of a list of
+                column names). A builtin exception, not a
+                `ValidationError`.
+            ValidationError: The input or options are invalid. A
+                subclass of `ValueError`. For example:
+
+                - `x` is empty, a column is missing, or a column
+                  contains missing values, NaN or infinity.
+                - `effects` is empty or has more than five columns, or
+                  `y`, `x` and `effects` overlap, or `dk_time` equals
+                  `y` or the first column of `effects`.
+                - There are insufficient observations, or
+                  `confidence_level` is out of range.
+                - `cov_type` is unknown or `"hc0"` (not supported for
+                  FE).
+                - `cluster`, `dk_time` or `dk_bandwidth` is given with
+                  a `cov_type` that does not use it, or
+                  `cov_type="dk"` is requested without `dk_time` (the
+                  time periods are never taken from `effects`).
+                - A group of a column in `effects` has a single
+                  observation.
+                - An explanatory variable has zero variance after the
+                  within transformation, or the outcome has no variation
+                  left after the fixed effects are removed.
+                - `cov_type="dk"` with no more unique `dk_time` periods
+                  than regressors: the Driscoll-Kraay covariance has
+                  rank at most `T - 1` (`T` periods), so the F-test of
+                  the slopes cannot be computed.
+                - `cov_type="dk"` with 2 `dk_time` periods, or
+                  `cov_type="cluster"` with 2 clusters, where every
+                  group of at least one column in `effects` is
+                  observed exactly once in each: the covariance is then
+                  identically zero.
+                - `cov_type="hc2"` or `"hc3"` when the groups of all the
+                  columns in `effects` except the one with the most
+                  groups total more than 3000 (unless the effects form
+                  a balanced two-way grid).
+
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
-                matrix, or a perfect fit of the within regression:
-                residuals zero up to rounding). A subclass of
-                `RuntimeError`.
+                matrix, a perfect fit of the within regression:
+                residuals zero up to rounding, or alternating
+                projections that did not converge within `max_iter`).
+                A subclass of `RuntimeError`.
         """
         raw = _lib.fit_fe(
-            self._data, self._y, self._x, self._entity, self._options
+            self._data, self._y, self._x, self._effects, self._options
         )
         return FEResults(raw)
 
@@ -135,26 +192,30 @@ class FEResults:
     `result.params["x1"]`. Use `params_table()` for a row-oriented
     listing (a list of dicts), for example for a JSON response.
 
+    Printing a result shows a header line (the dependent variable,
+    `n_obs` and `cov_type`) and a short table of the coefficients and
+    their standard errors. Its layout may change between versions, so
+    read the fields listed below or use `params_table()` rather than
+    parsing it.
+
     Fields by purpose:
 
     - Coefficients (no intercept): `params`, `std_errors`,
       `test_stats`, `p_values`, `conf_int`; the names in order:
       `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist`, `stat_df`.
     - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
       `f_df_denom`.
     - Fit: `r_squared_within`, `r_squared_between`,
       `r_squared_overall`, `log_likelihood`, `aic`, `bic`.
-    - Panel size: `n_obs`, `n_entities`, `n_periods` (two-way only).
+    - Panel size: `n_obs`, `n_groups`.
     - Model size: `df_model`, `df_resid`, `dep_var_name`.
     - Settings echoed back: `cov_type`, `dk_bandwidth_used`.
     - Residuals: `residuals` (within-transformed).
-    - Methods: `fixed_effects()` (the entity and time effects),
+    - Methods: `fixed_effects()` (the estimated effect of every group,
+      for each effects column of the model),
       `params_table()`.
-
-    Args:
-        raw: The estimation result object returned by `_lib.fit_fe`
-            (`_lib.FEResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -163,6 +224,9 @@ class FEResults:
 
     def __init__(self, raw: _lib.FEResult) -> None:
         self._raw = raw
+
+    def __repr__(self) -> str:
+        return results_repr(type(self).__name__, self._raw)
 
     @property
     def param_names(self) -> list[str]:
@@ -181,6 +245,21 @@ class FEResults:
         return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
+
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
+
+    @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
@@ -196,8 +275,9 @@ class FEResults:
     def stat_df(self) -> int:
         """Degrees of freedom of the t distribution behind `test_stats`.
         May differ from `df_resid` (cluster-robust inference uses
-        `G - 1`, Driscoll-Kraay `T - 1`), so use this to recompute
-        p-values from `test_stats`."""
+        `G - 1`, where `G` is the number of clusters, and
+        Driscoll-Kraay the number of `dk_time` periods minus 1), so use
+        this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -227,27 +307,31 @@ class FEResults:
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - n_entities - k` for
-        one-way, `n - n_entities - n_periods + 1 - k` for two-way)."""
+        """Residual degrees of freedom: `n - df_model`, where `df_model`
+        is the model degrees of freedom below (`n - G1 - k` for
+        one-way, `n - G1 - G2 + 1 - k` for two-way, and in general
+        `n - k - sum(G) + (number of columns - 1)`, where the `G` are
+        the group counts in `n_groups`)."""
         return self._raw.df_resid
 
     @property
     def df_model(self) -> int:
-        """Model degrees of freedom (`k`, the number of slope
-        coefficients)."""
+        """Model degrees of freedom: the `k` slope coefficients plus the
+        absorbed fixed effects (`k + G1` for one-way, `k + G1 + G2 - 1`
+        for two-way, and in general `k + sum(G) - (number of columns -
+        1)`, where the `G` are the group counts in `n_groups`). It is
+        used for the degrees of freedom of the inference (`df_resid = n
+        - df_model`) and for the information criteria; the number of
+        slope coefficients is `len(param_names)`."""
         return self._raw.df_model
 
     @property
-    def n_entities(self) -> int:
-        """Number of panel entities."""
-        return self._raw.n_entities
-
-    @property
-    def n_periods(self) -> int | None:
-        """Number of unique time periods (two-way effects only; `None`
-        for one-way). Two-way requires a balanced panel, so this equals
-        the number of observations per entity."""
-        return self._raw.n_periods
+    def n_groups(self) -> dict[str, int]:
+        """Number of groups (unique values) of each column in
+        `effects`, keyed by column name in the order given: one entry
+        for a one-way model, two for a two-way model, and so on. For
+        example `{"id": 3, "t": 2}`."""
+        return self._raw.n_groups
 
     @property
     def cov_type(self) -> str:
@@ -286,10 +370,12 @@ class FEResults:
     @property
     def f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of `f_statistic` (`None` when
-        `f_statistic` is `None`). Follows `cov_type` like the t-tests (`G - 1` for
-        `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
-        so it equals `stat_df` whenever `f_statistic` is not `None`. Use
-        this to recompute the p-value from `f_statistic`."""
+        `f_statistic` is `None`). Follows `cov_type` like the t-tests, so
+        it equals `stat_df` whenever `f_statistic` is not `None`: the
+        number of clusters minus 1 for `cov_type="cluster"`, the number
+        of `dk_time` periods minus 1 for `"dk"`, and `df_resid`
+        otherwise. Use this to recompute the p-value from
+        `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -337,24 +423,38 @@ class FEResults:
         """
         return params_table_rows(self._raw)
 
-    def fixed_effects(
-        self,
-    ) -> dict[str, float] | dict[str, dict[str, float]]:
-        """The fixed effects themselves (`α_i` for entity, `γ_t` for
-        time), recovered post-hoc from the fitted coefficients.
+    def fixed_effects(self) -> dict[str, dict[str, float]]:
+        """The fixed effects themselves (`α_i` for the first column of
+        `effects`, `γ_t` for the second, and one effect per group of
+        each further column), recovered post-hoc from the fitted
+        coefficients.
 
-        One-way: `dict[str, float]` keyed by entity id. Two-way:
-        `dict[str, dict[str, float]]` with top-level keys `"entity"`/
-        `"time"`. `α_i`/`γ_t` are not individually identified in the
-        two-way case, so `γ_t` of the first period in time order (the
-        order of the values of the time column) is fixed to 0 and
-        `α_i` absorbs the overall level. The `"time"` dictionary lists
-        the periods in time order.
-        `fixest::fixef()` instead uses the first time value in
-        observation order as the reference, so the two match
-        numerically only when both choose the same reference period.
+        Always a `dict[str, dict[str, float]]` keyed by the column
+        names in `effects`, then by group (the value of the column as a
+        string): one entry per column of `effects`.
+
+        The effects of the different columns are not individually
+        identified, so the first column absorbs the overall level and
+        one reference group of every other column is fixed to 0:
+
+        - the second column: its first period in time order (the order
+          of its values);
+        - any further column: its first group in the order of the
+          values written as text (so `"10"` comes before `"2"`, even
+          for an integer column).
+
+        On an unbalanced panel whose groups form several disconnected
+        sets, the reference is chosen in each connected set. If the
+        groups of one column lie inside those of another, only the sum
+        of the effects of a row is identified. The dictionary of the
+        second column lists the periods in time order.
+        `fixest::fixef()` chooses its own reference levels, so its
+        values can differ from these by a constant in each column after
+        the first.
 
         Returns:
-            The fixed effects, shaped as described above.
+            The fixed effects, shaped as described above. The group key
+            is always a string, even for an integer column, for example
+            `result.fixed_effects()["id"]["a"]`.
         """
         return self._raw.fixed_effects()

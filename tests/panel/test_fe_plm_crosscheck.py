@@ -50,7 +50,6 @@ fixestは内部実装（`cpp_driscoll_kraay`）のoff-by-oneで`bandwidth == T-1
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -63,6 +62,7 @@ from _assertions import (
     assert_inference_close,
 )
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
@@ -107,7 +107,7 @@ ONE_WAY_CASES = [
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
@@ -181,7 +181,7 @@ def _fit_frame(
 ):
     x_cols = x_columns(df)
     options = _options(cov_type, dk_bandwidth=dk_bandwidth)
-    return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    return FE(df, y="y", x=x_cols, effects=["entity"], options=options).fit()
 
 
 def _fit(scenario: str, cov_type: str, *, dk_bandwidth: int | None = None):
@@ -319,7 +319,7 @@ def test_wagepan_one_way_matches_plm(crosscheck, cov_type):
         df,
         y=WAGEPAN_Y,
         x=WAGEPAN_X,
-        entity=WAGEPAN_ENTITY,
+        effects=[WAGEPAN_ENTITY],
         options=options,
     ).fit()
 

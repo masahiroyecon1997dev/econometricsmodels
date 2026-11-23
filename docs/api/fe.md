@@ -2,24 +2,31 @@
 
 **FE**: [Usage](../usage/fe.md) · **Options and results** · [Definitions](../methods/fe.md)
 
-`FE` estimates a one-way (entity) or two-way (entity and time) fixed effects ("within") panel regression. It shares the API shape of [OLS](ols.md) (`data`/`y`/`x`/`options` constructor, `.fit()`), but `entity` is a required argument rather than an option, since a fixed effects model has no meaning without a panel structure. Two-way effects are selected with `FEOptions.time` and need a balanced panel.
-
-There is no intercept: the within transformation removes it, so `FEOptions` has no `include_intercept` and `FEResults.param_names` never includes `"const"`. `cov_type` defaults to `"cluster"` on `entity` (not `"classical"`), and `"hc0"` is not supported. `"dk"` (Driscoll–Kraay) requires `FEOptions.dk_time`, which is independent of `time`.
-
-The estimator, degrees of freedom, covariance estimators, test distributions, the three R² statistics and the recovery of the fixed effects (`FEResults.fixed_effects()`) are defined in [Methods: FE](../methods/fe.md).
+`FE` estimates a one-way (entity), two-way (entity and time) or higher-dimensional fixed effects ("within") panel regression, with the same constructor and `.fit()` as [OLS](ols.md). `effects` is a required argument: a list of one column (one-way, the entity), two columns (two-way, the entity then the time period) or three to five columns (further sets of effects); the panel may be unbalanced and a combination of the columns may repeat. The number of groups of each column is in `FEResults.n_groups`, keyed by column name, and `fixed_effects()` returns the effects of each column in the same order. There is no intercept, since the effects absorb it. The estimator, covariance estimators, R² statistics and the recovery of the fixed effects are defined in [Definitions: FE](../methods/fe.md).
 
 ## Options at a glance
 
-`entity` is an argument of `FE`, not an option. There is no `include_intercept`: the effects absorb the constant.
+Pass an `FEOptions` as `options=`. `effects` is an argument of `FE`, not an option, and there is no `include_intercept`.
 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
 | `cov_type` | Standard error type: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, `"dk"` | `"cluster"` | `"hc0"` is not available |
-| `cluster` | Column that defines the clusters | `None` (the `entity` column) | Only with `cov_type="cluster"` |
-| `dk_time` | Column that defines the time periods of the Driscoll–Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `time` |
+| `cluster` | Column that defines the clusters | `None` (the first column of `effects`) | Only with `cov_type="cluster"` |
+| `dk_time` | Column that defines the time periods of the Driscoll-Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `effects` |
 | `dk_bandwidth` | Kernel bandwidth | `None` (automatic) | Only with `cov_type="dk"` |
-| `time` | Column of the time identifier; sets two-way effects | `None` (one-way) | Two-way needs a balanced panel |
 | `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |
+| `tol` | Convergence tolerance of the alternating projections that remove the effects of a two-way model on an unbalanced panel, or of a model with three or more effects | `None` (1e-12) | Ignored on a balanced two-way panel and in a one-way model; a loose value also coarsens the detection of regressors collinear with the effects |
+| `max_iter` | Maximum number of passes of those projections, from 1 to 10000 | `10000` | A thinly connected panel needs many passes; reaching the limit raises `ComputationError` |
+
+Which options go with which `cov_type` (an option set where it is not used raises a `ValidationError`):
+
+| `cov_type` | Required | Optional |
+|---|---|---|
+| `"classical"`, `"hc1"` to `"hc3"` | | |
+| `"cluster"` (default) | | `cluster` (default: the first column of `effects`) |
+| `"dk"` | `dk_time` | `dk_bandwidth` |
+
+`dk_time` is independent of `effects`: `effects` sets the effects of the model, whereas `dk_time` sets the periods of the Driscoll-Kraay kernel, and it may be the same column as the second column of `effects` or a different one. It cannot be the `y` column or the first column of `effects`.
 
 The fields of the results are listed by purpose at the top of the results class below.
 

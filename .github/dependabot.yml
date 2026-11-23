@@ -32,7 +32,9 @@ updates:
     cooldown:
       default-days: 10
 
-  # .devcontainer/Dockerfileのベースイメージ（python:3.14-slim-bookworm）。
+  # .devcontainer/Dockerfileのベースイメージ（python:3.14-slim-bookworm）とuvイメージ
+  # （`FROM ghcr.io/astral-sh/uv:... AS uv`。`COPY --from=<image>`への直書きは追跡されない
+  # ため、FROMステージにしている）。
   # Rパッケージ・R本体はDependabot非対応のため別途check_r_updates.ymlで確認する。
   # cargo install でピン留めした開発ツールも同様にcheck_cargo_tool_updates.ymlで確認する。
   - package-ecosystem: "docker"

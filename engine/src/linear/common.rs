@@ -48,7 +48,12 @@ pub enum LeastSquaresError {
     /// WLSの重みが0以下（NaNを含む）。analytic weightとして扱うため正の値のみ許容する
     /// （`docs/spec/wls-spec.md`「API引数」参照）。
     #[error("{}", self.catalog_message())]
-    NonPositiveWeight { row: usize, weight: f64 },
+    NonPositiveWeight {
+        /// 重みの列名（`weight`引数で渡された名前）。
+        column: String,
+        row: usize,
+        weight: f64,
+    },
 
     /// 設計行列が特異（完全な多重共線性等）。`columns`は1つの線形従属に関わる列の名前
     /// （設計の並び順。[`crate::shared::linear_algebra::collinear_columns`]）。
@@ -116,9 +121,9 @@ impl DiagnosticTest {
 
 impl LeastSquaresError {
     /// 設計行列`x`のランク落ちをエラーにする。列の完全な共線性は`SingularMatrix`（`names`は
-    /// `x`の列名で、共線な列を[`collinear_columns`]で求めて名前に直す）、`X'X`の分解の失敗
-    /// （列のスケール差が極端）は共線性ではなく数値的なほぼ特異性なので`NearSingularMatrix`に
-    /// する。
+    /// `x`の列名で、共線な列を[`collinear_columns`]で求めて名前に直す）、列を単位ノルムに揃えた
+    /// 条件数が上限を超えた（または`X'X`の分解が失敗した）場合は、共線性ではなく数値的なほぼ
+    /// 特異性なので`NearSingularMatrix`にする。
     #[must_use]
     pub fn from_rank_deficient(err: RankDeficient, x: &Mat<f64>, names: &[String]) -> Self {
         match err {
@@ -143,11 +148,16 @@ impl ErrorInfo for LeastSquaresError {
                 "detail",
                 format!("y has {y_rows} rows but weight has {weight_rows} rows"),
             ),
-            Self::NonPositiveWeight { row, weight } => {
-                ErrorReport::new(ErrorCode::WeightNotPositive)
-                    .param("row", *row)
-                    .param("value", *weight)
-            }
+            Self::NonPositiveWeight {
+                column,
+                row,
+                weight,
+            } => ErrorReport::new(ErrorCode::WeightNotPositive)
+                .param("column", column.as_str())
+                .param("argument", "weight")
+                .param("data_argument", "data")
+                .param("row", *row)
+                .param("value", *weight),
             Self::SingularMatrix { columns } => {
                 ErrorReport::new(ErrorCode::DesignMatrixSingular).param("columns", columns.clone())
             }
@@ -243,6 +253,7 @@ mod tests {
             ),
             (
                 LeastSquaresError::NonPositiveWeight {
+                    column: "w".to_string(),
                     row: 3,
                     weight: 0.0,
                 },
@@ -322,11 +333,12 @@ mod tests {
         );
         assert_eq!(
             LeastSquaresError::NonPositiveWeight {
+                column: "w".to_string(),
                 row: 3,
                 weight: 0.0
             }
             .to_string(),
-            "The weight at row 3 (0-based) must be positive, got 0.0."
+            "The weight at row 3 (0-based) of column 'w' (given as weight) in data must be positive, got 0.0."
         );
         assert_eq!(
             LeastSquaresError::SingularMatrix {

@@ -38,6 +38,7 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.nonlinear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
     STATSMODELS_COV_TYPES,
@@ -229,7 +230,7 @@ def build_fixtures() -> dict:
             "（較正値はlogitと異なりbeta1=10、"
             "benchmark/nonlinear/datasets.py参照）。"
             "complete_separationシナリオ（真の完全分離、n=500、logitと同じ"
-            "nonlinear/common.rsのrun_solverを共有）も同様にここに含まない"
+            "nonlinear/common/solver.rsのrun_solverを共有）も同様にここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "scale_varianceは真のDGPを未スケーリングのXで計算した後に列のみを"
             "スケーリングする設計のため成功パス。"
@@ -265,5 +266,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures, BENCHMARKS_DIR / "probit.json", description=__doc__
+        lambda: strip_cov_params(build_fixtures()),
+        BENCHMARKS_DIR / "probit.json",
+        description=__doc__,
     )

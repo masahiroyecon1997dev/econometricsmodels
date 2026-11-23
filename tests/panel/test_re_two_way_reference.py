@@ -1,4 +1,4 @@
-"""2-way RE（`REOptions.time`、バランスパネル）のplm・手計算との数値照合。
+"""2-way RE（`effects`に個体列と時点列を渡す、バランスパネル）のplm・手計算との数値照合。
 
 2-way REを計算する参照実装は`plm`（`model = "random"`・`effect = "twoways"`・Swamy-Arora）
 だけで（`linearmodels.RandomEffects`は1-wayのみ）、plmとの照合が主になる
@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +31,7 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_close
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
@@ -67,7 +67,7 @@ RTOL_ABSOLUTE_YEAR = _TOL["rtol_absolute_year"]
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 @dataclass(frozen=True)
@@ -109,15 +109,13 @@ class Case:
             self.frame(),
             y=self.y_col,
             x=self.x_cols,
-            entity=self.entity_col,
+            effects=[self.entity_col, self.time_col],
             options=self.options(cov_type),
         ).fit()
 
     def options(self, cov_type: str) -> REOptions:
         dk_time = self.time_col if cov_type == "dk" else None
-        return REOptions(
-            cov_type=cov_type, time=self.time_col, dk_time=dk_time
-        )
+        return REOptions(cov_type=cov_type, dk_time=dk_time)
 
     def oracle(self, cov_type: str, **kwargs) -> dict:
         return hand_computed(
@@ -192,6 +190,7 @@ NO_WITHIN_VARIATION = {
 _PLM_KEYS = (
     "params",
     "std_errors",
+    "cov_params",
     "test_stats",
     "p_values",
     "f_statistic",

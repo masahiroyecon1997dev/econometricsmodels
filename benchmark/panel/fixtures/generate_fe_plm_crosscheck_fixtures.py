@@ -58,6 +58,7 @@ from benchmark.common import (
     group_by_dataset_source,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.panel.cluster_cases import CLUSTER_IMBALANCED_CSV, K1_CSV
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
@@ -66,13 +67,10 @@ from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     dk_three_periods_frame,
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import (
-    ONE_WAY_ONLY_SCENARIOS,
+    NUMERIC_SCENARIOS,
     SCENARIO_X_COLS,
-    TWO_WAY_SCENARIOS,
 )
 from benchmark.panel.references.r import default_dk_bandwidth, run_fe_plm_r
-
-NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 
 # plmで検証できるのは1-wayのclusterとdkのみ（モジュールdoc参照）。
 # many_regressors（k=20、T=6）はk>T-1のためdkが対象外（fe_crosscheck.jsonと同じ）。
@@ -286,7 +284,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures,
+        lambda: strip_cov_params(build_fixtures()),
         BENCHMARKS_DIR / "fe_plm_crosscheck.json",
         description=__doc__,
     )

@@ -23,7 +23,6 @@ Note:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import polars as pl
@@ -33,6 +32,7 @@ from _assertions import (
     assert_inference_close,
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset, with_cluster_groups
 from _nonlinear_helpers import (
     check_margeff,
@@ -68,7 +68,7 @@ _NEAR_SEPARATION_TOL = 1e-8
 
 @pytest.fixture(scope="module")
 def fixtures() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 def _check_result(

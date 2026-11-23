@@ -10,5 +10,9 @@ ignore = [
     "RUSTSEC-2026-0194", # quick-xml 0.39.4（polars→object_store経由、ビルドには含まれない未使用のオプション依存）: 重複属性名チェックが二次時間。0.41.0+で修正（上流待ち）
     "RUSTSEC-2026-0195", # quick-xml 0.39.4（polars→object_store経由、ビルドには含まれない未使用のオプション依存）: 名前空間宣言の無制限確保によるDoS。0.41.0+で修正（上流待ち）
     "RUSTSEC-2025-0141", # bincode 2.0.1 unmaintained（polars-utilsのserde機能経由、ビルドには含まれない未使用のオプション依存）: polars-utilsが`<3`を要求するため修正版へ上げられない（polars待ち）
+    "RUSTSEC-2026-0391", # zstd 0.13.3（polars-arrow経由、ビルドには含まれない未使用のオプション依存）: 再利用コンテキストで中断したストリームのデータが次のストリームに漏れる。0.14.3+で修正（polars-arrowが0.13系を要求するため上流待ち）
+    "RUSTSEC-2026-0398", # zstd-safe 7.2.4（同上）: Seekable::decompressがVecの長さを容量超過に設定する。8.2.0+で修正（上流待ち）
+    "RUSTSEC-2026-0403", # zstd-safe 7.2.4（同上）: レガシーフレームのストリーミング展開失敗時に未初期化メモリが露出する。8.2.0+で修正（上流待ち）
+    "RUSTSEC-2026-0410", # zstd-sys 2.0.16+zstd.1.5.7（同上）: WebAssemblyのアロケータshimが確保失敗時にメモリを破壊する（wasm専用）。2.1.2+で修正（上流待ち）
     "RUSTSEC-2024-0436", # paste 1.0.15 unmaintained（faer→gemm/pulp、およびargmin経由。proc-macroとして実際にビルドされる）: 代替版なし。faerとargminの両方が脱paste版を出すまで解消不可（上流待ち）
 ]

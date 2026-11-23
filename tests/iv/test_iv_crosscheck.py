@@ -10,7 +10,7 @@ linearmodelsとは独立した実装（R `ivreg`）との一致を確認する
 
 classical/hc0〜hc3/cluster/HACはRとほぼ機械精度で一致する（OLSクロスチェックと同じ実測
 傾向）ため`RTOL_STRICT`で厳密比較する。HACのR側は`NeweyWest(adjust = FALSE)`
-（既定の`adjust = TRUE`は共分散全体に`n/(n-k)`を掛けるが、本実装・linearmodelsは
+（`adjust = TRUE`（`kernHAC`の既定。`NeweyWest`の既定は`FALSE`）は共分散全体に`n/(n-k)`を掛けるが、本実装・linearmodelsは
 掛けない。このスカラー倍だけが差の全てで、small_n（n=40）でも機械精度で一致する。
 `benchmark/iv/references/run_ivreg.R`・`test_ols_crosscheck.py`参照）。Wu-Hausmanは
 補助回帰が内生変数の第一段階残差の分だけ列が多く、`adjust = TRUE`なら
@@ -20,13 +20,15 @@ classical/hc0〜hc3/cluster/HACはRとほぼ機械精度で一致する（OLSク
 Note:
     - `hc2`/`hc3`は`vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`の
       type="stage2"、第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
-      （`engine/src/iv/two_sls.rs`の`hc_cov_params`）と数値一致することを実機確認済み
+      （`engine/src/iv/two_sls/cov.rs`の`hc_cov_params`）と数値一致することを実機確認済み
       のため対象に含む（`iv-spec.md`3.1節）。`linearmodels`
       （`test_iv_reference.py`）は対応していないため、hc2/hc3の主リファレンス比較は
       このファイルのみで行う。
     - `weak_instrument_f`・`sargan_statistic`/`sargan_p_value`はivregの
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
       全cov_typeで同じ値になる（`benchmark/iv/references/run_ivreg.R`参照）。
+      `overid_statistic`は本実装では`cov_type`に追従するので、classicalだけivregの
+      Sarganと比べ、それ以外はmomentfitの2段階GMMのHansen Jと比べる（`_check_result`参照）。
     - `wu_hausman_statistic`/`wu_hausman_p_value`は全cov_typeでフィクスチャに
       実測値がある（`summary(diagnostics=TRUE, vcov.=<関数>)`で
       cov_type別のロバスト共分散を診断表に反映できることが判明、
@@ -47,7 +49,6 @@ Note:
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -61,6 +62,7 @@ from _assertions import (
     assert_p_value_close,
 )
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     hac_time_for,
     load_wooldridge_dataset,
@@ -114,12 +116,12 @@ ATOL = TOLERANCES["iv_crosscheck"]["atol"]
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())["synthetic"]
+    return load_fixtures_with_cov(FIXTURE_PATH)["synthetic"]
 
 
 @pytest.fixture(scope="module")
 def crosscheck_wooldridge() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())["wooldridge"]
+    return load_fixtures_with_cov(FIXTURE_PATH)["wooldridge"]
 
 
 # _assert_close/_assert_dict_closeはtests/support/_assertions.pyのassert_close/
@@ -139,22 +141,18 @@ def _check_result(
     check_wu_hausman: bool = True,
     n_clusters: int | None = None,
     check_sargan: bool = True,
-    rtol_wald: float = RTOL_STRICT,
 ) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL_STRICT, atol=ATOL)
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
-    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
-    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
     _assert_fields_close(res, ref, ("r_squared", "adj_r_squared"), label)
     assert_fields_close(
         res,
         ref,
         (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
         label,
-        rtol=rtol_wald,
+        rtol=RTOL_STRICT,
         atol=ATOL,
     )
 
@@ -164,11 +162,33 @@ def _check_result(
         f"{label}/weak_instrument_f_statistics",
     )
 
-    # check_sargan=False: 切片なしのivregは残差の中心化TSSを使うSarganで負の値に
-    # なりうる（定数項がZに入っている前提の式）ため、フィクスチャ側がnullで
-    # 比較不能。本実装側の値はlinearmodelsとの比較（`test_iv_reference.py`）で
-    # 検証する。
-    if not check_sargan:
+    # 過剰識別検定は`cov_type`に追従する。ロバストな版（`hc*`・`hac`・`cluster`）はivregに
+    # 無く、フィクスチャの`overid_statistic`はmomentfitの2段階GMMのHansen J
+    # （`benchmark/iv/fixtures/generate_iv_crosscheck_fixtures.py`の`_run_ivreg`）。
+    # 丁度識別と、クラスター数が全操作変数の数より少ない場合は`None`。
+    #
+    # classicalのSarganはivregの値（`sargan_statistic`）と比べる。check_sargan=False:
+    # 切片なしのivregは残差の中心化TSSを使うSarganで負の値になりうる（定数項がZに入っている
+    # 前提の式）ため、フィクスチャ側がnullで比較不能。本実装側の値はlinearmodelsとの
+    # 比較（`test_iv_reference.py`）で検証する。
+    if "overid_statistic" in ref:
+        if ref["overid_statistic"] is None:
+            assert res.overid_statistic is None, f"{label}/overid_statistic"
+            assert res.overid_p_value is None, f"{label}/overid_p_value"
+            assert res.overid_df is None, f"{label}/overid_df"
+        else:
+            _assert_close(
+                res.overid_statistic,
+                ref["overid_statistic"],
+                f"{label}/overid_statistic",
+            )
+            assert_p_value_close(
+                res.overid_p_value,
+                ref["overid_p_value"],
+                f"{label}/overid_p_value",
+                rtol=RTOL_STRICT,
+            )
+    elif not check_sargan:
         pass
     elif ref["sargan_statistic"] is None:
         assert res.overid_statistic is None, f"{label}/overid_statistic"
@@ -583,5 +603,4 @@ def test_card_cluster_matches_r(crosscheck_wooldridge):
         crosscheck_wooldridge["card"]["cluster"],
         "card/cluster/R",
         n_clusters=df[CARD_REGION_COLUMN].n_unique(),
-        rtol_wald=TOLERANCES["iv_crosscheck"]["rtol_wald_card_cluster"],
     )

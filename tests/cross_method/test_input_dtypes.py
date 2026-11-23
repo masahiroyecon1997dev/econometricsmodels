@@ -20,7 +20,7 @@ from _dtype_helpers import (
     make_frame,
     unused_column,
 )
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from _helpers import ROW_TIME, with_row_time
 from econometricsmodels import (
     FE,
@@ -115,10 +115,10 @@ def test_small_integer_entity_column_is_usable_as_group_key(base):
         (pl.int_range(pl.len()) // 6).cast(pl.Int8).alias("entity")
     )
 
-    result = FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
+    result = FE(df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
 
     as_int64 = df.with_columns(pl.col("entity").cast(pl.Int64))
-    expected = FE(as_int64, y="y", x=["x1", "x2"], entity="entity").fit()
+    expected = FE(as_int64, y="y", x=["x1", "x2"], effects=["entity"]).fit()
     assert result.params == expected.params
 
 
@@ -140,8 +140,6 @@ def test_boolean_y_is_usable_for_logit():
 
 def _non_numeric_column(name: str, dtype: pl.DataType) -> pl.Series:
     """数値として使えないdtypeの列（`n`行）を作る。"""
-    if dtype == pl.Enum(["a", "b"]):
-        return pl.Series(name, ["a", "b"] * (N // 2), dtype=dtype)
     return unused_column(dtype).alias(name)
 
 
@@ -324,10 +322,10 @@ ROLE_FITS = {
     "iv.x_exog": lambda d: IV(d, "y", ["col"], ["x1"], ["z", "z2"]).fit(),
     "iv.x_endog": lambda d: IV(d, "y", ["x2"], ["col"], ["z", "z2"]).fit(),
     "iv.instruments": lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "col"]).fit(),
-    "fe.y": lambda d: FE(d, "col", ["x1"], "entity").fit(),
-    "fe.x": lambda d: FE(d, "y", ["col"], "entity").fit(),
-    "re.y": lambda d: RE(d, "col", ["x1"], "entity").fit(),
-    "re.x": lambda d: RE(d, "y", ["col"], "entity").fit(),
+    "fe.y": lambda d: FE(d, "col", ["x1"], ["entity"]).fit(),
+    "fe.x": lambda d: FE(d, "y", ["col"], ["entity"]).fit(),
+    "re.y": lambda d: RE(d, "col", ["x1"], ["entity"]).fit(),
+    "re.x": lambda d: RE(d, "y", ["col"], ["entity"]).fit(),
     "logit.y": lambda d: Logit(d, "col", ["x1"]).fit(),
     "probit.y": lambda d: Probit(d, "col", ["x1"]).fit(),
     "tobit.y": lambda d: Tobit(d, "col", ["x1"]).fit(),
@@ -420,7 +418,14 @@ def test_boolean_weight_is_accepted_when_all_true_and_rejected_with_false(
     with_false = roles_frame.with_columns(
         (pl.int_range(pl.len()) > 0).alias("col")
     )
-    with raises_error(ErrorCode.WEIGHT_NOT_POSITIVE, row=0, value=0.0):
+    with raises_error(
+        ErrorCode.WEIGHT_NOT_POSITIVE,
+        column="col",
+        argument="weight",
+        data_argument="data",
+        row=0,
+        value=0.0,
+    ):
         ROLE_FITS["wls.weight"](with_false)
 
 
@@ -478,8 +483,9 @@ def test_non_finite_values_are_rejected_for_narrow_floats(
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="col",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
+        count=1,
         argument="x",
         data_argument="data",
     ):
@@ -527,14 +533,14 @@ HAC_FITS = {
         d,
         "y",
         ["x1"],
-        OLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        options=OLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
     "WLS": lambda d, hac_time="t": WLS(
         d,
         "y",
         ["x1"],
         "w",
-        WLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        options=WLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
     "IV": lambda d, hac_time="t": IV(
         d,
@@ -542,7 +548,7 @@ HAC_FITS = {
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        options=IVOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
     "IV-GMM-cov": lambda d, hac_time="t": IV(
         d,
@@ -550,7 +556,7 @@ HAC_FITS = {
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(
+        options=IVOptions(
             estimator="gmm", cov_type="hac", hac_lags=2, hac_time=hac_time
         ),
     ).fit(),
@@ -560,7 +566,7 @@ HAC_FITS = {
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(
+        options=IVOptions(
             estimator="gmm",
             gmm_weight_type="hac",
             hac_lags=2,
@@ -759,8 +765,9 @@ def test_hac_time_non_finite_value_raises(
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="t",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=3,
+        count=1,
         argument="hac_time",
         data_argument="data",
     ):
@@ -890,9 +897,16 @@ def _assert_hac_dependent_stats_match(result, expected) -> None:
     異なるため、存在する属性だけを比べる。
     """
     for name in _HAC_SCALAR_STATS:
-        if hasattr(expected, name):
+        if not hasattr(expected, name):
+            continue
+        expected_value = getattr(expected, name)
+        if expected_value is None:
+            # 推定量によって定義されない統計量（`float | None`）は`None`同士で
+            # 比べる。pytest 9.2から`approx(None, rel=...)`は`TypeError`になる。
+            assert getattr(result, name) is None, name
+        else:
             assert getattr(result, name) == pytest.approx(
-                getattr(expected, name), rel=1e-9
+                expected_value, rel=1e-9
             ), name
     for name in _HAC_DICT_STATS:
         if not hasattr(expected, name):

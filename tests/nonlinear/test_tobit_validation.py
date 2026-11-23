@@ -21,8 +21,12 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_expectations import escaped
-from _errors import raises_error
-from _helpers import name_collision_frame, with_cluster_groups
+from _errors import approx_param, raises_error
+from _helpers import (
+    assert_unit_change_invariant,
+    name_collision_frame,
+    with_cluster_groups,
+)
 from _nonlinear_helpers import (
     censored_separation_dataset,
     heavily_censored_tobit_dataset,
@@ -183,7 +187,7 @@ def test_non_finite_values_raise(bad):
     """`y`/`x` に NaN・無限大が含まれる場合 `ValidationError`。
 
     null（`test_null_values_raise` / `test_null_values_in_x_raise`）と NaN/無限大は
-    `column_extraction.rs` 内で別ロジックのため個別に確認する（OLS の
+    `column_extraction/` 内で別ロジックのため個別に確認する（OLS の
     `test_non_finite_values_raise` と同じ）。
     """
     df_y = pl.DataFrame(
@@ -192,7 +196,7 @@ def test_non_finite_values_raise(bad):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="y",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=1,
         argument="y",
         data_argument="data",
@@ -205,7 +209,7 @@ def test_non_finite_values_raise(bad):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=pytest.approx(bad, nan_ok=True),
+        value=approx_param(bad),
         row=1,
         argument="x",
         data_argument="data",
@@ -276,7 +280,7 @@ def test_censoring_bound_not_finite_reports_both_bounds(censored_dataset):
     （全パターンは`tests/cross_method/test_option_types.py`）
     """
     with raises_error(
-        ErrorCode.CENSORING_BOUND_NOT_FINITE, lower=float("-inf"), upper=None
+        ErrorCode.CENSORING_BOUND_NOT_FINITE, lower="-inf", upper=None
     ):
         Tobit(
             censored_dataset,
@@ -293,6 +297,9 @@ def test_y_out_of_censoring_bounds_raises():
     df = pl.DataFrame({"y": [-1.0, 0.0, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]})
     with raises_error(
         ErrorCode.OUTCOME_OUTSIDE_CENSORING_BOUNDS,
+        column="y",
+        argument="y",
+        data_argument="data",
         row=0,
         value=-1.0,
         lower=0.0,
@@ -306,6 +313,9 @@ def test_y_above_upper_bound_raises():
     df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 5.0], "x1": [1.0, 2.0, 3.0, 4.0]})
     with raises_error(
         ErrorCode.OUTCOME_OUTSIDE_CENSORING_BOUNDS,
+        column="y",
+        argument="y",
+        data_argument="data",
         row=3,
         value=5.0,
         lower=None,
@@ -386,7 +396,7 @@ def test_predict_null_or_non_finite_values_raise(censored_dataset):
     with raises_error(
         ErrorCode.COLUMN_NON_FINITE,
         column="x1",
-        value=float("inf"),
+        value="inf",
         row=1,
         argument="x",
         data_argument="new_data",
@@ -562,7 +572,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     （engine側の`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のため全体Wald検定のq×q部分行列がG≤qで構造的に特異になる。
-    GもqもR行列計算なしで即座に判定できるため、`wald_chi2_test`内の
+    GもqもR行列計算なしで即座に判定できるため、`wald_quadratic_form`内の
     `ComputationError`ではなく`fit()`冒頭の`ValidationError`で弾く（mroz
     `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
     """
@@ -768,7 +778,7 @@ def test_perfect_multicollinearity_raises_computation_error():
     ことのみを確認する。OLS/WLS/Logit と同じく凍結 CSV
     （`tobit_perfect_multicollinearity.csv`、`x3 = 2·x1 + 3·x2`）を使う。
 
-    Logit とは異なり、Tobit は `ols_initial_params` の QR 検証が `solver` に
+    Logit とは異なり、Tobit は設計行列の QR 分解（直交座標）でのランク判定が `solver` に
     関わらず常に最初に実行されるため、完全な多重共線性は常にこの経路で検出される
     （`solver` を parametrize する必要が無い、`docs/spec/tobit-spec.md` 3.2節参照）。
     """
@@ -784,27 +794,21 @@ def test_perfect_multicollinearity_raises_computation_error():
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1 を `*1e6`、x2 を `*1e-3`）は、
-    傾き係数の同時共分散部分行列がスケール比の 2 乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（OLS/WLS と同じ理由・同じ
-    凍結 CSV パターン、`test_ols_validation.py` 参照）。
-
-    Tobit の全体 Wald 検定が OLS の F 検定と同型でこの部分行列の反転を要求するため、
-    classical を含む全 cov_type で `ComputationError`
-    （`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`）になる。
-    `scale_variance_mild`
-    （スケール比 1e3）が数値リグレッション検知用の成功パス
-    （`test_tobit_reference.py`）。数値比較はせずエラーパスのみ確認する
-    （`TOBIT_ERROR_PATH_SCENARIOS`）。
+def test_scale_variance_is_invariant_to_the_units(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1 を `*1e6`、x2 を `*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体 Wald 統計量・p 値になり、係数と標準誤差は列の倍率に従う。
+    Tobit の全体 Wald 検定は OLS の F 検定と二次形式（`wald_quadratic_form`）を共有し、
+    相関スケール化した部分行列で判定するため、classical を含む全 cov_type で単位に依らない。
     """
     df = pl.read_csv(DATA_DIR / "tobit_scale_variance.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["scale_variance"]
     options = TobitOptions(cov_type=cov_type, lower=lower, upper=upper)
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
-    ):
-        Tobit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    assert_unit_change_invariant(
+        lambda d: Tobit(d, y="y", x=["x1", "x2", "x3"], options=options).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("wald_statistic", "wald_p_value"),
+    )
 
 
 def test_non_convergence_raises_computation_error_with_tiny_max_iter(
@@ -839,7 +843,10 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(solver):
         df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
     ).fit()
 
-    # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。許容幅は「真値を回復し、
+    # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。参照値（真値）との
+    # 差の許容幅が`TOLERANCES`の「リファレンスとの実測の最大差＋マージン」ではなく、
+    # 回復を判定するバウンドなので、`assert_close`ではなく明示的な`abs`・範囲比較で書く。
+    # 許容幅は「真値を回復し、
     # かつσ→0退化に倒れていない」ことだけを担保する緩いバンド。実測は（既定solverで）
     # x1≈99.91・x2≈0.52・const≈0.15・σ≈0.94だが、将来の
     # ソルバー変更でのメソッド間変動を吸収するためマージンを広く取る。σの下限0.5は
@@ -882,7 +889,7 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
     することを固定する（`y* = 100·x1 + 0.5·x2 + N(0, 0.001)`に対し
     `x1≈99.9999`, `x2≈0.4998`, `σ≈0.00094`）。
 
-    回帰ガード: `censored_contribution`（`engine/src/nonlinear/tobit.rs`）の
+    回帰ガード: `censored_contribution`（`engine/src/nonlinear/tobit/problem.rs`）の
     Hessian項`A(u)=λ(u+λ)`の計算でクランプ済み`λ`と生の`zeta`を混在させると、
     `|zeta|>U_CLAMP`の領域で`A(u)`が負になってHessianの正定値性が崩れ、
     Newtonが`max_iter`まで収束しない（Probitの`ProbitProblem`と同型）。
@@ -894,6 +901,10 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
     res = Tobit(df, y="y", x=["x1", "x2"]).fit()
 
     assert res.converged is True
+    # リファレンス数値照合ではなく、DGPの真値の回復バウンド（`assert_close`を使わない理由は
+    # 上のテストのコメント参照）。ノイズが極小（0.001）なので真値からの差は数値最適化の
+    # 精度で決まり、`x`の係数は真値±0.01、σ（真値0.001、実測≈0.00094）は0より大きく
+    # 真値の2倍未満に収まることを固定する。
     assert abs(res.params["x1"] - 100.0) < 0.01
     assert abs(res.params["x2"] - 0.5) < 0.01
     assert abs(res.sigma - 0.001) < 0.001
@@ -921,7 +932,10 @@ def test_many_regressors_no_false_separation():
     res = Tobit(df, y="y", x=[f"x{j}" for j in range(k)]).fit()
 
     assert res.converged
-    # 代表的な係数が真値近傍（厳密照合は数値テストの領分）。
+    # リファレンス数値照合ではなく、DGPの真値の回復バウンド（`assert_close`を使わない理由は
+    # `test_large_true_coefficient_dgp_converges_and_recovers_truth`のコメント参照）。
+    # 代表的な係数（x0の真値1.0、x1の真値-0.7）が真値の近傍にあり、σが真値1.5の近傍に
+    # あること。厳密照合は数値テストの領分。
     assert abs(res.params["x0"] - 1.0) < 0.5
     assert abs(res.params["x1"] - (-0.7)) < 0.5
     assert 1.0 < res.sigma < 2.0
@@ -947,7 +961,9 @@ def test_mroz_hours_raw_scale_converges_without_false_separation():
 
     assert res.converged
     assert res.n_obs == 753
-    # Wooldridge Example 17.2 の水準（educ の係数 ≈ 80.6）。
+    # リファレンス数値照合ではなく、教科書の水準（Wooldridge Example 17.2のeducの係数
+    # ≈ 80.6）の近傍にあることのバウンド（`assert_close`を使わない理由は
+    # `test_large_true_coefficient_dgp_converges_and_recovers_truth`のコメント参照）。
     assert abs(res.params["educ"] - 80.6) < 5.0
     assert 1000.0 < res.sigma < 1250.0
 

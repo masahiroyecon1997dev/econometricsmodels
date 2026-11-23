@@ -15,6 +15,10 @@ from _tolerances_common import (
 
 LINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels/R）との数値比較 ---
+    # 係数の分散共分散行列（`<手法>_cov.json`）も同じ`rtol`で比べる。要素ごとの尺度は
+    # `sqrt(V_ii·V_jj)`で、絶対誤差のフロアは使わない（`assert_cov_params_close`）。
+    # 実測の最大の差はこの尺度で1.1e-11（OLS・WLSの主リファレンスとRクロスチェックの全ケース。
+    # 最大はOLSのRクロスチェックprminwge/hac）。
     "ols_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
@@ -53,6 +57,17 @@ LINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
     },
+    # 実データのクラスターロバスト推定（`card`・`card_poly`・`wage1`、OLS・WLS）と、
+    # 有理数の厳密値（`_exact_cluster.py`）との比較。係数・標準誤差・全体Fを同じ`rtol`で
+    # 比べる（絶対誤差のフロアは使わない。値は全て0から離れている）。実測の最大相対差は、
+    # 係数2.1e-12・標準誤差1.0e-13・全体F 2.9e-12（いずれも経験年数の4次多項式で
+    # `cond(X) = 4.7e5`の`card_poly`。他のケースは係数3.3e-14・標準誤差3.2e-14・全体F 5.2e-14
+    # 以下）。`1e-10`は実測の最大の約35倍。`X'X`を明示的に反転してサンドイッチを組む経路は、
+    # 同じ式を倍精度のnumpyで組んだ実測で、`card_poly`の全体Fが相対3e-8（OLS）・1e-9（WLS）、
+    # 係数・標準誤差が1.5e-10ずれる。WLSの全体Fではこの許容誤差の10倍で、検出の余裕は小さい。
+    # 他の2ケースはその経路でも2e-12以下で、精度の確認にとどまる。
+    "ols_exact_cluster": {"rtol": 1e-10},
+    "wls_exact_cluster": {"rtol": 1e-10},
     # --- 独立実装（R等）とのクロスチェック ---
     # 独立実装（R `lmtest::bptest`＋同じ補助回帰のlm）。同じく閉形式で機械精度一致
     # （実測最大相対誤差1.1e-12）。p値は上と同じ理由で相対誤差のみ（`atol_p_value=0`）。
@@ -76,7 +91,7 @@ LINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         "atol_p_value": 0.0,
     },
     # classical/HC0-3/cluster/HACは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
-    # 適用する。HACのR側は`NeweyWest(adjust = FALSE)`: 既定の`adjust = TRUE`は共分散全体に
+    # 適用する。HACのR側は`NeweyWest(adjust = FALSE)`: `adjust = TRUE`（`kernHAC`の既定。`NeweyWest`の既定は`FALSE`）は共分散全体に
     # `n/(n-k)`（IVのWu-Hausmanの補助回帰は`n/(n-k_aug)`）を掛けるが、本実装・statsmodels・
     # linearmodelsは掛けず、このスカラー倍だけが差の全てだった（標準誤差で
     # `sqrt(n/(n-k))-1`、F統計量で`n/(n-k)-1`。n=500・k=4で0.4%・0.8%、n=40で4%・11%）。
@@ -107,7 +122,7 @@ LINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     },
     # 重み=1（または定数重み）のWLSとOLSの一致（r_squared・aic/bic・対数尤度・残差・
     # 予測値）。WLSは元スケールのy・重みから統計量を計算し直す経路
-    # （`engine/src/linear/wls.rs`）、OLSはfaerの行列演算の経路を通るため加算順序に
+    # （`engine/src/linear/wls/statistics.rs`）、OLSはfaerの行列演算の経路を通るため加算順序に
     # 由来する差が出る。実測最大8.9e-16。
     "wls_api": {
         "atol_ols_invariant": 1e-12,

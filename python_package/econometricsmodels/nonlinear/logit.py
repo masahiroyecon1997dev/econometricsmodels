@@ -1,19 +1,13 @@
 """Python wrapper for Logit (binary logistic regression).
 
 A thin wrapper around `econometricsmodels._lib.fit_logit` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`LogitOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `OLSOptions`, see
-`docs/spec/ols-spec.md`, "API引数").
-
-`summary()` is not implemented (structured-data-only output policy; see
-`docs/spec/nonlinear-common.md` section 5 and the
-`OLSResults`/`WLSResults` precedent).
+`LogitOptions` is re-exported as-is from `_lib`. There is no
+`summary()`: results are returned as structured data.
 """
 
 from __future__ import annotations
@@ -27,8 +21,10 @@ from .._lib import LogitOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     marginal_effect_rows,
     params_table_rows,
+    results_repr,
 )
 
 __all__ = ["Logit", "LogitOptions", "LogitResults"]
@@ -49,9 +45,15 @@ class Logit:
     Examples:
         >>> import polars as pl
         >>> from econometricsmodels import Logit
-        >>> df = pl.DataFrame({"y": [0.0, 1.0], "x1": [1.0, 2.0]})
+        >>> df = pl.DataFrame(
+        ...     {
+        ...         "y": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        ...     }
+        ... )
         >>> result = Logit(df, y="y", x=["x1"]).fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        1.214
     """
 
     def __init__(
@@ -59,6 +61,7 @@ class Logit:
         data: pl.DataFrame,
         y: str,
         x: list[str],
+        *,
         options: LogitOptions | None = None,
     ) -> None:
         self._data = data
@@ -78,7 +81,9 @@ class Logit:
                 builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
-                NaN/infinity, `y` contains a value other than 0.0/1.0,
+                NaN/infinity, `y` contains a value other than 0.0/1.0, `y`
+                has the same value in every row while
+                `include_intercept=True` (`OUTCOME_CONSTANT`),
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type`/`solver` string, etc.).
                 A subclass of `ValueError`.
@@ -101,10 +106,17 @@ class LogitResults:
     `result.params["x1"]`. Use `params_table()` for a row-oriented
     listing (a list of dicts), for example for a JSON response.
 
+    Printing a result shows a header line (the dependent variable,
+    `n_obs` and `cov_type`) and a short table of the coefficients and
+    their standard errors. Its layout may change between versions, so
+    read the fields listed below or use `params_table()` rather than
+    parsing it.
+
     Fields by purpose:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
       `conf_int`; the names in order: `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist` (always
       `"normal"`), `stat_df`.
     - Overall likelihood-ratio test: `lr_statistic`, `lr_p_value`,
@@ -118,10 +130,6 @@ class LogitResults:
     - Methods: `predict()` (probabilities), `augment()`,
       `marginal_effects()`, `pred_table()`, `params_table()`.
 
-    Args:
-        raw: The estimation result object returned by `_lib.fit_logit`
-            (`_lib.LogitResult`).
-
     Note:
         Users normally do not construct this directly; it is returned
         by `Logit.fit()`.
@@ -129,6 +137,9 @@ class LogitResults:
 
     def __init__(self, raw: _lib.LogitResult) -> None:
         self._raw = raw
+
+    def __repr__(self) -> str:
+        return results_repr(type(self).__name__, self._raw)
 
     @property
     def param_names(self) -> list[str]:
@@ -152,6 +163,21 @@ class LogitResults:
         return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
+
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
+
+    @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic.
 
@@ -160,17 +186,15 @@ class LogitResults:
         return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["normal"]:
+        """Distribution of `test_stats`. Always `"normal"`:
+        z-statistics are used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> None:
+        """Always `None`: the z-statistics in `test_stats` follow a
+        standard normal distribution, which has no degrees of freedom."""
         return self._raw.stat_df
 
     @property
@@ -196,12 +220,21 @@ class LogitResults:
     @property
     def lr_statistic(self) -> float:
         """Likelihood-ratio test statistic (overall significance; the
-        Logit analogue of OLS's F-statistic)."""
+        Logit analogue of OLS's F-statistic).
+
+        It compares the fitted model with the intercept-only model, even
+        when the model was fitted with `include_intercept=False`. In that
+        case the intercept-only model is not nested in the fitted model,
+        so the statistic can be negative and the test is not meaningful.
+        """
         return self._raw.lr_statistic
 
     @property
     def lr_p_value(self) -> float:
-        """P-value of the likelihood-ratio test (chi-squared distribution)."""
+        """P-value of the likelihood-ratio test (chi-squared distribution).
+
+        See `lr_statistic` for the case `include_intercept=False`.
+        """
         return self._raw.lr_p_value
 
     @property
@@ -232,12 +265,16 @@ class LogitResults:
 
     @property
     def df_model(self) -> int:
-        """Model degrees of freedom (`k - 1`)."""
+        """Model degrees of freedom (`k - 1`, where `k` is the number
+        of estimated coefficients). It is `k - 1` also with
+        `include_intercept=False`, the degrees of freedom of the
+        likelihood-ratio test against the intercept-only model."""
         return self._raw.df_model
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - k`)."""
+        """Residual degrees of freedom (`n - k`, where `k` is the number
+        of estimated coefficients, including the intercept if any)."""
         return self._raw.df_resid
 
     @property
@@ -274,7 +311,7 @@ class LogitResults:
         """
         return params_table_rows(self._raw)
 
-    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
+    def predict(self, *, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted probabilities `p_i = Λ(x_i'β̂)`.
 
         Note:
@@ -306,15 +343,14 @@ class LogitResults:
         """
         return self._raw.predict(new_data)
 
-    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+    def augment(self, *, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted probabilities appended as a
         column.
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
         new `"predicted_probability"` column) instead of a plain list.
-        See `OLSResults.augment()` for the project's general policy on
-        this DataFrame-returning exception.
+        It exists to attach predictions back to their source rows.
 
         Args:
             new_data: Same as `predict()`. If `None` (default), returns
@@ -332,14 +368,15 @@ class LogitResults:
         """
         return self._raw.augment(new_data)
 
-    def pred_table(self, threshold: float = 0.5) -> list[dict[str, float]]:
+    def pred_table(self, *, threshold: float = 0.5) -> list[dict[str, float]]:
         """Classification (confusion) table.
 
-        `actual` always uses a fixed 0.5 split; only the predicted
-        class depends on `threshold` (matches statsmodels'
-        `BinaryResults.pred_table(threshold)`). Unlike `predict()`,
-        out-of-sample data (a `new_data` argument) is not yet
-        supported.
+        Counts the training observations by actual class (`y` is 0 or
+        1) and predicted class. The predicted class is 1 when the
+        predicted probability exceeds `threshold`. This matches
+        statsmodels' `BinaryResults.pred_table(threshold)`. Unlike
+        `predict()`, it has no `new_data` argument: it describes the
+        training data only.
 
         Args:
             threshold: Probability threshold above which an
@@ -358,7 +395,7 @@ class LogitResults:
         ]
 
     def marginal_effects(
-        self, at: str = "overall", confidence_level: float = 0.95
+        self, *, at: str = "overall", confidence_level: float = 0.95
     ) -> list[dict[str, float | str]]:
         """Marginal effects (`dy/dx`) with delta-method standard errors.
 
@@ -379,8 +416,9 @@ class LogitResults:
             (excluding the intercept). Keys are `param_name`, `effect`,
             `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`. `test_stat` is
             always a z-statistic (normal distribution). `effect` is
-            the marginal effect estimate (corresponds to `dy/dx` in
-            Stata's `margins, dydx(*)` and statsmodels).
+            the marginal effect estimate, the derivative of the
+            predicted probability (the same as `get_margeff(method=
+            "dydx")` in statsmodels for the same `at`).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,

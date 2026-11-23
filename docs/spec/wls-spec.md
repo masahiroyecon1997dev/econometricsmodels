@@ -1,20 +1,20 @@
 # WLS 仕様書
 
-WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本は公開ページ[`docs/methods/wls.md`](../methods/wls.md)（英語）で、本書は実装上の判断・内部構成・テスト方針を記す（定義式は重複させない）。`engine/src/linear/wls.rs`・
+WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本は公開ページ[`docs/methods/wls.md`](../methods/wls.md)（英語）で、本書は実装上の判断・内部構成・テスト方針を記す（定義式は重複させない）。`engine/src/linear/wls.rs`（ファサード）と`engine/src/linear/wls/`・
 `engine_pybind/src/linear/wls.rs`・`python_package/econometricsmodels/linear/wls.py`として
 実装済み。OLSに強く依存する設計のため、共通する式・理由は[`ols-spec.md`](./ols-spec.md)を参照し、
 本ドキュメントではWLS固有の差分のみを記載する。
 
 ## 1. API引数
 
-3層構成: `WLS(data, y, x, weight, options).fit() -> WLSResults`（python_package）→
+3層構成: `WLS(data, y, x, weight, options=options).fit() -> WLSResults`（python_package）→
 `fit_wls(data, y, x, weight, options) -> WLSResult`（engine_pybind）→
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 
 - `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`WLSOptions`側には置かない）。
-  理由: `cluster`/`hac_time`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
-  だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
-  （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
+  理由: `cluster`/`hac_time`は`cov_type`に応じた条件付きでデフォルトのある設定だが、`weight`は
+  必須でデフォルトがない。置き場所の基準（必須なら引数、任意ならOptions）と`weight`が単数形の理由は
+  [`api-conventions.md`](./api-conventions.md)を参照。
 - 専用の`WLSOptions`型を持ち、`OLSOptions`と完全に同一のフィールド
   構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、
   意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。結果型`WLSResult`が独立型なのと
@@ -71,7 +71,7 @@ WLSは`OlsEstimator::fit`をそのまま呼ぶため、既存の`LeastSquaresErr
 エラー型として使い続ける（専用の`WlsError`型は新設しない）。
 
 - `WeightDimensionMismatch { y_rows, weight_rows }`: 重み配列と`y`の行数不一致（防御的チェック）。
-- `NonPositiveWeight { row, weight }`: 重みが0以下（NaN含む）。
+- `NonPositiveWeight { column, row, weight }`: 重みが0以下（NaN含む）。`column`は重みの列名で、`from_columns_weighted`が`weight_name`として受け取る（`report()`が`argument="weight"`・`data_argument="data"`を足す）。
 
 被説明変数が定数（`OUTCOME_CONSTANT`、切片あり）と完全フィット（`PERFECT_FIT`）の判定は
 `OlsEstimator::fit`の判定（`ols-spec.md`3.3節）をそのまま使う。総平方和は変換後の$\tilde y$ではなく
@@ -110,8 +110,8 @@ $\tfrac12\sum_i\ln w_i$）は公開ページ[`docs/methods/wls.md`](../methods/w
 
 **実装**: `OlsEstimator`/`OlsInput`自体は重みを一切知らない設計を維持したまま、
 `WlsEstimator::fit`側（元の、変換前の`y`・重みにアクセスできる層）で上記5フィールドを計算し直す
-`weighted_fit_statistics`関数を`WlsEstimator`に持たせている（`residuals`と同じ「WLS固有の後処理を
-`WlsEstimator`層に置く」パターン）。
+`weighted_fit_statistics`関数（`wls/statistics.rs`。`fit_wls`が呼ぶ）で計算している（`residuals`と同じ
+「WLS固有の後処理を`WlsEstimator`層に置く」パターン）。
 
 ### 3.5 `predict()`
 
@@ -145,7 +145,7 @@ OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・�
 ### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/support/_tolerances_linear.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
-  HACもOLSと同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
+  HACもOLSと同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。`adjust = TRUE`（`NeweyWest`の既定は`FALSE`。`kernHAC`・`vcovHAC`の既定）は共分散に
   `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、WLSでもこのスカラー倍だけが差の全てで、
   OLSと同じ値になる。以前の`rtol_hac=5e-2`（実測約4.3%）は現在の入力では再現しない）。
 - 実データセット: `401ksubs`（`fsize==1`の単身世帯サブサンプル、n=2017）、Wooldridge Example

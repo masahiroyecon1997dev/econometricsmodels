@@ -41,11 +41,11 @@ disable-model-invocation: true
 11. 確認が得られたらタグをpushする。
 12. ビルドジョブの完了を`Monitor`で監視する。
 13. `publish to PyPI`ジョブが`waiting`状態（`pypi`環境のRequired reviewersゲート）になったら、承認用のGitHub Actions実行URLを提示し、**ユーザーの承認を待つ**。
-14. 承認確認後、`publish to PyPI`・`create GitHub Release`ジョブの完了を監視する。
+14. 承認確認後、`publish to PyPI`・`create GitHub Release`ジョブの完了を監視する。`create GitHub Release`はdraftで作成してassetを添付してから公開する（Immutable Releasesでは公開後にassetを足せないため）。
 
 ### 5. 完了確認
 
-15. `gh release view vX.Y.Z`でGitHub Releaseの内容（アセット一覧等）を確認する。
+15. `gh release view vX.Y.Z --json isDraft,isImmutable,assets`でGitHub Releaseの内容を確認する。`isDraft`が`false`、`isImmutable`が`true`、アセット一覧がホイール・sdistの全てであること。
 16. PyPI公開URL（`https://pypi.org/project/econometricsmodels/X.Y.Z/`）とGitHub ReleaseのURLをユーザーに報告する。
 
 ## 注意
@@ -54,3 +54,4 @@ disable-model-invocation: true
 - タグpush・PyPI公開は実世界への副作用を伴う操作のため、手順3（事前ビルド確認）を省略しない。
 - `git push`（ブランチ・タグ）と`gh pr merge`は`allowed-tools`に入れていない。実行するたびに権限確認が出る（タグpushは手順10の確認に加えて二重になるが、実世界への副作用が大きいため意図的）。force pushと`--delete`は`.claude/settings.json`でdenyしている。
 - 想定外のCI失敗・承認待ち以外の異常（ジョブ失敗等）が起きた場合は、その場で報告し次のステップに進む前にユーザーに確認する。
+- `create GitHub Release`ジョブが公開前に失敗すると、draftのreleaseが残る。そのままジョブを再実行すると同名のreleaseが既にあるため失敗する。draftは`gh release delete`（`.claude/settings.json`でdeny）かGitHubのUIで利用者が削除してから、失敗したジョブだけを再実行する。PyPI公開は既に済んでいるので、`publish to PyPI`は再実行しない。公開（draft解除）まで進んだreleaseは削除してもtag名を再利用できない。

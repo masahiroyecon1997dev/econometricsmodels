@@ -18,6 +18,7 @@ use nonlinear::tobit::{
     CensoringFitCategoryResult, CensoringFitCheckResult, TobitOptions, TobitResult,
 };
 use panel::fe::{FEOptions, FEResult};
+use panel::fe_iv::{FEIVOptions, FEIVResult};
 use panel::re::{REOptions, REResult};
 use shared::catalog_export::error_catalog;
 #[cfg(debug_assertions)]
@@ -42,6 +43,7 @@ use shared::option_values::extract_options;
 ///     Estimation options.
 #[pyfunction]
 fn fit_ols(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -56,7 +58,7 @@ fn fit_ols(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        linear::ols::fit(data, y, x, &options)
+        linear::ols::fit(py, data, y, x, &options)
     })
 }
 
@@ -77,6 +79,7 @@ fn fit_ols(
 ///     Estimation options.
 #[pyfunction]
 fn fit_wls(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -93,7 +96,7 @@ fn fit_wls(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        linear::wls::fit(data, y, x, weight, &options)
+        linear::wls::fit(py, data, y, x, weight, &options)
     })
 }
 
@@ -112,6 +115,7 @@ fn fit_wls(
 ///     Estimation options.
 #[pyfunction]
 fn fit_logit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -126,7 +130,7 @@ fn fit_logit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::logit::fit(data, y, x, &options)
+        nonlinear::logit::fit(py, data, y, x, &options)
     })
 }
 
@@ -145,6 +149,7 @@ fn fit_logit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_probit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -159,7 +164,7 @@ fn fit_probit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::probit::fit(data, y, x, &options)
+        nonlinear::probit::fit(py, data, y, x, &options)
     })
 }
 
@@ -178,6 +183,7 @@ fn fit_probit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_tobit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -192,7 +198,7 @@ fn fit_tobit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::tobit::fit(data, y, x, &options)
+        nonlinear::tobit::fit(py, data, y, x, &options)
     })
 }
 
@@ -215,6 +221,7 @@ fn fit_tobit(
 ///     Estimation options. `options.estimator` selects "2sls" (default) or "gmm".
 #[pyfunction]
 fn fit_iv(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x_exog: &Bound<'_, PyAny>,
@@ -235,7 +242,7 @@ fn fit_iv(
         columns.extend(instruments.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
+        iv::common::fit(py, data, y, x_exog, x_endog, instruments, &options)
     })
 }
 
@@ -244,36 +251,98 @@ fn fit_iv(
 /// Parameters
 /// ----------
 /// data : polars.DataFrame
-///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster/HAC time columns.
+///     The input data. Must contain the `y`, `x`, `effects`, and (if specified)
+///     cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
 ///     Column names of the independent variables. Must contain at least one
 ///     column name.
-/// entity : str
-///     Column name of the entity (individual/panel unit) identifier.
+/// effects : list[str]
+///     Column names that define the fixed effects: one column for one-way
+///     effects, two columns (entity, then time) for two-way effects, and
+///     three to five columns for higher-dimensional effects.
 /// options : FEOptions
 ///     Estimation options.
 #[pyfunction]
 fn fit_fe(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
-    entity: &Bound<'_, PyAny>,
+    effects: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<FEResult> {
     guard(|| {
         check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
-        let entity = extract_column_name(entity, "entity")?;
+        let effects = extract_column_list(effects, "effects")?;
         let options: FEOptions = extract_options(options, "options")?;
-        let mut columns: Vec<String> = vec![y.clone(), entity.clone()];
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(effects.iter().cloned());
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::fe::fit(data, y, x, entity, &options)
+        panel::fe::fit(py, data, y, x, effects, &options)
+    })
+}
+
+/// Entry point for FEIV (fixed effects instrumental variables, with two-stage least squares or
+/// GMM) estimation.
+///
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x_exog`, `x_endog`, `instruments`, `effects`,
+///     and (if specified) cluster/dk_time columns.
+/// y : str
+///     Column name of the dependent variable.
+/// x_exog : list[str]
+///     Column names of the exogenous independent variables. May be empty (the fixed effects
+///     absorb the intercept).
+/// x_endog : list[str]
+///     Column names of the endogenous independent variables. Must contain at least one
+///     column name.
+/// instruments : list[str]
+///     Column names of the excluded instruments. Must contain at least as many columns as
+///     `x_endog`.
+/// effects : list[str]
+///     Column names that define the fixed effects: one column for one-way effects, two columns
+///     (entity, then time) for two-way effects, and three to five columns for
+///     higher-dimensional effects.
+/// options : FEIVOptions
+///     Estimation options.
+// Pythonの公開引数（`data`・`y`・`x_exog`・`x_endog`・`instruments`・`effects`・`options`）の数を変えられない。
+#[allow(clippy::too_many_arguments)]
+#[pyfunction]
+fn fit_fe_iv(
+    py: Python<'_>,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x_exog: &Bound<'_, PyAny>,
+    x_endog: &Bound<'_, PyAny>,
+    instruments: &Bound<'_, PyAny>,
+    effects: &Bound<'_, PyAny>,
+    options: &Bound<'_, PyAny>,
+) -> PyResult<FEIVResult> {
+    guard(|| {
+        check_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x_exog = extract_column_list(x_exog, "x_exog")?;
+        let x_endog = extract_column_list(x_endog, "x_endog")?;
+        let instruments = extract_column_list(instruments, "instruments")?;
+        let effects = extract_column_list(effects, "effects")?;
+        let options: FEIVOptions = extract_options(options, "options")?;
+        let columns = panel::fe_iv::FeIvColumns {
+            y,
+            x_exog,
+            x_endog,
+            instruments,
+            effects,
+        };
+        let data = select_columns(data, "data", &columns.data_columns(&options))?;
+        panel::fe_iv::fit(py, data, columns, &options)
     })
 }
 
@@ -282,36 +351,85 @@ fn fit_fe(
 /// Parameters
 /// ----------
 /// data : polars.DataFrame
-///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster columns.
+///     The input data. Must contain the `y`, `x`, `effects`, and (if specified)
+///     cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
 ///     Column names of the independent variables. Must contain at least one
 ///     column name.
-/// entity : str
-///     Column name of the entity (individual/panel unit) identifier.
+/// effects : list[str]
+///     Column names that define the random effects: one column for one-way
+///     effects, two columns (entity, then time) for two-way effects.
 /// options : REOptions
 ///     Estimation options.
 #[pyfunction]
 fn fit_re(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
-    entity: &Bound<'_, PyAny>,
+    effects: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<REResult> {
     guard(|| {
         check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
-        let entity = extract_column_name(entity, "entity")?;
+        let effects = extract_column_list(effects, "effects")?;
         let options: REOptions = extract_options(options, "options")?;
-        let mut columns: Vec<String> = vec![y.clone(), entity.clone()];
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(effects.iter().cloned());
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::re::fit(data, y, x, entity, &options)
+        panel::re::fit(py, data, y, x, effects, &options)
+    })
+}
+
+/// `_restore_pickled`の種別ごとの分岐。種別名は各型の`PickleState::KIND`と照合するので、
+/// 綴りを別に書く必要がない（型を足してここに足し忘れても、`tests/cross_method/test_pickle.py`が検出する）。
+macro_rules! restore_by_kind {
+    ($kind:expr, $py:expr, $state:expr, $unknown:expr; $($ty:ty),+ $(,)?) => {
+        match $kind {
+            $( kind if kind == <$ty as shared::pickle::PickleState>::KIND => {
+                shared::pickle::restore::<$ty>($py, $state)
+            } )+
+            _ => Err($unknown),
+        }
+    };
+}
+
+/// Restore function returned by `__reduce__` of the options and result classes.
+///
+/// Internal entry point called by `pickle` and `copy`; not meant to be called directly.
+/// Raises `ValidationError` (`PICKLE_FORMAT_MISMATCH`) when `kind` is unknown, `version` differs
+/// from the current format, or `state` does not have the fields and types of that class.
+#[pyfunction]
+fn _restore_pickled(
+    py: Python<'_>,
+    kind: &Bound<'_, PyAny>,
+    version: &Bound<'_, PyAny>,
+    state: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    guard(|| {
+        // 引数の型が違うときも`PICKLE_FORMAT_MISMATCH`にする（壊れたpickleの報告を1つの`code`にそろえる）。
+        let kind_name = kind
+            .extract::<String>()
+            .unwrap_or_else(|_| "(unknown)".to_string());
+        let mismatch = || shared::pickle::format_mismatch(&kind_name);
+        if version.extract::<u32>().ok() != Some(shared::pickle::FORMAT_VERSION) {
+            return Err(mismatch());
+        }
+        let state = state
+            .cast::<pyo3::types::PyDict>()
+            .map_err(|_| mismatch())?;
+        restore_by_kind!(
+            kind_name.as_str(), py, state, mismatch();
+            OLSOptions, OLSResult, WLSOptions, WLSResult, LogitOptions, LogitResult, MarginalEffectsResult,
+            ProbitOptions, ProbitResult, TobitOptions, TobitResult, CensoringFitCategoryResult, CensoringFitCheckResult,
+            IVOptions, IVResult, FEOptions, FEResult, FEIVOptions, FEIVResult, REOptions, REResult,
+        )
     })
 }
 
@@ -347,13 +465,21 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_iv, m)?)?;
     m.add_class::<IVOptions>()?;
     m.add_class::<IVResult>()?;
+    m.add_class::<iv::common::CraggDonaldOutput>()?;
+    m.add_class::<iv::common::KleibergenPaapOutput>()?;
+    m.add_class::<iv::common::CStatisticOutput>()?;
+    m.add_class::<iv::common::EffectiveFOutput>()?;
     m.add_function(wrap_pyfunction!(fit_fe, m)?)?;
     m.add_class::<FEOptions>()?;
     m.add_class::<FEResult>()?;
+    m.add_function(wrap_pyfunction!(fit_fe_iv, m)?)?;
+    m.add_class::<FEIVOptions>()?;
+    m.add_class::<FEIVResult>()?;
     m.add_function(wrap_pyfunction!(fit_re, m)?)?;
     m.add_class::<REOptions>()?;
     m.add_class::<REResult>()?;
     m.add_function(wrap_pyfunction!(error_catalog, m)?)?;
+    m.add_function(wrap_pyfunction!(_restore_pickled, m)?)?;
     // テスト専用の入口はデバッグビルドにだけ含める（配布するreleaseビルドには入れない）。
     #[cfg(debug_assertions)]
     {

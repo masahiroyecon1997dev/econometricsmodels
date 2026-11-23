@@ -38,8 +38,8 @@ def test_fit_succeeds_and_returns_re_results(fe_dataset):
 
 
 def test_default_options_use_cluster_cov_type(fe_dataset):
-    """`options`省略時は`REOptions()`の既定値（cov_type="cluster"、entity
-    単位）が使われる（panel-common.md 3.2節、FEと同じデフォルト）。
+    """`options`省略時は`REOptions()`の既定値（cov_type="cluster"、`effects`の
+    先頭要素の列（entity）単位）が使われる（panel-common.md 3.2節、FEと同じデフォルト）。
     """
     res = our_fit_re(fe_dataset)
     assert res.cov_type == "cluster"
@@ -117,11 +117,11 @@ def test_params_std_errors_test_stats_p_values_share_keys(fe_dataset):
     assert set(res.p_values.keys()) == expected_keys
 
 
-def test_n_obs_dep_var_name_and_n_entities(fe_dataset):
+def test_n_obs_dep_var_name_and_n_groups(fe_dataset):
     res = our_fit_re(fe_dataset)
     assert res.n_obs == fe_dataset.height
     assert res.dep_var_name == "y"
-    assert res.n_entities == fe_dataset["entity"].n_unique()
+    assert res.n_groups["entity"] == fe_dataset["entity"].n_unique()
 
 
 def test_df_resid_and_df_model(fe_dataset):
@@ -173,7 +173,7 @@ def test_confidence_level_changes_interval_width(fe_dataset):
 def test_dk_time_option_does_not_affect_coefficients(fe_dataset):
     """`REOptions.dk_time`は`cov_type="dk"`のHAC時点列にのみ使われ、係数・
     ハウスマン検定・`df_model`には影響しない（`engine/src/panel/CLAUDE.md`
-    「RE」節参照。FEの`time`が`df_model`を変えるのとは対照的）。
+    「RE」節参照。FEの`effects`の2要素目が`df_model`を変えるのとは対照的）。
     """
     classical = our_fit_re(fe_dataset)
     dk = our_fit_re(
@@ -186,7 +186,7 @@ def test_dk_time_option_does_not_affect_coefficients(fe_dataset):
 
 
 def test_cluster_defaults_to_entity(fe_dataset):
-    """`cluster`省略時は`entity`引数の列を自動的にクラスターキーとして
+    """`cluster`省略時は`effects`の先頭要素の列を自動的にクラスターキーとして
     使う（3.2節）。明示的に`cluster="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
@@ -252,13 +252,15 @@ def test_hausman_follows_cov_type(fe_dataset):
 
 
 def test_hausman_computed_with_singleton_time():
-    """1-wayでは`time`列を使わないため、singleton timeがあってもハウスマン検定は
+    """1-way（`effects`が1要素）では`time`列を使わないため、singleton timeがあってもハウスマン検定は
     計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`dk_time`を指定。2-wayは
     `time`のsingletonを`ValidationError`にする）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
     options = REOptions(cov_type="dk", dk_time="time")
-    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    res = RE(
+        df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+    ).fit()
 
     assert isinstance(res.hausman_statistic, float)
     assert isinstance(res.hausman_p_value, float)
@@ -280,14 +282,14 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=REOptions(cov_type="classical"),
     ).fit()
     clustered = RE(
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=REOptions(cov_type="cluster"),
     ).fit()
 

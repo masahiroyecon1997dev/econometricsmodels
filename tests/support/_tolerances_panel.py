@@ -22,9 +22,159 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # のみ、linearmodels自身がentityのみdemeanの別定義を使うため対象外
     # （テストコード側でこのフィールドの比較自体をスキップすること、
     # `benchmark/panel/references/linearmodels_ref.py`モジュールdoc参照）。
+    # 係数の分散共分散行列（`fe_cov.json`・`re_cov.json`と、`fe_cov_crosscheck.json`・
+    # `fe_plm_cov_crosscheck.json`・`re_cov_crosscheck.json`・`re_statsmodels_cluster_cov.json`・
+    # `re_time_invariant_cov.json`・`re_two_way_cov.json`・`re_variance_method_cov.json`）も、各テストの
+    # `rtol`で比べる。要素ごとの尺度は`sqrt(V_ii·V_jj)`（`assert_cov_params_close`）。実測の最大は
+    # この尺度で、FE・REの主リファレンスとクロスチェックは2e-12以下。`re_time_invariant`・
+    # `re_two_way`・`re_variance_method`は絶対年の列を含む入力で2e-8（time_invariant）・1e-8
+    # （two_way）・1.2e-7（variance_method）まで大きくなる。標準誤差と同じく
+    # `CONDITIONING_SENSITIVE_KEYS`に入れ、そこだけ`rtol_absolute_year`で比べる。
     "fe_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
+    },
+    # FEIV（固定効果つきの2SLS）の`_lib.fit_fe_iv`の照合（`fe_iv_binding`）。参照は、ダミー変数を明示した
+    # 2SLSのnumpy実装（Frisch-Waugh-Lovell。classical・hc1・hc2・hc3の共分散、Sargan、部分F、固定効果）。
+    # within変換後の閉形式・交互射影の解で、実測の最大相対誤差は1e-10未満。
+    "fe_iv_binding": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
+    # FEIV（固定効果つきのGMM）の`_lib.fit_fe_iv`の照合（`fe_iv_gmm_binding`）。参照は、ダミー変数への回帰の
+    # 残差で固定効果を除いた列から、点推定・重み行列（classical・robust・cluster）・サンドイッチ共分散
+    # （classical・hc1・hc2・hc3）・Hansen J・C統計量をLU分解のnumpyで組んだ実装（本実装の定義に沿った手計算
+    # で、独立な第三者実装ではない。engineの単体テストがダミー変数を明示した`iv::gmm`との照合を持つ）。
+    # within変換後の閉形式・交互射影の解で、実測の最大相対誤差は係数 1e-15、標準誤差 1e-14、共分散 4e-14、
+    # Wald 2e-14、Hansen J 4e-15、within R² 3e-16、C統計量 3e-14（`J_e`・`J_c`は1e-15）。
+    "fe_iv_gmm_binding": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
+    # FE-GMM（`FEIV`）の主リファレンスは、within変換後のデータに当てたlinearmodels `IVGMM`
+    # （`fe_iv_gmm.json`・`fe_iv_gmm_cov.json`。1-way・2-way・3-way、`fe_iv_datasets.SCENARIOS`の全シナリオ、one_step・
+    # two_step（classical・robust・cluster重み）・iterated、classical・hc1・cluster・時点・region・sectorの
+    # クラスター・dk・hc2・hc3）。
+    # 固定効果を除く計算は、本実装の閉形式・交互射影とは別（群の平均・ダミー変数行列への`lstsq`）。係数・
+    # Hansen J・反復回数は`IVGMM`のまま、標準誤差は漸近共分散に小標本補正のスカラー（手書き）を掛ける。
+    # 実測の最大: 係数 8e-14（相対）、標準誤差 9e-13、共分散行列 2e-12（`sqrt(V_ii·V_jj)`尺度）、信頼区間 3e-10
+    # （悪条件のHC3）、Wald 5e-13、Hansen J 2e-13、R² 7e-16、p値 9e-11（Wald・Hansen Jのp値は1e-13）、
+    # 反復回数は完全一致（悪条件のシナリオ`high_condition_number`が最大）。p値は裾が丸め誤差を増幅するため、相対誤差1e-6を
+    # 絶対誤差の下限なしで使う（`fe_iv_reference`と同じ）。
+    "fe_iv_gmm_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-GMMのR momentfitによる独立クロスチェック（`fe_iv_gmm_crosscheck.json`・`fe_iv_gmm_cov_crosscheck.json`。
+    # 1-way・不均衡・2-way・不均衡な2-way・3-way、one_step・two_step（3つの重み）・iterated × classical・hc1・
+    # cluster）。実測の最大: 係数 7e-15（相対）、標準誤差 5e-14、共分散行列 1e-13、信頼区間 9e-15、Wald 1e-13、
+    # Hansen J 1e-13。
+    "fe_iv_gmm_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-GMMのC統計量の参照（`fe_iv_gmm_c_statistic.json`はnumpyのオラクル、`fe_iv_gmm_c_statistic_crosscheck.json`は
+    # R momentfit。どちらもwithin変換後のデータ）。実測の最大: 統計量・`J_e`・`J_c`とも1e-13（相対）。
+    # p値は統計量から求めるχ²の裾なので、相対誤差1e-6を絶対誤差の下限なしで使う。
+    "fe_iv_gmm_c_statistic": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-GMMからFE-2SLSへの還元（丁度識別。`just_identified`の1-way全`cov_type`）。GMMの共分散は重みによらず
+    # FE-2SLSと同じなので、FE-2SLSの参照（fixest・plm。`fe_iv.json`・`fe_iv_plm_crosscheck.json`）の
+    # 係数・標準誤差・共分散行列と比べる。許容誤差は`fe_iv_reference`・`fe_iv_plm_crosscheck`と同じ。
+    # 実測の最大: fixestに対して係数 1e-13（相対）、標準誤差 1e-12、共分散行列 2e-12、Sargan 3e-12、plmに対して
+    # 係数 5e-14、標準誤差 3e-13、共分散行列 6e-13。
+    # 同じキーを、GMMの第一段階・弱操作変数診断・Wu-Hausman・固定効果の整合性テスト
+    # （`test_fe_iv_gmm_first_stage.py`・`test_fe_iv_gmm_fixed_effects.py`。同じ共有実装をFE-2SLSと
+    # GMMから呼んだ結果の比較）と、2SLSの`c_stat()`のテスト（`test_fe_iv_c_statistic_2sls.py`）が使う。
+    # 実測の最大（`reduction_cases()`の全ケース）: 第一段階の係数・標準誤差・t値、部分F、Cragg-Donald、rk LM、
+    # rk Wald F、有効F、Wu-Hausmanの統計量とp値はFE-2SLSとビット一致（相対誤差 0）、固定効果は絶対誤差 3e-15。
+    # fixestに対する部分F・rk Wald F・Wu-Hausmanは上のFE-2SLSの実測（4e-11以下）と同じ。
+    "fe_iv_gmm_reduction": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-2SLS（`FEIV`）の主リファレンスはR fixest（`fe_iv.json`・`fe_iv_cov.json`。1-way・2-way・3-way、
+    # classical・hc1・cluster・dk、悪条件・外れ値・多列・自由度の境界を含む）。within変換後の閉形式・
+    # 交互射影の解で、fixestの`ssc()`既定に本実装の小標本補正と自由度が合っているため機械精度で一致する。
+    # 実測の最大: 係数 6e-14（相対）、標準誤差 1e-12、共分散行列 2e-12（`sqrt(V_ii·V_jj)`尺度）、信頼区間 1e-11、
+    # 係数のp値 9e-12、全係数のWald F 2e-12（p値 2e-11）、Wu-Hausman 1e-12、部分F 2e-14、
+    # Sargan（`e'e/n`の尺度を`(n-n_absorbed)/n`倍）3e-12、rk Wald F 4e-11。p値は裾が丸め誤差を増幅するため、
+    # 相対誤差1e-6を絶対誤差の下限なしで使う（`fe_multi_way_reference`と同じ）。
+    "fe_iv_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-2SLSのダミー変数を明示した2SLS（linearmodels IV2SLS、HC2・HC3はnumpy）によるクロスチェック
+    # （`fe_iv_dummy_crosscheck.json`・`fe_iv_dummy_cov_crosscheck.json`）。Frisch-Waugh-Lovellで本実装と
+    # 同じ量を、within変換を使わずに計算する。実測の最大: 係数 3e-13、標準誤差 4e-13、共分散行列 7e-13、
+    # Wu-Hausman 8e-14、Cragg-Donald 3e-15、rk LM 3e-15、rk Wald F 4e-13、Sargan 1e-12、R² 1e-14、有効F（MOPの
+    # 独立実装）5e-11（悪条件・外れ値のシナリオを含む）。絶対誤差の下限は主リファレンスと同じ1e-10にする
+    # （標準誤差は0.03〜0.1程度で、下限が1e-8だと実効の相対許容が1e-7を超えてしまう）。
+    "fe_iv_dummy_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-2SLSのplm（`model = "within"`）によるクロスチェック（`fe_iv_plm_crosscheck.json`・
+    # `fe_iv_plm_cov_crosscheck.json`。1-way、classical・hc1・cluster・dk）。サンドイッチの中身はplm、
+    # 小標本補正はスカラー倍の手計算。実測の最大: 係数 4e-15、標準誤差 7e-14、共分散行列 1e-13、
+    # p値 1e-12、信頼区間 1e-11。絶対誤差の下限は主リファレンスと同じ1e-10（実測が機械精度に近いため）。
+    "fe_iv_plm_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-2SLSの弱操作変数診断のivDiagによるクロスチェック（`fe_iv_weak_diagnostics_crosscheck.json`）。
+    # 実測の最大（相対）: 2-wayの不均衡パネル以外は3e-14（Cragg-Donald・rk Wald F・有効F）、その2-wayの
+    # 不均衡パネルはhc1が1.1e-9、sectorクラスターが4.2e-9（rk Wald F 2.0e-9・有効F 4.2e-9）。許容誤差は
+    # 基本の1e-8（ivDiagの値は小数14桁で指定して取り出している。`run_ivdiag.R`参照）。
+    "fe_iv_weak_diagnostics_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 0.0,
+    },
+    # FE-2SLSのHC2・HC3のrk Wald Fの、R fixestの第一段階（通常の`feols`）のWald Fとの照合
+    # （`fe_iv_first_stage_hc_crosscheck.json`。fixestはIVのHC2・HC3を提供しない）。実測の最大:
+    # rk Wald F 1.5e-12（相対。自由度の境界`df1_boundary`のHC3、それ以外は4e-14以下）。
+    "fe_iv_first_stage_hc_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 0.0,
+    },
+    # 3次元以上の固定効果（`effects`が3〜4列）の主リファレンスはR fixest（`fe_multi_way.json`・
+    # `fe_multi_way_cov.json`）。classical/hc1/hc2/hc3/cluster/dkとも、fixestの`ssc()`既定に本実装の
+    # 小標本補正と自由度が合っているため機械精度で一致する。実測の最大（9シナリオ×全ケース）:
+    # 係数 3e-15（相対）、標準誤差 4e-11（相対）、信頼区間 3e-10、p値 7e-11、F統計量のp値 4e-11、
+    # AIC/BIC/対数尤度/Within R² 2e-15、行ごとの残差 6e-12（絶対）。p値は裾が`exp(-F)`型に丸め誤差を
+    # 増幅するため、他の統計量より緩い相対誤差1e-6を、絶対誤差の下限なしで使う（`fe_crosscheck`と同じ）。
+    # fixestは`fixef.tol=1e-11`で固定効果を除く（`run_fixest_benchmark.R`参照）。
+    "fe_multi_way_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # 3次元以上のクロスチェックはlinearmodels.AbsorbingLS（classical/hc1、`debiased=True`）。
+    # 固定効果をlsmrで反復して除くため、打ち切りを厳しく（atol・btol=1e-14）して機械精度に揃えてある
+    # （既定の1e-8だと残差・標準誤差が1e-9〜1e-8ずれる）。実測の最大: 係数 8e-16（相対）、
+    # 標準誤差 6e-13（相対）、p値 2e-11、信頼区間 7e-12、行ごとの残差 6e-13（絶対）。
+    "fe_multi_way_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
     },
     # REの主リファレンスはlinearmodels.RandomEffects。閉形式のGLS変換のため
     # OLS/WLS/IV/FEと同じ機械精度一致（実測相対誤差1e-9〜1e-14程度、
@@ -161,7 +311,7 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # ~1e-10（ハウスマン検定のp値）、絶対年の列を含む入力を除く）。
     # p値の裾の扱いと
     # `rtol_absolute_year`（絶対年の列、または個体平均に相対1e-3まで近い列（ほぼ別名）を含む入力で
-    # 丸め誤差が拡大する統計量だけ緩める。実測最大 ~6e-8）の理由は`re_two_way`と同じ。
+    # 丸め誤差が拡大する統計量だけ緩める。実測最大 ~6e-8、係数の分散共分散行列は1.2e-7）の理由は`re_two_way`と同じ。
     "re_variance_method": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

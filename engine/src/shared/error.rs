@@ -21,6 +21,7 @@
 use thiserror::Error;
 
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
+use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
 
 /// 利用者向けのエラー内容（`code`・`params`・文面）を返せるエラー型。
 ///
@@ -58,7 +59,8 @@ impl ClusterSetting {
 pub enum MatrixKind {
     /// 係数の共分散行列のうち、全体F/Wald検定の対象にする傾き係数の部分行列。
     CoefficientCovariance,
-    /// 設計行列のGram行列`X'X`（QRのランク判定は通ったが、Cholesky分解が失敗した）。
+    /// 設計行列（QRのランク判定は通ったが、列を単位ノルムに揃えた条件数が上限を超えた。
+    /// `OrthonormalDesign::new_checked`。`X'X`のCholeskyの失敗でもこの種別になる）。
     DesignGram,
     /// 最尤推定の（負の）Hessian。
     Hessian,
@@ -66,7 +68,8 @@ pub enum MatrixKind {
     Opg,
     /// GMMのモーメント条件の重み行列（`S`）。
     GmmWeight,
-    /// GMMの係数の「パン」`X'ZWZ'X`。
+    /// GMMの重みで白色化した構造方程式のモーメント行列`Ĝ = Z̃'X`（`X'ZWZ'X = Ĝ'Ĝ`のパンの因子）の、
+    /// 列を揃えた条件数・ランクの判定。
     GmmBread,
 }
 
@@ -147,6 +150,66 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     InsufficientClustersForInference { g: usize, q: usize },
 
+    /// `gmm_type="iterated"`の`gmm_max_iter`が3未満。
+    ///
+    /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
+    /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
+    #[error("{}", self.catalog_message())]
+    InvalidGmmMaxIter { max_iter: i64 },
+
+    /// `gmm_type="iterated"`の`gmm_tol`が正の有限値でない（0以下・NaN・inf）。
+    ///
+    /// 収束判定の許容誤差として意味を持たないため。
+    #[error("{}", self.catalog_message())]
+    InvalidGmmTol { gmm_tol: f64 },
+
+    /// `estimator="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
+    /// `S`（l×l、`l`は全操作変数`x_exog ++ instruments`の数）を非特異にするのに足りない。
+    ///
+    /// `S = Σ_g S_g S_g'`はG個のランク1行列の和なので`rank(S) ≤ g`。丁度識別（`l == k`）の
+    /// ときは`Z'ê = 0`（`Σ_g S_g = 0`）が成り立つため`rank(S) ≤ g-1`となり、`g <= l`で
+    /// 特異になる。過剰識別（`l > k`）では`Z'ê = 0`が成り立たないため`g < l`で特異になる。
+    /// `cov_type=Cluster`の[`CommonError::InsufficientClustersForInference`]（係数共分散の
+    /// Wald部分行列、閾値は`q`）とは対象・閾値が異なる別軸のため別のバリアントとする。IV・固定効果つきGMMが共有する。
+    /// `g`・`l`は入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
+    #[error("{}", self.catalog_message())]
+    InsufficientClustersForWeightMatrix {
+        g: usize,
+        l: usize,
+        /// 必要なクラスター数の下限（過剰識別は`l`、丁度識別は`l + 1`）。
+        min_clusters: usize,
+    },
+
+    /// `raise_on_non_convergence=true`（既定）かつ`gmm_type="iterated"`で、`gmm_max_iter`回
+    /// （初回推定を含む上限回数）以内に係数が収束しなかった。
+    ///
+    /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論
+    /// （`raise_on_non_convergence=false`にすると`converged=false`のまま結果を返す）。
+    /// 文言は`MleError::NonConvergence`（"failed to converge after {n_iter} iterations.
+    /// Set raise_on_non_convergence=False to receive the result anyway, or increase
+    /// max_iter"）とほぼ揃えているが、カタログの文面は`gmm_max_iter`を名指しする。
+    #[error("{}", self.catalog_message())]
+    GmmNonConvergence { n_iter: usize },
+
+    /// C統計量で検定する内生変数も操作変数も指定されていない。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticNothingToTest,
+
+    /// C統計量で検定する除外操作変数が多すぎて、外した後の操作変数が内生変数の数に足りない
+    /// （順序条件を満たさず、元の構造方程式が識別できない）。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticTooManyTestedInstruments {
+        n_tested: usize,
+        n_instruments: usize,
+        n_endog: usize,
+    },
+
+    /// C統計量が、このデータでは定義できない（必要な行列が特異: 操作変数の共線、完全フィット、
+    /// モーメント条件の共分散のランク落ち等）。診断なので`fit()`は失敗させず、診断のメソッドを
+    /// 呼んだときにだけ返す。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticUndefined,
+
     /// `cov_type="hac"`（GMMの`weight_type="hac"`を含む）の`hac_lags`が負、または観測数`n`以上（`[0, n)`の範囲外）。
     ///
     /// OLS/WLS・2SLS・GMMのHACが共有する検証（`shared::covariance::resolve_hac_lags`）。
@@ -155,8 +218,10 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     InvalidHacLags { hac_lags: i64, n: usize },
 
-    /// `matrix`が数値的にほぼ特異で、推定量や共分散の計算を続けられない（条件数が倍精度の限界を
-    /// 超える。列のスケール差が極端な場合や、残差が0の完全な当てはまり等）。
+    /// `matrix`が数値的にほぼ特異で、推定量や共分散の計算を続けられない（設計行列の列を単位長に
+    /// 揃えた条件数が上限を超える場合（`DESIGN_GRAM`。列の単位を変えても合否は動かない）、共分散や
+    /// ヘッセ行列の条件数が倍精度の限界を超える場合等）。`hint`は同じ`code`で一つなので、共線な
+    /// 回帰変数を除く対処とスケールを揃える対処の両方を挙げる。
     #[error("{}", self.catalog_message())]
     NearSingularMatrix { matrix: MatrixKind },
 
@@ -165,12 +230,31 @@ pub enum CommonError {
     /// [`crate::shared::validation::has_no_variation`]。推定を走らせずに入力だけから分かるため`ValidationError`。
     /// 切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。
     #[error("{}", self.catalog_message())]
-    OutcomeConstant,
+    OutcomeConstant {
+        /// 被説明変数の列名。
+        column: String,
+    },
 
     /// 残差が丸め誤差の範囲で0（`SSR <= k * epsilon * SST`）で、標準誤差と検定統計量が
     /// 定義できない。判定は[`crate::shared::goodness_of_fit::is_perfect_fit`]の1か所。
     #[error("{}", self.catalog_message())]
     PerfectFit,
+
+    /// HC2・HC3の行スケール`1/(1-h_ii)`・`1/√(1-h_ii)`が定義できない: `n_affected`行のレバレッジ`h_ii`が
+    /// 丸め誤差の範囲で1以上（または非有限）で、その行はモデルに完全にあてはまり残差が情報を持たない。
+    /// `first_row`は最初の該当行（0始まり）。判定は[`crate::shared::covariance::hc_scales`]の1か所。
+    /// レバレッジは設計行列の分解を経て初めて分かるため`ComputationError`。
+    #[error("{}", self.catalog_message())]
+    UnitLeverage { n_affected: usize, first_row: usize },
+
+    /// 傾き係数のある組み合わせの（残差に基づく）ロバスト共分散が0になり、全体のF/Wald検定
+    /// （とREのHausman補助回帰）が定義できない: `n_affected`行のレバレッジが丸め誤差の範囲で1で、その行は
+    /// モデルに完全にあてはまり残差が0のため、その行にだけ値がある方向の分散が0になる。
+    /// `UnitLeverage`と同じ行の検出（`crate::shared::covariance::unit_leverage_rows`）で、
+    /// `crate::shared::wald::name_unit_leverage_cause`が`NearSingularMatrix`を置き換える
+    /// （全体検定が特異で失敗したときだけ。係数・標準誤差が計算できる推定は止めない）。
+    #[error("{}", self.catalog_message())]
+    UnitLeverageSlopeCovariance { n_affected: usize, first_row: usize },
 
     /// 実装の誤りでだけ起きるはずの状態（不変条件の破れ）。`detail`は開発者向けの英語。
     #[error("{}", self.catalog_message())]
@@ -228,6 +312,36 @@ impl ErrorInfo for CommonError {
                     .param("n_slopes", *q)
                     .param("min_clusters", q + 1)
             }
+            Self::InsufficientClustersForWeightMatrix { g, l, min_clusters } => {
+                ErrorReport::new(ErrorCode::GmmWeightClusterCountTooSmall)
+                    .param("n_clusters", *g)
+                    .param("n_instruments", *l)
+                    .param("min_clusters", *min_clusters)
+            }
+            Self::InvalidGmmMaxIter { max_iter } => {
+                ErrorReport::new(ErrorCode::GmmMaxIterOutOfRange)
+                    .param("value", *max_iter)
+                    .param("min", GMM_MAX_ITER_MIN)
+                    .param("max", MAX_ITER_LIMIT)
+            }
+            Self::InvalidGmmTol { gmm_tol } => {
+                ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                    .param("option", "gmm_tol")
+                    .param("value", *gmm_tol)
+            }
+            Self::GmmNonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
+                .param("n_iter", *n_iter)
+                .param("iter_option", "gmm_max_iter"),
+            Self::CStatisticNothingToTest => ErrorReport::new(ErrorCode::CStatisticNothingToTest),
+            Self::CStatisticTooManyTestedInstruments {
+                n_tested,
+                n_instruments,
+                n_endog,
+            } => ErrorReport::new(ErrorCode::CStatisticTooManyTestedInstruments)
+                .param("n_tested", *n_tested)
+                .param("n_instruments", *n_instruments)
+                .param("n_endog", *n_endog),
+            Self::CStatisticUndefined => ErrorReport::new(ErrorCode::CStatisticUndefined),
             Self::DimensionMismatch { y_rows, x_rows } => {
                 internal(format!("y has {y_rows} rows but x has {x_rows} rows"))
             }
@@ -240,8 +354,23 @@ impl ErrorInfo for CommonError {
             Self::NearSingularMatrix { matrix } => {
                 ErrorReport::new(ErrorCode::MatrixNearSingular).param("matrix", matrix.as_str())
             }
-            Self::OutcomeConstant => ErrorReport::new(ErrorCode::OutcomeConstant),
+            Self::OutcomeConstant { column } => ErrorReport::new(ErrorCode::OutcomeConstant)
+                .param("column", column.as_str())
+                .param("argument", "y")
+                .param("data_argument", "data"),
             Self::PerfectFit => ErrorReport::new(ErrorCode::PerfectFit),
+            Self::UnitLeverage {
+                n_affected,
+                first_row,
+            } => ErrorReport::new(ErrorCode::UnitLeverageObservation)
+                .param("n_affected", *n_affected)
+                .param("first_row", *first_row),
+            Self::UnitLeverageSlopeCovariance {
+                n_affected,
+                first_row,
+            } => ErrorReport::new(ErrorCode::UnitLeverageSlopeCovariance)
+                .param("n_affected", *n_affected)
+                .param("first_row", *first_row),
             Self::Internal { detail } => internal(detail.clone()),
         }
     }
@@ -303,7 +432,7 @@ mod tests {
                 confidence_level: f64::NAN
             }
             .to_string()
-            .ends_with("got NaN.")
+            .ends_with("got nan.")
         );
     }
 

@@ -24,6 +24,23 @@ def fix_intercept_name(
     return "const" if name in intercept_aliases else name
 
 
+def normalize_cov_params(
+    cov: dict[str, dict[str, float]],
+    intercept_aliases: Collection[str] = _INTERCEPT_ALIASES_DEFAULT,
+) -> dict[str, dict[str, float]]:
+    """分散共分散行列（`{名前: {名前: 値}}`）の行・列の名前を`"const"`規則へ揃える。
+
+    `normalize_names`が`params`等に行う切片名の正規化を、行列の両軸に同じ規則で行う。
+    """
+    return {
+        fix_intercept_name(row, intercept_aliases): {
+            fix_intercept_name(col, intercept_aliases): value
+            for col, value in values.items()
+        }
+        for row, values in cov.items()
+    }
+
+
 def normalize_names(
     raw: dict,
     *,

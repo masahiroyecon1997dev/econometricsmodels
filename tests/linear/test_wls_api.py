@@ -346,7 +346,7 @@ def test_predict_new_data_matches_statsmodels(wide_dataset):
 
     res = WLS(df, y="y", x=WIDE_X, weight="weight").fit()
     new_data = wide_new_data()
-    predicted = res.predict(new_data.select(reversed(WIDE_X)))
+    predicted = res.predict(new_data=new_data.select(reversed(WIDE_X)))
 
     expected = sm_res.predict(sm.add_constant(new_data.to_numpy()))
 
@@ -386,7 +386,7 @@ def test_predict_new_data_with_regressor_dependent_weight_matches_statsmodels(
 
     res = WLS(df, y="y", x=WIDE_X, weight=REGRESSOR_WEIGHT).fit()
     new_data = wide_new_data()
-    predicted = res.predict(new_data.select(reversed(WIDE_X)))
+    predicted = res.predict(new_data=new_data.select(reversed(WIDE_X)))
 
     expected = sm_res.predict(sm.add_constant(new_data.to_numpy()))
 
@@ -397,7 +397,7 @@ def test_predict_new_data_with_regressor_dependent_weight_matches_statsmodels(
 
 def test_predict_with_include_intercept_false_and_x_named_const():
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
-    `predict(new_data)`が、その列の値を使って正しく計算されること。
+    `predict(new_data=...)`が、その列の値を使って正しく計算されること。
 
     `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様の
     ため（`wls-spec.md`「API引数」）、`include_intercept=False`ならユーザーが
@@ -420,7 +420,7 @@ def test_predict_with_include_intercept_false_and_x_named_const():
     ).fit()
 
     new_data = pl.DataFrame({"const": [100.0, 200.0], "x2": [10.0, 20.0]})
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
 
     coef_const = res.params["const"]
     coef_x2 = res.params["x2"]
@@ -470,13 +470,13 @@ def test_augment_none_returns_training_data_with_predicted_column(
 def test_augment_new_data_returns_new_data_with_predicted_column(
     wide_dataset,
 ):
-    """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
-    DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
+    """`augment(new_data=...)`が、`new_data`の全列＋`"predicted"`列を持つ
+    DataFrameを、`predict(new_data=...)`と同じ予測値で返すこと。
     """
     res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
     new_data = wide_new_data(2)
 
-    augmented = res.augment(new_data)
+    augmented = res.augment(new_data=new_data)
 
     assert isinstance(augmented, pl.DataFrame)
     assert augmented.height == 2
@@ -484,7 +484,7 @@ def test_augment_new_data_returns_new_data_with_predicted_column(
     for col in WIDE_X:
         assert augmented[col].to_list() == new_data[col].to_list()
 
-    expected = res.predict(new_data)
+    expected = res.predict(new_data=new_data)
     assert augmented["predicted"].to_list() == expected
 
 
@@ -495,7 +495,7 @@ def test_augment_new_data_with_extra_column_preserves_it(wide_dataset):
     res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
     new_data = wide_new_data(2).insert_column(0, pl.Series("id", ["a", "b"]))
 
-    augmented = res.augment(new_data)
+    augmented = res.augment(new_data=new_data)
 
     assert augmented.columns == ["id", *WIDE_X, "predicted"]
     assert augmented["id"].to_list() == ["a", "b"]
@@ -528,7 +528,7 @@ def test_augment_new_data_with_regressor_dependent_weight_matches_statsmodels(
     regressor_weight_dataset,
 ):
     """重みが説明変数に依存し範囲が広い場合（`REGRESSOR_WEIGHT`）も、
-    `augment(new_data)`の`"predicted"`列がstatsmodelsの`.predict()`と一致し、
+    `augment(new_data=...)`の`"predicted"`列がstatsmodelsの`.predict()`と一致し、
     `new_data`の全列が渡した順のまま保たれること（列順は学習時と逆順）。
     """
     import statsmodels.api as sm
@@ -539,7 +539,7 @@ def test_augment_new_data_with_regressor_dependent_weight_matches_statsmodels(
     res = WLS(df, y="y", x=WIDE_X, weight=REGRESSOR_WEIGHT).fit()
     new_data = wide_new_data()
     reversed_new_data = new_data.select(reversed(WIDE_X))
-    augmented = res.augment(reversed_new_data)
+    augmented = res.augment(new_data=reversed_new_data)
 
     assert augmented.columns == [*reversed(WIDE_X), "predicted"]
     for col in WIDE_X:
@@ -570,8 +570,8 @@ def test_augment_without_intercept_matches_predict():
     assert augmented_none["predicted"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
-    augmented_new = res.augment(new_data)
-    expected_new = res.predict(new_data)
+    augmented_new = res.augment(new_data=new_data)
+    expected_new = res.predict(new_data=new_data)
     assert augmented_new["predicted"].to_list() == expected_new
 
 
@@ -607,7 +607,7 @@ def test_weight_one_matches_ols(unit_weight_dataset, option_kwargs):
     データにそのまま適用する実装であるため（weight=1なら変換が恒等写像になる）
     厳密な`==`で一致する。r_squared・log_likelihood（→aic/bic）・残差は、
     WLS側で元スケールのy・weightsから独立に計算し直す実装のため、加算順序
-    等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls.rs`
+    等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls/`
     の対応するRust単体テストで確認済みの挙動）。
 
     `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラスのため、
@@ -672,7 +672,7 @@ def test_weight_one_matches_ols_predict(unit_weight_dataset):
     OLSの`predict()`と一致すること（予測値は重みに関与しない、
     という設計の帰結を確認する）。
 
-    学習データ（`new_data=None`）の計算経路自体はwls.rs（手動ループ、
+    学習データ（`new_data=None`）の計算経路自体はwls/statistics.rs（手動ループ、
     `original_scale_fitted_and_residuals`）とols.rs（faerの行列演算、
     `OlsEstimator::fitted_values`）で異なるため、丸め誤差レベルでの一致を
     確認する（`test_residuals_are_original_scale_not_weighted`と同じ理由）。
@@ -691,7 +691,7 @@ def test_weight_one_matches_ols_predict(unit_weight_dataset):
 
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
     for wls_val, ols_val in zip(
-        wls_res.predict(new_data), ols_res.predict(new_data)
+        wls_res.predict(new_data=new_data), ols_res.predict(new_data=new_data)
     ):
         assert wls_val == ols_val
 

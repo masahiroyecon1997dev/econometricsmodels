@@ -1,14 +1,12 @@
 """Python wrapper for OLS (Ordinary Least Squares).
 
 A thin wrapper around `econometricsmodels._lib.fit_ols` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`OLSOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; see `docs/spec/ols-spec.md`, "API引数").
+`OLSOptions` is re-exported as-is from `_lib`.
 """
 
 from __future__ import annotations
@@ -22,7 +20,9 @@ from .._lib import OLSOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     params_table_rows,
+    results_repr,
 )
 from ..diagnostics import (
     BreuschGodfreyTestResult,
@@ -48,9 +48,15 @@ class OLS:
     Examples:
         >>> import polars as pl
         >>> from econometricsmodels import OLS
-        >>> df = pl.DataFrame({"y": [1.0, 2.0], "x1": [1.0, 2.0]})
+        >>> df = pl.DataFrame(
+        ...     {
+        ...         "y": [1.2, 1.9, 3.1, 3.8, 5.2],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+        ...     }
+        ... )
         >>> result = OLS(df, y="y", x=["x1"]).fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.99
     """
 
     def __init__(
@@ -58,6 +64,7 @@ class OLS:
         data: pl.DataFrame,
         y: str,
         x: list[str],
+        *,
         options: OLSOptions | None = None,
     ) -> None:
         self._data = data
@@ -98,10 +105,17 @@ class OLSResults:
     `result.params["x1"]`. Use `params_table()` for a row-oriented
     listing (a list of dicts), for example for a JSON response.
 
+    Printing a result shows a header line (the dependent variable,
+    `n_obs` and `cov_type`) and a short table of the coefficients and
+    their standard errors. Its layout may change between versions, so
+    read the fields listed below or use `params_table()` rather than
+    parsing it.
+
     Fields by purpose:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
       `conf_int`; the names in order: `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist`, `stat_df`.
     - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
       `f_df_denom`.
@@ -115,10 +129,6 @@ class OLSResults:
     - Post-estimation tests (never run by `fit()`): `white_test()`,
       `breusch_pagan_test()`, `breusch_godfrey_test()`.
 
-    Args:
-        raw: The estimation result object returned by `_lib.fit_ols`
-            (`_lib.OLSResult`).
-
     Note:
         Users normally do not construct this directly; it is returned
         by `OLS.fit()`.
@@ -126,6 +136,9 @@ class OLSResults:
 
     def __init__(self, raw: _lib.OLSResult) -> None:
         self._raw = raw
+
+    def __repr__(self) -> str:
+        return results_repr(type(self).__name__, self._raw)
 
     @property
     def param_names(self) -> list[str]:
@@ -143,6 +156,21 @@ class OLSResults:
         return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
+
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
+
+    @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
@@ -158,7 +186,8 @@ class OLSResults:
     def stat_df(self) -> int:
         """Degrees of freedom of the t distribution behind `test_stats`.
         May differ from `df_resid` (e.g. cluster-robust inference uses
-        `G - 1`), so use this to recompute p-values from `test_stats`."""
+        `G - 1`, where `G` is the number of clusters), so use this to
+        recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -237,8 +266,11 @@ class OLSResults:
     @property
     def f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of `f_statistic` (`None` when
-        `f_statistic` is `None`). May differ from `df_resid`, so use this to recompute
-        the p-value from `f_statistic`."""
+        `f_statistic` is `None`). Follows `cov_type` like the t-tests, so
+        it equals `stat_df` whenever `f_statistic` is not `None`: the
+        number of clusters minus 1 for `cov_type="cluster"` and
+        `df_resid` otherwise. Use this to recompute the p-value from
+        `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -280,7 +312,7 @@ class OLSResults:
         """
         return params_table_rows(self._raw)
 
-    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
+    def predict(self, *, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
         Also available for new data through `new_data`; there is no
@@ -306,7 +338,7 @@ class OLSResults:
         """
         return self._raw.predict(new_data)
 
-    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+    def augment(self, *, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
         Same `new_data` semantics as `predict()`, but returns a polars
@@ -329,15 +361,15 @@ class OLSResults:
                 otherwise be silently overwritten). Also raised for
                 `new_data=None` when this result has no retained
                 training data (currently only possible for the
-                `OLSResults` returned by `IVResult.first_stage()`,
+                `OLSResults` returned by `IVResults.first_stage()`,
                 which has no single source DataFrame to attach a
-                column to; calling `augment(new_data)` with an
+                column to; calling `augment(new_data=...)` with an
                 explicit `new_data` still works normally in that case).
         """
         return self._raw.augment(new_data)
 
     def white_test(
-        self, statistic: Literal["lm", "f"] = "lm"
+        self, *, statistic: Literal["lm", "f"] = "lm"
     ) -> WhiteTestResult:
         """White test for heteroskedasticity.
 
@@ -373,7 +405,7 @@ class OLSResults:
                 regressor is constant; there are too few observations for
                 the auxiliary regression; or this result has no retained
                 training data (currently only the `OLSResults` returned
-                by `IVResult.first_stage()`).
+                by `IVResults.first_stage()`).
             ComputationError: The auxiliary design matrix is still
                 singular after dropping terms, or the auxiliary
                 regression's R² is undefined (for example the squared
@@ -392,6 +424,7 @@ class OLSResults:
 
     def breusch_pagan_test(
         self,
+        *,
         variables: list[str] | None = None,
         statistic: Literal["lm", "f"] = "lm",
     ) -> BreuschPaganTestResult:
@@ -443,7 +476,7 @@ class OLSResults:
                 is constant; there are too few observations for the
                 auxiliary regression; or this result has no retained
                 training data (currently only the `OLSResults` returned
-                by `IVResult.first_stage()`).
+                by `IVResults.first_stage()`).
             ComputationError: The auxiliary design matrix is still
                 singular after dropping variables, or the auxiliary
                 regression's R² is undefined (for example the squared
@@ -464,6 +497,7 @@ class OLSResults:
         self,
         time: str,
         nlags: int,
+        *,
         statistic: Literal["lm", "f"] = "lm",
     ) -> BreuschGodfreyTestResult:
         """Breusch-Godfrey test for serial correlation of the errors.
@@ -472,11 +506,12 @@ class OLSResults:
         on their own lags 1 to `nlags`, and tests that the lag
         coefficients are all zero. The lags are taken in the order of the
         `time` column, and the lags before the first observation are
-        filled with zero (the convention of R's `lmtest::bgtest`,
-        statsmodels and Stata). The auxiliary regression uses the model's
+        filled with zero (the convention of R's `lmtest::bgtest` and
+        statsmodels). The auxiliary regression uses the model's
         regressors as they are: no constant is added to a model fitted
-        with `include_intercept=False` (the definition of R and Greene;
-        statsmodels adds one in that case, so its value differs). The test
+        with `include_intercept=False` (the definition of R's
+        `lmtest::bgtest`; statsmodels adds one in that case, so its value
+        differs). The test
         does not depend on `cov_type`.
 
         This is a post-estimation diagnostic: it is never computed by
@@ -515,7 +550,7 @@ class OLSResults:
                 exist, has an unsupported dtype, or contains missing,
                 non-finite or duplicate values; or this result has no
                 retained training data (currently only the `OLSResults`
-                returned by `IVResult.first_stage()`).
+                returned by `IVResults.first_stage()`).
             ComputationError: The auxiliary design matrix is singular, or
                 the residuals are all zero or fitted exactly by the
                 auxiliary regression.

@@ -36,6 +36,7 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.nonlinear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
     STATSMODELS_COV_TYPES,
@@ -256,5 +257,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures, BENCHMARKS_DIR / "logit.json", description=__doc__
+        lambda: strip_cov_params(build_fixtures()),
+        BENCHMARKS_DIR / "logit.json",
+        description=__doc__,
     )

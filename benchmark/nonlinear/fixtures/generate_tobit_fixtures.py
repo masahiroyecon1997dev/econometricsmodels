@@ -18,6 +18,7 @@ Wooldridge mroz（hours、生スケール）は `load_wooldridge` 経由で都�
 from __future__ import annotations
 
 from benchmark.common import BENCHMARKS_DIR, run_fixture_cli
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.nonlinear.fixtures._tobit_fixtures import build
 
 
@@ -27,7 +28,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures,
+        lambda: strip_cov_params(build_fixtures()),
         BENCHMARKS_DIR / "tobit.json",
         description=__doc__,
     )

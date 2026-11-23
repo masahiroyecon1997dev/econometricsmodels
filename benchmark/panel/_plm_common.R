@@ -54,3 +54,14 @@ plm_t_inference <- function(coefs, ses, t_df) {
     conf_upper = coefs + crit * ses
   )
 }
+
+# 係数の分散共分散行列を`{行: {列: 値}}`の入れ子のリストにする（JSON出力用）。
+# `names`は行・列の名前（出力の係数名に揃える）。標準誤差の元になった`vc`をそのまま渡す。
+plm_cov_params <- function(vc, names) {
+  setNames(
+    lapply(seq_along(names), function(i) {
+      setNames(as.list(as.numeric(vc[i, ])), names)
+    }),
+    names
+  )
+}

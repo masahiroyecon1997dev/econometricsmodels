@@ -13,15 +13,20 @@
 
 - **Consistent API** — Every model follows the same conventions: a polars
   DataFrame, column names as strings, and an options object in; a `.fit()`
-  call out, returning a result with the same accessors. Methods with extra
-  inputs (instruments for IV, an entity column for panel models) add
-  arguments, but moving from OLS to Logit, IV, or panel models doesn't mean
-  learning a new interface design.
+  call out, returning a result with the same accessors. One rule decides the
+  layout: a required column is an argument, and an optional setting is an
+  option. Methods with extra inputs (instruments for IV, the entity and
+  optional time columns, passed as `effects`, for panel models) add arguments,
+  but moving from OLS to Logit, IV, or panel models doesn't mean learning a new
+  interface design
+  ([Arguments and options](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/api-conventions/)).
 - **Programmatic specification and results** — Models are defined with
   explicit arguments and an options object, not a formula string. Results
   come back as Python objects (`.params`, `.std_errors`, `.p_values`,
-  `.conf_int`), not formatted text, so they are easy to build, inspect, and
-  feed into other code. Parameter tables (`params_table()`) are plain lists
+  `.conf_int`), not a formatted report, so they are easy to build,
+  inspect, and feed into other code. Printing a result shows only a
+  one-line header and a short table of coefficients and standard errors
+  for a quick look. Parameter tables (`params_table()`) are plain lists
   of dicts that can be passed straight to polars or `json.dumps`.
 - **Explicit validation** — Invalid input is rejected rather than silently
   dropped or repaired. Missing values, perfectly collinear columns,
@@ -152,8 +157,8 @@ Each key of a row is the singular of the matching result attribute
 are the two ends of `conf_int`). The rows of `marginal_effects()` use the same keys,
 with `effect` in place of `param`.
 
-There is no formatted text to parse. `params_table()` is shaped so it can
-be passed directly into a Polars DataFrame, a JSON API response, or an
+The printed table is for reading, not parsing. `params_table()` is shaped
+so it can be passed directly into a Polars DataFrame, a JSON API response, or an
 automated reporting workflow:
 
 ```python
@@ -220,7 +225,8 @@ Currently implemented:
 - OLS, WLS
 - Logit, Probit, Tobit
 - IV (2SLS, GMM)
-- FE (fixed effects), RE (random effects)
+- FE (fixed effects), FEIV (fixed effects two-stage least squares or GMM),
+  RE (random effects)
 
 More methods are planned, including further discrete-choice models and
 causal inference designs. What is planned or in progress, and in what
@@ -242,18 +248,20 @@ model tests — for each supported covariance type.
 
 | Method | Primary reference | Independent cross-check | Relative tolerance (primary / cross-check) |
 |---|---|---|---|
-| OLS | statsmodels `OLS` | R `lm` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
-| WLS | statsmodels `WLS` | R `lm(weights=)` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 5e-2) |
-| Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 1e-6 |
-| Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 1e-6 |
-| Tobit<sup>2</sup> | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 |
-| IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
+| OLS | statsmodels `OLS` | R `lm` + `sandwich`/`lmtest` | 1e-8 / 1e-8 |
+| WLS | statsmodels `WLS` | R `lm(weights=)` + `sandwich`/`lmtest` | 1e-8 / 1e-8 |
+| Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-7 |
+| Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 2e-7 |
+| Tobit<sup>2</sup> | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 (exceptions on the verification page) |
+| IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 |
 | IV (GMM) | linearmodels `IVGMM` | R `momentfit` | 1e-8 / 1e-8 |
 | FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
-| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
+| FEIV<sup>3</sup> | R `fixest` (`feols` with instruments) | linearmodels `IV2SLS` with dummy variables, R `plm`, R `ivDiag` | 1e-8 / 1e-8 |
+| FEIV (`estimator="gmm"`)<sup>4</sup> | linearmodels `IVGMM` on within-transformed data | R `momentfit` on within-transformed data, FE-2SLS references (`fixest`, `plm`) | 1e-8 / 1e-8 |
+| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 |
 
 <sup>1</sup> For FE and RE, linearmodels covers only classical and HC1
-standard errors. Its cluster and Driscoll–Kraay standard errors use
+standard errors. Its cluster and Driscoll-Kraay standard errors use
 different small-sample corrections, so R (`fixest`, `plm`) is the primary
 reference for those. Which implementation checks which statistic is
 detailed on the verification page.
@@ -264,17 +272,26 @@ based), so the second one is a genuine cross-check, but there is no
 reference from outside R. Where no Python implementation exists, two
 different R packages are used.
 
+<sup>3</sup> `fixest` does not provide HC2 and HC3 standard errors for
+instrumental variables, so a dummy-variable two-stage least squares written in
+numpy is their only reference. The verification page lists what each reference
+covers.
+
+<sup>4</sup> No package estimates fixed effects GMM, so both references are
+applied to the within-transformed data (the effects are removed by a
+different computation than the engine's). The standard errors of the
+overidentified model with HC2, HC3 and Driscoll-Kraay covariances have only a
+hand-written reference; the verification page lists what each reference
+covers.
+
 - **Tolerance.** The target relative tolerance against the primary
   reference is 1e-8 (with a tiny absolute floor for values near zero); for
   closed-form estimators the measured agreement is about 1e-14. Where
   implementations legitimately differ, looser documented values are used
-  instead: the figures in parentheses and the Logit/Probit cross-check, as
-  well as some solver options and real-data cases listed on the
-  verification page. Typical reasons are HAC small-sample conventions, both
-  sides being iterative optimizers, or plm and linearmodels estimating the
-  Swamy–Arora variance components slightly differently on unbalanced
-  panels. The full list of tolerances and the reasons are on the
-  verification page.
+  instead: the Logit/Probit cross-check (both sides are iterative
+  optimizers), the Tobit exceptions, and some solver options and real-data
+  cases listed on the verification page. The full list of tolerances and
+  the reasons are on the verification page.
 - **Single-reference cases.** Some statistics have only one reference. For
   example, IV (2SLS) with HC2/HC3 standard errors is checked against `ivreg`
   only, because linearmodels has no equivalent. These cases are listed on the
@@ -307,31 +324,32 @@ classical standard errors:
 
 | Method | `fit()` time |
 |---|---|
-| OLS | 0.058 s |
-| WLS | 0.11 s |
-| Logit | 0.49 s |
-| Probit | 1.5 s |
-| Tobit | 2.2 s |
-| IV (2SLS) | 0.48 s |
-| FE | 0.30 s |
-| RE | 0.31 s |
+| OLS | 0.13 s |
+| WLS | 0.12 s |
+| Logit | 0.86 s |
+| Probit | 1.1 s |
+| Tobit | 2.5 s |
+| IV (2SLS) | 0.73 s |
+| FE | 0.24 s |
+| FEIV | 0.54 s |
+| RE | 0.94 s |
 
 Execution time and memory are compared against statsmodels and linearmodels
 wherever a comparable Python implementation exists. Some examples at the
 same sample size (reference time divided by ours):
 
-- OLS: about 2.5x faster than statsmodels.
-- IV (2SLS): about 26x faster than linearmodels.
+- OLS: about 2.1x faster than statsmodels.
+- IV (2SLS): about 15x faster than linearmodels.
 - FE: about 13x faster than linearmodels.
-- Logit: about on par with statsmodels (1.0x) at 1,000,000 observations,
-  and slightly slower (0.85x to 0.91x) at 100,000 observations for every
-  standard-error type, including clustered ones.
+- Logit: about 1.3x faster than statsmodels at 1,000,000 observations,
+  and about 1.2x faster at 100,000 observations for every standard-error
+  type, including clustered ones.
 - Tobit has no Python implementation to compare against, so only its own
   time is shown.
 
 Peak memory is lower in the largest cases measured too: IV (2SLS) peaks at
-about 1.1 GB against about 4.0 GB for linearmodels, and OLS at about 0.32 GB
-against about 0.57 GB for statsmodels (whole-process peak, including the
+about 0.71 GB against about 4.8 GB for linearmodels, and OLS at about 0.35 GB
+against about 0.76 GB for statsmodels (whole-process peak, including the
 Python interpreter).
 
 Times are end-to-end measurements from CI on shared runners, so absolute

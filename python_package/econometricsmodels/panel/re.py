@@ -1,24 +1,15 @@
 """Python wrapper for RE (random effects panel regression).
 
 A thin wrapper around `econometricsmodels._lib.fit_re` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — `entity` as a bare
-column-name argument (`time` goes in `REOptions`), `x` as a list, an
-options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性",
-`docs/spec/panel-common.md` section 1).
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+`effects` and `x` as lists of column names, and an options object for
+the estimation settings.
 
-`REOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `OLSOptions`/`IVOptions`/`FEOptions`).
-
-Unlike FE, RE has no separate "additional result" method: the Hausman
-test comparing RE against the equivalent FE specification is computed
-automatically inside `fit()` and exposed directly as properties on
-`REResults` (`docs/spec/panel-common.md` section 2.4).
-
-`summary()` is not implemented (structured-data-only output policy; see
-the `OLSResults`/`FEResults` precedent).
+`REOptions` is re-exported as-is from `_lib`. Unlike FE, the Hausman
+test against the equivalent FE specification is computed by `fit()` and
+exposed as properties of `REResults`. There is no `summary()`: results
+are returned as structured data.
 """
 
 from __future__ import annotations
@@ -32,7 +23,9 @@ from .._lib import REOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     params_table_rows,
+    results_repr,
 )
 
 __all__ = ["RE", "REOptions", "REResults"]
@@ -45,27 +38,41 @@ class RE:
     `REOptions.variance_method` selects Wallace-Hussain or Amemiya
     instead.
 
-    Unlike FE, RE has an intercept. By default it estimates one-way
-    (entity) random effects. Setting `REOptions.time` requests two-way
-    (entity + time) random effects, which requires a balanced panel
-    (`ValidationError` otherwise). The Hausman test and the panel R²
+    Unlike FE, RE has an intercept. `effects` with one column
+    estimates one-way (entity) random effects; with two columns, the
+    entity and then the time period, it estimates two-way random
+    effects, which requires a balanced panel (`ValidationError`
+    otherwise). More than two columns are not supported. The order of
+    the two columns matters: the first is the entity dimension
+    (`sigma2_u`, `theta_entity`) and the second the time dimension
+    (`sigma2_lambda`, `theta_time`). The first column is also the
+    default clustering column, so swapping the columns changes the
+    default standard errors and the Hausman test. The Hausman test and
+    the panel R²
     (within / between / overall) are available for both one-way and
     two-way effects; see `REResults`.
 
     Args:
         data: A polars DataFrame containing the dependent variable,
-            independent variables, entity identifier, and (if
-            specified) time/cluster columns.
+            independent variables, the `effects` columns, and (if
+            specified) the `cluster` and `dk_time` columns of the
+            options.
         y: Column name of the dependent variable.
         x: List of column names of the independent variables. Must
             contain at least one column name. A time-invariant
             regressor (constant over time within every entity) is
             allowed, unlike in FE.
-        entity: Column name of the entity (individual/panel unit)
-            identifier.
+        effects: List of one or two column names that define the random
+            effects. The first is the entity (individual/panel unit)
+            identifier; the optional second is the time period,
+            which makes the model two-way (balanced panels only). The
+            order matters: the first column gives `sigma2_u` and
+            `theta_entity`, the second `sigma2_lambda` and `theta_time`
+            (see above), and the first is also the default cluster
+            key.
         options: Estimation options. Defaults to `REOptions()`
-            (`cov_type="cluster"` on `entity`, confidence_level=0.95)
-            when omitted.
+            (`cov_type="cluster"` on the first column of `effects`,
+            confidence_level=0.95) when omitted.
 
     Examples:
         >>> import polars as pl
@@ -77,8 +84,27 @@ class RE:
         ...         "id": ["a", "a", "b", "b", "c", "c"],
         ...     }
         ... )
-        >>> result = RE(df, y="y", x=["x1"], entity="id").fit()
-        >>> result.params["x1"]
+        >>> result = RE(df, y="y", x=["x1"], effects=["id"]).fit()
+        >>> round(result.params["x1"], 3)
+        0.315
+
+        Two-way effects take a second column, the time period:
+
+        >>> panel = pl.DataFrame(
+        ...     {
+        ...         "y": [1.2, 2.1, 2.9, 2.0, 3.2, 3.9]
+        ...         + [0.5, 1.7, 2.2, 3.1, 3.8, 5.2],
+        ...         "x1": [1.0, 2.0, 3.0, 1.5, 2.5, 3.0]
+        ...         + [0.5, 1.0, 2.0, 2.0, 3.0, 4.0],
+        ...         "id": ["a"] * 3 + ["b"] * 3 + ["c"] * 3 + ["d"] * 3,
+        ...         "t": [1, 2, 3] * 4,
+        ...     }
+        ... )
+        >>> two_way = RE(
+        ...     panel, y="y", x=["x1"], effects=["id", "t"]
+        ... ).fit()
+        >>> two_way.n_groups
+        {'id': 4, 't': 3}
     """
 
     def __init__(
@@ -86,13 +112,14 @@ class RE:
         data: pl.DataFrame,
         y: str,
         x: list[str],
-        entity: str,
+        effects: list[str],
+        *,
         options: REOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x = x
-        self._entity = entity
+        self._effects = effects
         self._options = options if options is not None else REOptions()
 
     def fit(self) -> REResults:
@@ -103,49 +130,56 @@ class RE:
 
         Raises:
             TypeError: An argument has the wrong type (for example
-                `x` is a string instead of a list of column names). A
-                builtin exception, not a `ValidationError`.
-            ValidationError: The input or options are invalid (`x` is
-                empty, a column is missing, contains missing values or
-                NaN/infinity, `y`/`x`/`entity`/`time` overlap, `dk_time`
-                equal to `y` or `entity`, a two-way model (`time` set) on
-                an unbalanced panel or with a singleton time period,
-                insufficient observations, `confidence_level` out of
-                range, an unknown `cov_type` (or `cov_type="hc0"`,
-                unsupported for RE), `dk_time` specified with a
-                `cov_type` other than `"dk"`, a singleton entity group
-                (raised by RE's internal FE regression, which is built
-                for every `variance_method`), a `cov_type="dk"` request
-                with `dk_time` unset, `cov_type="dk"` with no more
-                unique time periods than regressors (the
-                Driscoll-Kraay covariance has rank at most T-1, so the
-                Hausman test cannot be computed),
-                `cov_type="cluster"` with no more clusters than the
-                identified slopes of the Hausman auxiliary regression,
-                an unknown `variance_method`, an outcome constant
-                within every entity, or
-                `variance_method="amemiya"` with a
-                regressor that has no within variation (time-invariant;
-                for two-way effects, varying in at most one
-                dimension)). A subclass of `ValueError`.
+                `x` or `effects` is a string instead of a list of
+                column names). A builtin exception, not a
+                `ValidationError`.
+            ValidationError: The input or options are invalid. A
+                subclass of `ValueError`. For example:
+
+                - `x` is empty, a column is missing, or a column
+                  contains missing values, NaN or infinity.
+                - `effects` is empty or has more than two columns, or
+                  `y`, `x` and `effects` overlap, or `dk_time` equals
+                  `y` or the first column of `effects`.
+                - There are insufficient observations, or
+                  `confidence_level` is out of range.
+                - `cov_type` is unknown or `"hc0"` (not supported for
+                  RE), or `variance_method` is unknown.
+                - `cluster`, `dk_time` or `dk_bandwidth` is given with
+                  a `cov_type` that does not use it, or
+                  `cov_type="dk"` is requested without `dk_time`.
+                - A two-way model (two columns in `effects`) is fitted
+                  on an unbalanced panel.
+                - A group of a column in `effects` has a single
+                  observation (an entity or, in a two-way model, a
+                  time period).
+                - `cov_type="dk"` with no more unique `dk_time` periods
+                  than regressors: the Driscoll-Kraay covariance has
+                  rank at most `T - 1` (`T` periods), so the Hausman
+                  test cannot be computed.
+                - `cov_type="cluster"` with no more clusters than the
+                  slope coefficients compared in the Hausman test.
+                - The outcome is constant within every entity.
+                - `variance_method="amemiya"` with a regressor that has
+                  no within variation (time-invariant; for two-way
+                  effects, varying in at most one dimension).
             ComputationError: A problem was detected during
-                computation (e.g. a singular quasi-demeaned design
-                matrix, in particular a time-invariant regressor that
-                is constant across entities or collinear with another
-                time-invariant regressor, or a regressor together with
-                a multiple of itself or of its entity mean; the
-                between and Hausman auxiliary regressions drop such
-                aliased columns, the final regression does not, so
-                the failure comes from the final regression; a
-                singular pooled first-stage
-                regression with `variance_method="wallace_hussain"`, or
-                a non-positive estimate of σ_ε² with `"wallace_hussain"`
-                or `"amemiya"`, or a perfect fit of the within
-                regression that estimates σ_ε²: residuals zero up to
-                rounding). A subclass of `RuntimeError`.
+                computation. A subclass of `RuntimeError`. For example:
+
+                - The transformed design matrix is singular: a
+                  time-invariant regressor that is constant across
+                  entities or collinear with another time-invariant
+                  regressor, or a regressor together with a multiple of
+                  itself or of its entity mean.
+                - `variance_method="wallace_hussain"` with a singular
+                  pooled regression.
+                - `variance_method="wallace_hussain"` or `"amemiya"`
+                  gives a non-positive estimate of σ_ε².
+                - The within regression that estimates σ_ε² fits
+                  perfectly (residuals zero up to rounding).
         """
         raw = _lib.fit_re(
-            self._data, self._y, self._x, self._entity, self._options
+            self._data, self._y, self._x, self._effects, self._options
         )
         return REResults(raw)
 
@@ -160,10 +194,17 @@ class REResults:
     `param_names[0]` is always `"const"` (unlike FE, RE has an
     intercept).
 
+    Printing a result shows a header line (the dependent variable,
+    `n_obs` and `cov_type`) and a short table of the coefficients and
+    their standard errors. Its layout may change between versions, so
+    read the fields listed below or use `params_table()` rather than
+    parsing it.
+
     Fields by purpose:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
       `conf_int`; the names in order: `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist`, `stat_df`.
     - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
       `f_df_denom`.
@@ -176,7 +217,7 @@ class REResults:
       apply are `None`.
     - Fit: `r_squared_within`, `r_squared_between`,
       `r_squared_overall`, `log_likelihood`, `aic`, `bic`.
-    - Panel size: `n_obs`, `n_entities`, `n_periods` (two-way only).
+    - Panel size: `n_obs`, `n_groups`.
     - Model size: `df_model`, `df_resid`, `dep_var_name`.
     - Settings echoed back: `cov_type`, `dk_bandwidth_used`.
     - Residuals: `residuals` (quasi-demeaned).
@@ -186,10 +227,6 @@ class REResults:
     version; see the docstring of `hausman_statistic` and the
     definitions in the documentation.
 
-    Args:
-        raw: The estimation result object returned by `_lib.fit_re`
-            (`_lib.REResult`).
-
     Note:
         Users normally do not construct this directly; it is returned
         by `RE.fit()`.
@@ -198,6 +235,9 @@ class REResults:
     def __init__(self, raw: _lib.REResult) -> None:
         self._raw = raw
         self._theta: dict[str, float] | None = None
+
+    def __repr__(self) -> str:
+        return results_repr(type(self).__name__, self._raw)
 
     @property
     def param_names(self) -> list[str]:
@@ -216,6 +256,21 @@ class REResults:
         return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
+
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
+
+    @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
@@ -231,8 +286,9 @@ class REResults:
     def stat_df(self) -> int:
         """Degrees of freedom of the t distribution behind `test_stats`.
         May differ from `df_resid` (cluster-robust inference uses
-        `G - 1`, Driscoll-Kraay `T - 1`), so use this to recompute
-        p-values from `test_stats`."""
+        `G - 1`, where `G` is the number of clusters, and
+        Driscoll-Kraay the number of `dk_time` periods minus 1), so use
+        this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -262,28 +318,30 @@ class REResults:
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - k`, unlike FE's
-        `n - n_entities - k`; RE is a GLS transform that does not
-        consume entity-dummy degrees of freedom)."""
+        """Residual degrees of freedom (`n - df_model`, where `df_model`
+        counts the intercept; unlike FE's `n - G1 - k` (one-way;
+        `n - G1 - G2 + 1 - k` for two-way), with `G1` and `G2` the
+        group counts of the first and second `effects` column, since
+        RE is a GLS transform that does not consume entity-dummy
+        degrees of freedom)."""
         return self._raw.df_resid
 
     @property
     def df_model(self) -> int:
-        """Model degrees of freedom (`k`, including the intercept)."""
+        """Number of estimated coefficients, including the intercept (the
+        number of slope coefficients plus 1). Unlike OLS's `df_model`,
+        it does not exclude the intercept."""
         return self._raw.df_model
 
     @property
-    def n_entities(self) -> int:
-        """Number of panel entities."""
-        return self._raw.n_entities
-
-    @property
-    def n_periods(self) -> int | None:
-        """Number of unique time periods (two-way effects only; `None`
-        for one-way, also when only `REOptions.dk_time` is given).
-        Two-way requires a balanced panel, so this equals the number of
-        observations per entity."""
-        return self._raw.n_periods
+    def n_groups(self) -> dict[str, int]:
+        """Number of groups (unique values) of each column in
+        `effects`, keyed by column name in the order given: one entry
+        for a one-way model, two for a two-way model. Two-way requires
+        a balanced panel, so the count of the second column equals the
+        number of observations per group of the first. For example
+        `{"id": 3, "t": 2}`."""
+        return self._raw.n_groups
 
     @property
     def variance_method(self) -> str:
@@ -317,12 +375,14 @@ class REResults:
 
     @property
     def sigma2_u(self) -> float:
-        """Estimated variance of the entity effect, σ_u² (a negative
+        """Estimated variance of the effect of the first column of
+        `effects` (the entity), σ_u² (a negative
         estimate is raised to 0). Swamy-Arora on an unbalanced panel is
         the `linearmodels` estimator (harmonic mean of the entity
-        sizes), which differs from `plm`'s by a few percent up to about
-        10 %; on a balanced panel the two agree. Wallace-Hussain and
-        Amemiya follow `plm` on balanced and unbalanced panels."""
+        sizes), which differs from `plm`'s; the difference depends on
+        how unbalanced the panel is (2.6 % in one test panel), and on
+        a balanced panel the two agree. Wallace-Hussain and Amemiya
+        follow `plm` on balanced and unbalanced panels."""
         return self._raw.sigma2_u
 
     @property
@@ -353,14 +413,16 @@ class REResults:
     def theta_entity(self) -> float | None:
         """Two-way weight θ₁ of the entity means in the GLS
         transformation `x - θ₁·x̄ᵢ - θ₂·x̄ₜ + θ₃·x̄`:
-        `θ₁ = 1 - σ_ε/σ₁` with `σ₁² = σ_ε² + T·σ_u²` (`T` periods).
+        `θ₁ = 1 - σ_ε/σ₁` with `σ₁² = σ_ε² + T·σ_u²` (`T` is the group
+        count of the second column of `effects`, the periods).
         It is 0 when σ_u² is 0. `None` for one-way."""
         return self._raw.theta_entity
 
     @property
     def theta_time(self) -> float | None:
         """Two-way weight θ₂ of the time means: `θ₂ = 1 - σ_ε/σ₂` with
-        `σ₂² = σ_ε² + N·σ_λ²` (`N` entities). It is 0 when σ_λ² is 0.
+        `σ₂² = σ_ε² + N·σ_λ²` (`N` is the group count of the first
+        column of `effects`, the entities). It is 0 when σ_λ² is 0.
         `None` for one-way."""
         return self._raw.theta_time
 
@@ -410,10 +472,12 @@ class REResults:
     @property
     def f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of `f_statistic` (`None` when
-        `f_statistic` is `None`). Follows `cov_type` like the t-tests (`G - 1` for
-        `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
-        so it equals `stat_df` whenever `f_statistic` is not `None`. Use
-        this to recompute the p-value from `f_statistic`."""
+        `f_statistic` is `None`). Follows `cov_type` like the t-tests, so
+        it equals `stat_df` whenever `f_statistic` is not `None`: the
+        number of clusters minus 1 for `cov_type="cluster"`, the number
+        of `dk_time` periods minus 1 for `"dk"`, and `df_resid`
+        otherwise. Use this to recompute the p-value from
+        `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -458,8 +522,8 @@ class REResults:
     @property
     def hausman_statistic(self) -> float | None:
         """Regression-based Hausman test statistic (chi-squared
-        version, `k × F` of the Wald test that the `k` within-transformed
-        slope regressors (`k` is `hausman_df`) are jointly
+        version, `hausman_df × F` of the Wald test that the
+        `hausman_df` within-transformed slope regressors are jointly
         zero in the auxiliary regression of the quasi-demeaned `y` on
         the quasi-demeaned regressors and the within-transformed
         regressors). Always non-negative. The comparison is against FE
@@ -468,9 +532,10 @@ class REResults:
         `cov_type` (default `"cluster"` gives the cluster-robust
         Hausman test; `"classical"` gives the classical version). The
         auxiliary regression uses the same small-sample corrections as
-        the RE standard errors. For unbalanced panels the
-        auxiliary regression's constant is left untransformed, as in
-        `plm::phtest`. `None` when no coefficient can be tested (no
+        the RE standard errors. The auxiliary
+        regression's constant is not quasi-demeaned, as in `plm::phtest`
+        (on a balanced panel a quasi-demeaned constant would only be
+        rescaled, so the statistic is the same). `None` when no coefficient can be tested (no
         regressor varies after the within transformation, or the
         remaining ones are aliased, for example because the entity
         mean of every time-varying regressor is also a regressor). If

@@ -42,6 +42,8 @@ _PIN_RE = re.compile(
 )
 # Debianのr-baseバージョン（例: `4.5.3-1~bookwormcran.0`）からR本体の版を取る
 _DEBIAN_R_VERSION_RE = re.compile(r"^(?:\d+:)?(?P<ver>\d+(?:\.\d+)*)-")
+# `_meta.r_version`の値（`4.5.3`、または`R version 4.5.3 (2026-03-11)`）から版番号を取る
+_R_VERSION_RE = re.compile(r"(?P<ver>\d+\.\d+(?:\.\d+)*)")
 
 
 def parse_pinned_packages(dockerfile_text: str) -> dict[str, str]:
@@ -87,13 +89,26 @@ def _version_key(version: str) -> tuple[int, ...]:
     return tuple(int(p) for p in re.split(r"[.-]", version) if p.isdigit())
 
 
+def _extract_r_version(raw: str) -> str | None:
+    """`_meta.r_version`の値からR本体の版番号（例: `4.5.3`）だけを取り出す。
+
+    生成スクリプトにより書式が混在する: `getRversion()`由来の`4.5.3`と、
+    `R.version.string`由来の`R version 4.5.3 (2026-03-11)`。版番号以外
+    （日付など）を`_version_key`に渡すと別の版として比較されてしまう。
+    """
+    m = _R_VERSION_RE.search(raw)
+    return m["ver"] if m else None
+
+
 def fixture_r_version(fixtures_dir: Path) -> str | None:
     """フィクスチャJSONの`_meta.r_version`のうち最大の版を返す。"""
     versions = set()
     for path in sorted(fixtures_dir.glob("*.json")):
         meta = json.loads(path.read_text(encoding="utf-8")).get("_meta", {})
         if isinstance(meta, dict) and isinstance(meta.get("r_version"), str):
-            versions.add(meta["r_version"])
+            version = _extract_r_version(meta["r_version"])
+            if version:
+                versions.add(version)
     return max(versions, key=_version_key) if versions else None
 
 

@@ -3,7 +3,7 @@
 このファイルは、Claude Code がこのリポジトリで作業する際に毎回参照する前提知識です。
 言語別の詳細なコーディング規約・テスト方針は `.claude/rules/`（パス指定で自動ロード）に、定型作業は `.claude/skills/` に、コードレビューは `.claude/agents/` のサブエージェントに分離している。重複記載を避けるため、このファイルには全体像・非交渉事項・各詳細ファイルへの参照のみを置く。
 
-手法固有の実装ノウハウ（設計判断の理由・既知の落とし穴等）は、対応する `engine/src/<系統>/CLAUDE.md` 等のネストCLAUDE.md（該当ディレクトリ配下のファイルを読み書きしたときだけ自動ロード）に置く。現状は `linear`（OLS/WLS）系統が`engine`/`engine_pybind`/`python_package`の3箇所、`nonlinear`（Logit/Probit）系統が`engine_pybind`/`python_package`の2箇所（`engine/src/nonlinear/`はまだ未作成）で作成済み。他系統・未作成箇所は実装着手時にその都度作成する（4章参照）。
+手法固有の実装ノウハウ（設計判断の理由・既知の落とし穴等）は、対応する `engine/src/<系統>/CLAUDE.md` 等のネストCLAUDE.md（該当ディレクトリ配下のファイルを読み書きしたときだけ自動ロード）に置く。現状は`linear`・`nonlinear`・`iv`・`panel`の各系統について、`engine`/`engine_pybind`/`python_package`のうち該当する箇所に作成済み。他系統・未作成箇所は実装着手時にその都度作成する（4章参照）。
 
 ## 1. プロジェクト概要
 
@@ -30,6 +30,7 @@
   - 推定オプションは **オブジェクト（設定用クラス／構造体）渡し**
   - 理由: スクリプト・プログラムからの呼び出しやすさ（型補完、バリデーション、動的組み立て）を優先するため。
 - 計算コアはRustで実装し高速化。Python側はPyO3バインディングとして薄く保つ。
+- **引数とOptionsの置き場所**: 必須の列（モデルを定義する入力。`y`/`x`/`weight`/`x_exog`/`x_endog`/`instruments`/`effects`等）は`data`の直後の引数、任意または条件付き必須の設定（`cov_type`/`cluster`/`hac_time`/`dk_time`等）は`*Options`のフィールドに置く。`options`は末尾のキーワード専用引数。単一列は`str`で単数形、複数列は`list[str]`で`x`・`x_<役割>`・複数形。IVの`x_exog`/`x_endog`とWLSの`weight`は変えない。理由と一覧は`docs/spec/api-conventions.md`、検査は`tests/cross_method/test_call_signatures.py`。
 - **検定・診断の公開形**: 推定量そのものの妥当性・識別に属する検定（Sargan/J・Hausman・全体F/Wald/LR等）は`fit()`時に計算してプロパティで公開し、推定後の事後診断（White・Breusch-Godfrey等、利用者の選択が入るもの）は検定ごとの独立メソッドとして公開する（事後診断は`fit()`で自動計算しない）。事後診断メソッドの返り値は検定共通のfrozen dataclass（`DiagnosticResult`: `statistic`/`p_value`/`df`/`df_denom`/`distribution`＋`to_dict()`。検定固有の項目は継承型に足す。例: `OLSResults.white_test()`の`WhiteTestResult`）で、ドット記法で読めJSON化は`to_dict()`で行う。キーが利用者の列名で決まる結果（`params`等）と、表形式の`params_table()`/`marginal_effects()`は`dict`・`list[dict]`のまま、`predict()`は`list[float]`。詳細は`docs/spec/inference-conventions.md`6章。
 
 これらの変更が必要と思われる場合も、まず提案として提示し、ユーザーの明示的な承認を得てから実装すること。
@@ -49,7 +50,7 @@ econometricsmodels/
 ├── engine/                       # 純粋Rustの計算心臓部（PyO3非依存）
 │   └── src/
 │       ├── lib.rs
-│       ├── linear/ nonlinear/ iv/ panel/           # 系統別。手法は最初1ファイル、肥大化したらディレクトリ（linear/ols/ 等）
+│       ├── linear/ nonlinear/ iv/ panel/           # 系統別。手法は`<手法>.rs`（ファサード）＋`<手法>/`（子モジュール）、系統内の共有は`common.rs`＋`common/`（linear/ols.rs＋linear/ols/ 等。詳細は.claude/rules/rust-style.md）
 │       └── shared/                                 # 複数の系統が共有するコード。error.rs・inference.rs・linear_algebra.rs・parallelism.rs・validation.rs・design_matrix.rs、計算部品（共分散・Wald検定・最小二乗・適合度・クラスターのグループ化）。各系統の common.rs とは別
 │
 ├── engine_pybind/                # PyO3の薄いバインディング層
@@ -114,10 +115,11 @@ econometricsmodels/
 - **Dependabotのsecurity updates**: `dependabot.yml`の`target-branch`を無視して、デフォルトブランチ（`main`）向けにPRが出る（Dependabotの仕様）。更新対象が配布物に入るなら上の緊急対応として扱い、入らないなら`release/*`側で同じ更新（`uv lock --upgrade-package <名前>`等）を行い、`main`向けのPRは閉じる。
 - **配布物に入るかの判断**: wheel/sdistに入るのは、`engine`/`engine_pybind`がビルドするRustクレートと、実行時依存（`pyproject.toml`の`dependencies`）。`cargo audit`は機能フラグを考慮せず`Cargo.lock`全体をスキャンするので、実際にビルドされるかは`cargo tree --target all -e normal,build -i <クレート>`で確認する（`docs/spec/ci-cd-notes.md`の「セキュリティ」節参照）。
 - **保護設定**: `main`と`dev`へはローカルからの直pushを禁止し、pull request経由のみとする（ブランチ保護）。
+- **コミット署名**: `main`と`dev`は署名必須（ruleset）。署名鍵はホストにあり、署名のたびにホストの端末でパスフレーズの確認が出る。Claudeが守る点は`.claude/rules/commit-signing.md`を参照（ホスト環境の手順は利用者が個人で管理し、このリポジトリには置かない）。
 - **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
 - **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。
 - **GitHub Issue**: リポジトリがpublicなため、英語で記述する（README・MkDocsと同様の理由）。対象はIssue本文のみで、セッション内の会話・コミットメッセージは対象外（引き続き日本語）。
-- **リファクタリング・テスト拡充の候補**: コード解説や実装の過程で気づいた候補は、メモファイルに溜めず、ユーザーの承認を得てGitHub Issueに直接起票する（関連する項目は1つのIssueにまとめる。既存Issueで扱える場合はコメントで追記する）。
+- **リファクタリング・テスト拡充の候補**: 実装の過程で気づいた候補は、メモファイルに溜めず、ユーザーの承認を得てGitHub Issueに直接起票する（関連する項目は1つのIssueにまとめる。既存Issueで扱える場合はコメントで追記する）。
 
 ## 6. コーディング規約
 
@@ -127,7 +129,7 @@ econometricsmodels/
 
 ## 7. テスト方針
 
-詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestは性能比較専用）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestはリファレンスに使わない）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはテスト対象のロジックと同じファイルの`mod tests`、`tests/`はpytestに分離。
 
 ## 8. バージョニング・CI/CD
 
@@ -146,7 +148,7 @@ econometricsmodels/
 
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
 - ベースイメージ: `python:3.14-slim-bookworm`（ダイジェストでも固定）。Rust（`ARG RUST_VERSION`で固定、clippy/rustfmt/llvm-tools）、uv（版とダイジェストを固定した公式イメージからコピー）、Node.js（`signed-by`のAPTリポジトリ）、R（fixest/plm/ivreg/AER/censReg/marginaleffects等、`benchmark/`のベンチマーク生成用。Rパッケージは`Dockerfile`で`remotes::install_version()`によりバージョンをピン留めし、新版の有無は`check_r_updates.yml`が週次で確認してIssueで通知する）を導入済み。**旧経緯**: `ivreg`は当初`Dockerfile`が`install.packages()`でインストールを試みていたが実際には失敗し導入されていなかった（依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、Debian bookworm標準のr-baseは4.2.2固定でこれを満たせなかった。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくかった）。CRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`、実体は最新のRリリースを追従）を追加してR 4.x系（執筆時点で4.5.3）に更新し解消した。現在は`install_version()`で導入済みで、IVのRクロスチェックに使っている。Rパッケージの追加時は`install.packages()`ではなく`install_version()`を使い、導入失敗をビルドエラーとして検知できるようにする。
-- コンテナに`sudo`・`openssh-client`は入れない(パッケージを足すときは`Dockerfile`に書いて再構築する。SSHは使わずHTTPSで運用する)。`RUST_VERSION`はCIのstableと食い違いうるため、上げるときは手動で上げる(自動の更新確認は無い)。
+- コンテナに`sudo`・`openssh-client`は入れない(パッケージを足すときは`Dockerfile`に書いて再構築する。SSHは使わずHTTPSで運用する)。Rustの版はリポジトリ直下の`rust-toolchain.toml`で固定し、CI（`setup-rust-toolchain`）とローカルが同じ版を使う。`Dockerfile`の`RUST_VERSION`は同じ値にし、上げるときは両方を手動で上げる(新版の有無と食い違いは`check_cargo_tool_updates.yml`が週次で確認してIssueで通知する)。
 - `cargo install --locked`で導入するcargo開発ツール（cargo-audit/about/llvm-cov）も`Dockerfile`の`ARG`でバージョンをピン留めしており、新版の有無とCI（`ci_engine.yml`のcargo-audit）とのピンの食い違いは`check_cargo_tool_updates.yml`が週次で確認してIssueで通知する（手順は`docs/spec/ci-cd-notes.md`）。
 - Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。**`gh`の認証**: ホストの`GITHUB_TOKEN`をコンテナの環境変数に渡さない（コンテナ内の全プロセスから読めるため）。コンテナ内で、このリポジトリ限定・必要な権限のみ・有効期限付きのfine-grained PATを`gh auth login --with-token`で入れる（必要な権限: Contents/Pull requests/Issues/Actions/Workflowsの読み書き）。リポジトリ設定の変更（Administration権限が必要）はUIで行うか、一時的に権限を足したPATで行う。`git push`はVS Codeの認証情報転送を使う。
 - **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON等を除外している。
@@ -168,14 +170,15 @@ econometricsmodels/
 - 仕様書: `docs/spec/`（実装済みの手法ごとの実装上の判断・内部構成・テスト方針・ベンチマーク上の注意。日本語で、公開サイトには出さない。method非依存のCI/CD・セキュリティ運用ノートもここに置く、例: `ci-cd-notes.md`・`inference-conventions.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
-- **手法の定義（数式）の正本**: `docs/methods/<手法>.md`（mkdocsのnavに載せる英語の公開ページ。推定量・`cov_type`ごとの共分散・検定分布と自由度・適合度統計量・事後診断の定義式）。`docs/spec/`には定義式を重複させず、このページへのリンクと、実装上の判断・理由だけを置く。手法の式や定義を変えたら`methods/`を更新し、`spec/`は理由が変わったときだけ更新する。オプション・結果フィールドの意味の正本はコード内のdocstring（APIページが自動生成）で、`spec/`の「API引数」「結果構造体」は設計判断の理由のみとする。公開側（`usage/`・`methods/`・`guide/`・`api/`・公開クラスのdocstring）は英語で、`docs/spec/`・`.claude/`・`CLAUDE.md`への参照を含めない（`tests/cross_method/test_public_docs.py`が検査する）。新手法の追加時は`usage/`・`api/`・`methods/`に各1ページ足し、mkdocsのnavの手法配下（Usage / Options and results / Definitions）に載せる。`api/`ページは冒頭に「Options at a glance」の表を置き、Resultsクラスのdocstringには「Fields by purpose」で公開プロパティ・メソッドを目的別に漏れなく列挙する（`tests/cross_method/test_results_docstrings.py`が検査する）。`usage/`のコード例はページ内で自己完結させる。
-- 利用者向け横断ガイド: `docs/guide/`（mkdocsのnavに載せる英語の公開ページ）。現状は`inference-conventions.md`（手法別の検定分布・自由度、R/statsmodels/linearmodelsとの違い、診断統計量の読み方）。手法別の一覧表はこの公開ページを正本とし、`docs/spec/inference-conventions.md`には重複させず選択理由・ベンチマーク上の注意のみを置く。新手法の追加時は公開ページの表に1行追加する。
+- **手法の定義（数式）の正本**: `docs/methods/<手法>.md`（mkdocsのnavに載せる英語の公開ページ。推定量・`cov_type`ごとの共分散・検定分布と自由度・適合度統計量・事後診断の定義式）。`docs/spec/`には定義式を重複させず、このページへのリンクと、実装上の判断・理由だけを置く。手法の式や定義を変えたら`methods/`を更新し、`spec/`は理由が変わったときだけ更新する。オプション・結果フィールドの意味の正本はコード内のdocstring（APIページが自動生成）で、`spec/`の「API引数」「結果構造体」は設計判断の理由のみとする。公開側（`usage/`・`methods/`・`guide/`・`api/`・公開クラスのdocstring）は英語で、`docs/spec/`・`.claude/`・`CLAUDE.md`への参照を含めない（`tests/cross_method/test_public_docs.py`が検査する）。新手法の追加時は`usage/`・`api/`・`methods/`に各1ページ足し、mkdocsのnavのModels配下で、系統（Linear models / Nonlinear models / Instrumental variables / Panel models。`engine/src/`の系統ディレクトリに対応）の中に手法を置き、手法の下にUsage / Options and results / Definitionsを載せる。`api/`ページは冒頭に「Options at a glance」の表を置き、Resultsクラスのdocstringには「Fields by purpose」で公開プロパティ・メソッドを、`*Options`（Rustの`///`）には「Options by purpose」でフィールドを、目的別に漏れなく列挙する（Optionsは短い導線だけで、詳細は`api/`の表）（`tests/cross_method/test_results_docstrings.py`が検査する）。`usage/`のコード例はページ内で自己完結させる。推定量クラスのdocstringの`Examples:`は`tests/cross_method/test_docstring_examples.py`が実行して出力まで照合する。
+- 利用者向け横断ガイド: `docs/guide/`（mkdocsのnavに載せる英語の公開ページ）。`api-conventions.md`（引数とOptionsの基準と全手法の引数一覧。新手法の追加時は表に1行足す。`test_call_signatures.py`が引数名の掲載を検査する）、`inference-conventions.md`（手法別の検定分布・自由度、R/statsmodels/linearmodelsとの違い、診断統計量の読み方）。手法別の一覧表はこの公開ページを正本とし、`docs/spec/inference-conventions.md`には重複させず選択理由・ベンチマーク上の注意のみを置く。新手法の追加時は公開ページの表に1行追加する。
+- **公開ドキュメントの校正・校閲**: 公開ページ（`docs/`の英語ページとAPIページに描画されるdocstring）を変更したら、`/review-docs`（または「校閲して」等の依頼）で校閲する。変更しただけでは自動実行しない（スペル・わかりやすさ・全体構成、数式・統計学の正しさ、実装との整合、他パッケージ言及の事実性を、`docs-prose-reviewer`/`docs-accuracy-reviewer`が確認する）。他パッケージ言及の事実確認でWeb検索をするときは、事前にユーザーの許可を得る。指摘はドキュメントを直さず提示し、起票は承認後にGitHub Issueへ行う。
 - 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の計測方法論・設計判断・既知の限界・今後の検討を残す日本語の開発ノート。
   計測結果の表は置かない）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
 - **公開ページ（mkdocs nav掲載・英語）の運用ルール**: 検証と性能は、手法が増えたら公開ページにも反映する。
-  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/support/_tolerances_<系統>.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
+  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/support/_tolerances_<系統>.py`が正）・実データ。クロスチェックの設定の注記と単一リファレンスの例外（「Not compared against a second reference」）は`docs/guide/verification-details.md`に分けている。新手法のテスト作成（`/test-new`）の完了条件に含める。
   - `docs/guide/performance.md`（概要・既知の課題・計測条件は手書き、先頭のサマリー表は生成ブロック）と`docs/guide/performance-results.md`（全表、全体が生成物）: **数値は`benchmark_performance.yml`のCI計測値を正とする**（devcontainerの単発計測は使わない）。リリース準備時（`/release`）にリリースブランチで手動実行し、artifactから`python -m performance.render_docs_results`で再生成する。`README.md`「Performance」節の表・例にも同じ数値を丸めて転記しているため、再生成のたびに合わせて更新する（手順は`/release`）。手法を足すときは`benchmark_performance.yml`のmatrixに加えれば、次回の再生成で自動的にページへ現れる。
-  - `docs/guide/accepted-data.md`: 受け付ける入力（polarsの`DataFrame`のみ）・列の役割ごとに許可するdtype・値の変換と精度・引数の型（`TypeError`との分担）。許可するdtypeの表は`engine_pybind/src/shared/column_extraction.rs`のdtype検査が正で、検査を変更したらこの表を同時に更新する（許可・拒否の方針を各手法specに複製しない）。
+  - `docs/guide/accepted-data.md`: 受け付ける入力（polarsの`DataFrame`のみ）・列の役割ごとに許可するdtype・値の変換と精度・引数の型（`TypeError`との分担）。許可するdtypeの表は`engine_pybind/src/shared/column_extraction/dtype.rs`のdtype検査が正で、検査を変更したらこの表を同時に更新する（許可・拒否の方針を各手法specに複製しない）。
   - `docs/guide/validation.md`: バリデーションの設計思想（欠損値を自動除外しない理由等）と、`ValidationError`/`ComputationError`が出る状況の分類。手法固有のチェック（新しい列引数・オプションの検証、手法固有の`ComputationError`）を追加したら、該当する分類表に1行足す。新しいエラー（`code`）を足す手順と文面の規則は`docs/spec/error-handling.md`・`docs/spec/error-style-guide.md`（`.claude/rules/rust-style.md`のエラーハンドリング節に要約）。`docs/guide/error-codes.md`は`tools/render_error_catalog.py`の生成物（表は手で編集しない）。欠損値・共線列等の共通方針は各手法specに複製せず、このページを参照する。
   - 検証・性能の結果表は日本語ノートや`docs/spec/`に重複させない（公開ページが正本）。
 

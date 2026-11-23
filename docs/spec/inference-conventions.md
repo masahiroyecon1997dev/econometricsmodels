@@ -10,7 +10,7 @@
 
 **GMM/Logit/Probit/Tobitがz分布を使う理由**: GMMの理論的正当化（Hansen 1982）およびMLEの漸近理論は、いずれもサンプルサイズが無限大に近づくときの漸近正規性のみに依拠しており、OLSの`n-k`に相当する自然な自由度・有限標本での厳密な分布の閉形式が存在しない。t分布を使うことは、存在しない有限標本の理論的裏付けを偽って主張することになるため、素直に漸近論が保証するz分布・カイ二乗分布を採用する（`iv-spec.md`3.2節、`nonlinear-common.md`4章）。Tobitも同じMLEベースのため同様に標準正規分布・Wald χ²（`tobit-spec.md`）。
 
-**クラスター時の自由度**: OLS/WLS/2SLSの`cov_type="cluster"`はp値・信頼区間の自由度を`G-1`にする（`ols-spec.md`3.2節）。FE/REも`cov_type="cluster"`では`G-1`（`G`は`cluster`列のクラスター数。既定のentityでなくても同様）、`cov_type="dk"`では`t_periods-1`、それ以外は`df_resid`（`fe-spec.md`3.2節、`re-spec.md`3.3節）。`fixest::feols(cluster=)`の`ssc()`既定`t.df="min"`と一致する。FE/REのF統計量も同じ`cov_type`別の共分散・自由度のWald検定のため、`f_df_denom`は`stat_df`と一致する（`fe-spec.md`3.2節、`re-spec.md`3.5節）。
+**クラスター時の自由度**: OLS/WLS/2SLSの`cov_type="cluster"`はp値・信頼区間の自由度を`G-1`にする（`ols-spec.md`3.2節）。FE/REも`cov_type="cluster"`では`G-1`（`G`は`cluster`列のクラスター数。既定の`effects`の先頭の列でなくても同様）、`cov_type="dk"`では`t_periods-1`、それ以外は`df_resid`（`fe-spec.md`3.2節、`re-spec.md`3.3節）。`fixest::feols(cluster=)`の`ssc()`既定`t.df="min"`と一致する。FE/REのF統計量も同じ`cov_type`別の共分散・自由度のWald検定のため、`f_df_denom`は`stat_df`と一致する（`fe-spec.md`3.2節、`re-spec.md`3.5節）。
 
 **engine側の型**: `engine::shared::inference::StatDist::{T { df }, Normal}`で「t分布なら自由度がある、正規分布ならない」関係を型で保証する。Python側の`stat_dist`/`stat_df`はその写像。`marginal_effects()`は常に正規分布で、返り値が`list[dict]`のため行ごとの`stat_dist`は持たない（docstringに明記）。
 
@@ -28,7 +28,7 @@
 
 - v1スコープでは内生変数ごとの生の部分F統計量のみを返す。Stock-Yogoの臨界値テーブルは経験的なシミュレーション値でクローズドフォームでなく実装コストが高いため、照合（合否判定）は実装しない（`iv-spec.md`3.4節）。
 - 複数内生変数の同時弱操作変数診断（Cragg-Donald統計量）も同様の理由でv1スコープ外。複数内生変数（`k_endog>=2`）シナリオが実際にサポートされた後もこの判断を維持するかは再検討中。
-- 部分F統計量が`cov_type`に依存しない理由（Stock-Yogoの臨界値表が等分散前提でキャリブレーションされている、`OlsEstimator`が`cov_params`全体を公開していない）は`engine/src/iv/CLAUDE.md`参照。
+- 部分F統計量が`cov_type`に依存しない理由（Stock-Yogoの臨界値表が等分散前提でキャリブレーションされている、`OlsEstimator`の`cov_params()`は第一段階の`cov_type`の行列で、制限モデルの比較には使えない）は`engine/src/iv/CLAUDE.md`参照。
 
 ## 4. 過剰識別検定（Sargan/Hansen J）の設計判断
 
@@ -45,10 +45,10 @@
 
 新しい検定・診断統計量を足すときの置き場所の規則（ユーザー決定済み）。既存の公開形はこの規則の帰結であり、場当たりに決めたものではない。
 
-- **推定量そのものの妥当性・識別に属する検定は、`fit()`時に計算してプロパティで公開する。** 自由パラメータを持たず（`fit()`のオプションだけで決まり）、推定量を選ぶ・使う時点で必ず目にする検定が対象。例: IVのSargan/Hansen J・Wu-Hausman・弱操作変数F（Cragg-Donald/Kleibergen-Paapも同区分）、REのHausman、全体F/Wald/LR。
+- **推定量そのものの妥当性・識別に属する検定は、`fit()`時に計算してプロパティで公開する。** 自由パラメータを持たず（`fit()`のオプションだけで決まり）、推定量を選ぶ・使う時点で必ず目にする検定が対象。例: IVのSargan/Hansen J・Wu-Hausman・弱操作変数の部分F、REのHausman、全体F/Wald/LR。Cragg-Donald・Kleibergen-Paap・有効Fは例外で事後診断のメソッドにする（ユーザー決定済み。臨界値の水準`alpha`・`cov_type`に頑健な版という選択が入り、`fit()`の計算量を増やさず、C統計量と同じ「結果が元のデータを保持して呼び出し時に再計算する」仕組みを共有するため。`iv-spec.md`3.4.4節）。
 - **推定後の事後診断は、検定ごとの独立したメソッドとして公開する。** 検定のバリエーション、ラグ次数、時間順の指定、補助回帰の設計など利用者の選択が入るもの。例: White、Breusch-Godfrey、Breusch-Pagan、今後のRESET/Jarque-Bera。
 - **事後診断を`fit()`で自動計算しない。** 「検定してから頑健SEを選ぶ」手順を誘発するため。頑健SEは`cov_type`で最初から選ぶ設計と整合しない。
 - **検定ごとにメソッドを分ける。** 引数が検定ごとに異なり（例: BGは`time`・`nlags`、BPは`variables`、Whiteは引数なし）、検定ごとのメソッドなら型補完とバリデーションがそのまま効くため（`y`を`str`単独にするのと同じ、呼び出しやすさ優先の理由）。全検定を束ねる`diagnostics()`は**当面作らない**（一覧性が必要になった時点で薄い集約メソッドとして足す余地は残す。確定した不採用ではない）。
-- **公開形の揃え方**: プロパティは`<name>_statistic`/`_p_value`/`_df`の三つ組。事後診断メソッドは、同じ意味のフィールド（`statistic`/`p_value`/`df`/`distribution`）を持つ検定共通のfrozen dataclassを返し、`to_dict()`でJSON向けの`dict`にできる。理由: `fit_result.params`のように結果は属性（ドット記法）で読むのが基本で、診断だけ添字アクセスだとAPIが不揃いになる。レポートへの埋め込み（`f"{res.p_value:.3f}"`）でも読みやすい。JSON化は`dataclasses.asdict`相当で足りる。検定固有の追加項目は継承した型に足す。型名は`DiagnosticResult`（検定共通）と、検定固有の項目を持つ継承型（例: `WhiteTestResult`、置き場所は`econometricsmodels.diagnostics`、トップレベルにも公開）。`distribution`は`stat_dist`と同じく`Literal`の文字列（`"chi2"`/`"f"`）。LMとF版のように同じ検定の版が複数ある場合は、結果を2つ返さず`statistic`引数（`Literal["lm", "f"]`）で選ばせて型を単純に保つ。一方、キーが利用者の列名で決まる結果（`params`/`std_errors`/`test_stats`/`p_values`/`conf_int`）と、表形式で`pl.DataFrame`/`json.dumps`にそのまま渡す`params_table()`/`marginal_effects()`（`list[dict]`）は`dict`のまま、`predict()`は`list[float]`（`residuals`と同じ形）とする。
+- **公開形の揃え方**: プロパティは`<name>_statistic`/`_p_value`/`_df`の三つ組。事後診断メソッドは、同じ意味のフィールド（`statistic`/`p_value`/`df`/`distribution`）を持つ検定共通のfrozen dataclassを返し、`to_dict()`でJSON向けの`dict`にできる。理由: `fit_result.params`のように結果は属性（ドット記法）で読むのが基本で、診断だけ添字アクセスだとAPIが不揃いになる。レポートへの埋め込み（`f"{res.p_value:.3f}"`）でも読みやすい。JSON化は`dataclasses.asdict`相当で足りる。検定固有の追加項目は継承した型に足す。p値を持たない診断（IVのCragg-Donald・有効F）や、2つの統計量を並べて持つ診断（Kleibergen-Paapのrk LMとrk Wald F）は`DiagnosticResult`を継承せず、診断ごとの専用のfrozen dataclass（`CraggDonaldResult`・`KleibergenPaapResult`・`EffectiveFResult`、同じ`econometricsmodels.diagnostics`）にする（ユーザー決定済み）。型名は`DiagnosticResult`（検定共通）と、検定固有の項目を持つ継承型（例: `WhiteTestResult`、置き場所は`econometricsmodels.diagnostics`、トップレベルにも公開）。`distribution`は`stat_dist`と同じく`Literal`の文字列（`"chi2"`/`"f"`）。LMとF版のように同じ検定の版が複数ある場合は、結果を2つ返さず`statistic`引数（`Literal["lm", "f"]`）で選ばせて型を単純に保つ。一方、キーが利用者の列名で決まる結果（`params`/`std_errors`/`test_stats`/`p_values`/`conf_int`と、行・列とも列名で決まる`cov_params`＝`dict[str, dict[str, float]]`）と、表形式で`pl.DataFrame`/`json.dumps`にそのまま渡す`params_table()`/`marginal_effects()`（`list[dict]`）は`dict`のまま、`predict()`は`list[float]`（`residuals`と同じ形）とする。
 - **メソッドが`X`等を必要とするとき**: `OLSResult`は`X`を保持せず、元の`polars.DataFrame`と`param_names`から必要な列だけを都度取り込む（`augment()`は元のDataFrameに列を足す）。元のデータが無い結果（IVの`first_stage()`が返す`OLSResults`）では`ValidationError`にする。
 - **時間順が必要な検定（Breusch-Godfrey等）は時間列を必須引数とし、行順を時間順とみなす暗黙の既定を置かない**（`hac_time`と同じ理由、`ols-spec.md`の`hac_time`の項）。パッケージは警告を出さない方針のため、横断面データへの誤適用はこの必須引数で防ぐ。

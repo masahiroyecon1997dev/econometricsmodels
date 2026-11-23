@@ -15,14 +15,16 @@ import polars as pl
 import pytest
 from _dtype_helpers import N, make_frame
 from _error_expectations import escaped
-from _errors import raises_error
+from _errors import approx_param, raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -70,6 +72,10 @@ FIELDS = [
     (IVOptions, "gmm_tol", "float"),
     (FEOptions, "confidence_level", "float"),
     (FEOptions, "dk_bandwidth", "int"),
+    (FEIVOptions, "confidence_level", "float"),
+    (FEIVOptions, "dk_bandwidth", "int"),
+    (FEIVOptions, "gmm_max_iter", "int"),
+    (FEIVOptions, "gmm_tol", "float"),
     (REOptions, "confidence_level", "float"),
     (REOptions, "dk_bandwidth", "int"),
 ]
@@ -302,8 +308,20 @@ def _fit(options, df):
             options=options,
         ).fit()
     if cls is FEOptions:
-        return FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
-    return RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+        return FE(
+            df, y="y", x=["x1"], effects=["entity"], options=options
+        ).fit()
+    if cls is FEIVOptions:
+        return FEIV(
+            df,
+            y="y",
+            x_exog=["x2"],
+            x_endog=["x1"],
+            instruments=["z", "z2"],
+            effects=["entity"],
+            options=options,
+        ).fit()
+    return RE(df, y="y", x=["x1"], effects=["entity"], options=options).fit()
 
 
 ALL_OPTION_CLASSES = [
@@ -314,6 +332,7 @@ ALL_OPTION_CLASSES = [
     TobitOptions,
     IVOptions,
     FEOptions,
+    FEIVOptions,
     REOptions,
 ]
 
@@ -351,7 +370,11 @@ def test_huge_hac_lags_is_validation_error_not_overflow(df, cls, huge, how):
 
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize("huge", [2**70, -(2**70)], ids=["+2^70", "-2^70"])
-@pytest.mark.parametrize("cls", [FEOptions, REOptions], ids=["FE", "RE"])
+@pytest.mark.parametrize(
+    "cls",
+    [FEOptions, FEIVOptions, REOptions],
+    ids=["FE", "FEIV", "RE"],
+)
 def test_huge_dk_bandwidth_is_validation_error(df, cls, huge, how):
     kwargs = {"cov_type": "dk", "dk_time": "t"}
     options = _with_value(cls, "dk_bandwidth", huge, how, **kwargs)
@@ -430,7 +453,7 @@ class TestMleOptionValues:
         with raises_error(
             ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
             option="tol",
-            value=pytest.approx(value, nan_ok=True),
+            value=approx_param(value),
         ):
             _fit(options, df)
 
@@ -441,13 +464,14 @@ class TestMleOptionValues:
     [
         (float("nan"), float("nan")),
         (float("inf"), float("inf")),
+        (float("-inf"), float("-inf")),
         (2**70, float(2**70)),
         (-(2**70), -float(2**70)),
         (10**400, float("inf")),
         (0, 0.0),
         (1, 1.0),
     ],
-    ids=["nan", "inf", "2^70", "-2^70", "huge_int", "zero", "one"],
+    ids=["nan", "inf", "-inf", "2^70", "-2^70", "huge_int", "zero", "one"],
 )
 @pytest.mark.parametrize(
     "cls", ALL_OPTION_CLASSES, ids=[c.__name__ for c in ALL_OPTION_CLASSES]
@@ -463,7 +487,7 @@ def test_invalid_confidence_level_is_validation_error_for_every_method(
 
     with raises_error(
         ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE,
-        value=pytest.approx(value, nan_ok=True),
+        value=approx_param(value),
     ):
         _fit(options, df)
 
@@ -471,8 +495,8 @@ def test_invalid_confidence_level_is_validation_error_for_every_method(
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize(
     "bad",
-    [float("nan"), float("inf"), 10**400],
-    ids=["nan", "inf", "huge_int"],
+    [float("nan"), float("inf"), float("-inf"), 10**400],
+    ids=["nan", "inf", "-inf", "huge_int"],
 )
 @pytest.mark.parametrize("field", ["lower", "upper"])
 def test_invalid_tobit_bound_is_validation_error(df, field, bad, how):
@@ -484,9 +508,16 @@ def test_invalid_tobit_bound_is_validation_error(df, field, bad, how):
 
     with raises_error(
         ErrorCode.CENSORING_BOUND_NOT_FINITE,
-        **{field: pytest.approx(expected, nan_ok=True)},
+        **{field: approx_param(expected)},
     ):
         _fit(options, df)
+
+
+# GMMを使うためにオプションの種類ごとに要る指定（IVは`estimator`、FEIVは常にGMM）。
+_GMM_KWARGS = {
+    IVOptions: {"estimator": "gmm"},
+    FEIVOptions: {"estimator": "gmm"},
+}
 
 
 @pytest.mark.parametrize("how", SETTERS)
@@ -495,16 +526,19 @@ def test_invalid_tobit_bound_is_validation_error(df, field, bad, how):
     [-(2**70), 2, 10_001, 2**70],
     ids=["-2^70", "2", "limit+1", "2^70"],
 )
-def test_gmm_max_iter_outside_the_range_is_validation_error(df, invalid, how):
+@pytest.mark.parametrize("cls", [IVOptions, FEIVOptions])
+def test_gmm_max_iter_outside_the_range_is_validation_error(
+    df, cls, invalid, how
+):
     """`gmm_max_iter`は3から10,000まで。範囲外（`i64`に収まらない巨大な値を含む）は
     `OverflowError`ではなく`ValidationError`。
     """
     options = _with_value(
-        IVOptions,
+        cls,
         "gmm_max_iter",
         invalid,
         how,
-        estimator="gmm",
+        **_GMM_KWARGS[cls],
         gmm_type="iterated",
         raise_on_non_convergence=False,
     )
@@ -520,13 +554,14 @@ def test_gmm_max_iter_outside_the_range_is_validation_error(df, invalid, how):
 
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize("limit", [3, 10_000], ids=["lower", "upper"])
-def test_gmm_max_iter_limits_are_accepted(df, limit, how):
+@pytest.mark.parametrize("cls", [IVOptions, FEIVOptions])
+def test_gmm_max_iter_limits_are_accepted(df, cls, limit, how):
     options = _with_value(
-        IVOptions,
+        cls,
         "gmm_max_iter",
         limit,
         how,
-        estimator="gmm",
+        **_GMM_KWARGS[cls],
         gmm_type="iterated",
         raise_on_non_convergence=False,
     )
@@ -537,23 +572,24 @@ def test_gmm_max_iter_limits_are_accepted(df, limit, how):
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize(
     "tol",
-    [float("nan"), float("inf"), -1.0],
-    ids=["nan", "inf", "negative"],
+    [float("nan"), float("inf"), float("-inf"), -1.0],
+    ids=["nan", "inf", "-inf", "negative"],
 )
-def test_invalid_gmm_tol_is_validation_error(df, tol, how):
+@pytest.mark.parametrize("cls", [IVOptions, FEIVOptions])
+def test_invalid_gmm_tol_is_validation_error(df, cls, tol, how):
     options = _with_value(
-        IVOptions,
+        cls,
         "gmm_tol",
         tol,
         how,
-        estimator="gmm",
+        **_GMM_KWARGS[cls],
         gmm_type="iterated",
     )
 
     with raises_error(
         ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
         option="gmm_tol",
-        value=pytest.approx(tol, nan_ok=True),
+        value=approx_param(tol),
     ):
         _fit(options, df)
 
@@ -607,7 +643,7 @@ def test_numpy_uint64_beyond_i64_is_validation_error(df, how):
 
 # ── 文字列のoption ─────────────────────────────────────────────────
 #
-# 列名（`cluster`・`hac_time`・`time`・`dk_time`）は`fit()`の列名引数と同じ形式、
+# 列名（`cluster`・`hac_time`・`dk_time`）は`fit()`の列名引数と同じ形式、
 # それ以外（`cov_type`・`solver`等の選択肢）は`must be a str`のメッセージになる。
 
 # (オプションクラス, フィールド名, 種類, `None`を許すか)。種類は`column`・`text`。
@@ -634,11 +670,15 @@ STRING_FIELDS = [
     (IVOptions, "gmm_weight_type", "text", True),
     (IVOptions, "gmm_type", "text", True),
     (FEOptions, "cov_type", "text", False),
-    (FEOptions, "time", "column", True),
     (FEOptions, "cluster", "column", True),
     (FEOptions, "dk_time", "column", True),
+    (FEIVOptions, "estimator", "text", False),
+    (FEIVOptions, "cov_type", "text", False),
+    (FEIVOptions, "cluster", "column", True),
+    (FEIVOptions, "dk_time", "column", True),
+    (FEIVOptions, "gmm_weight_type", "text", True),
+    (FEIVOptions, "gmm_type", "text", True),
     (REOptions, "cov_type", "text", False),
-    (REOptions, "time", "column", True),
     (REOptions, "dk_time", "column", True),
     (REOptions, "cluster", "column", True),
 ]

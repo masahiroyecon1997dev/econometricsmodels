@@ -27,7 +27,7 @@
 # 最大約8%の乖離として発覚した（本実装・statsmodelsはどちらも観測情報行列を使うため、
 # 一致しないのはRの`glm()`側の计算対象の違いであり、本実装側の不整合ではない。
 # `numDeriv::hessian()`による数値微分Hessianで検証済み）。このため`observed_bread()`
-# （本実装の`nonlinear/probit.rs`・`logit.rs`と同じ解析的Hessian公式、`λᵢ(λᵢ+zᵢ)`
+# （本実装の`nonlinear/probit/problem.rs`・`logit/problem.rs`と同じ解析的Hessian公式、`λᵢ(λᵢ+zᵢ)`
 # （probit）・`pᵢ(1-pᵢ)`（logit）で明示的に計算）を`sandwich::sandwich(bread.=...)`
 # に渡すことで、リンク関数によらず観測情報行列ベースの共分散を一貫して使う。
 # Logitでは正準リンクの性質により`bread.glm()`の値と数学的に完全に一致するため、
@@ -160,8 +160,8 @@ for (i in seq_len(glm_settings$max_refit)) {
   }
 }
 
-# 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・
-# logit.rs）と同じ解析式で計算する（上記docコメント参照）。
+# 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit/problem.rs・
+# logit/problem.rs）と同じ解析式で計算する（上記docコメント参照）。
 observed_hessian_weights <- function(model, link) {
   X <- model.matrix(model)
   y <- model$y
@@ -255,6 +255,15 @@ names(zs) <- rownames(ct)
 names(pvalues) <- rownames(ct)
 names(conf_low) <- rownames(ct)
 names(conf_high) <- rownames(ct)
+
+# 係数の分散共分散行列（標準誤差の元になった`vc`そのもの）を`{行: {列: 値}}`で出す。
+# 行・列の名前は係数名（`coeftest`の行名）に揃える。
+cov_names <- rownames(ct)
+dimnames(vc) <- list(cov_names, cov_names)
+cov_params <- setNames(
+  lapply(cov_names, function(r) setNames(as.list(as.numeric(vc[r, ])), cov_names)),
+  cov_names
+)
 
 # 適合度統計量はcov_typeに依存しない（対数尤度・deviance由来のため）。
 # R標準のAIC()/BIC()は、二項分布族（分散パラメータを別途推定しない）では
@@ -392,6 +401,7 @@ result <- list(
   p_values = as.list(pvalues),
   conf_low = as.list(conf_low),
   conf_high = as.list(conf_high),
+  cov_params = cov_params,
   log_likelihood = ll,
   log_likelihood_null = ll_null,
   aic = -2 * ll + 2 * k_params,

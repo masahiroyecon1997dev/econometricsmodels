@@ -286,11 +286,13 @@ def test_param_types_use_the_documented_vocabulary(catalog: dict) -> None:
 
 def test_stage_table_and_test_labels(catalog: dict) -> None:
     names = [s["name"] for s in catalog["stages"]]
-    assert len(names) == len(set(names)) == 12
+    assert len(names) == len(set(names)) == 13
     by_name = {s["name"]: s for s in catalog["stages"]}
     assert by_name["FIRST_STAGE"]["params"] == ["endog_name"]
     assert "{endog_name}" in by_name["FIRST_STAGE"]["prefix"]
     assert by_name["DIAGNOSTIC_AUXILIARY_REGRESSION"]["params"] == ["test"]
+    assert "Wald" in by_name["OVERALL_WALD_TEST"]["prefix"]
+    assert "F test" in by_name["OVERALL_F_TEST"]["prefix"]
     assert catalog["test_labels"]["WHITE"] == "White test"
 
 

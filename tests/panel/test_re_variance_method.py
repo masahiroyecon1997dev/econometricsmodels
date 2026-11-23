@@ -31,7 +31,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
 
@@ -43,7 +42,12 @@ import statsmodels.api as sm
 from _assertions import assert_close, assert_option_case_insensitive
 from _constants import DATA_DIR
 from _errors import raises_error
-from _helpers import CASE_SPELLINGS, load_wooldridge_dataset
+from _fixture_cov import load_fixtures_with_cov
+from _helpers import (
+    CASE_SPELLINGS,
+    assert_unit_change_invariant,
+    load_wooldridge_dataset,
+)
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
     _Panel,
@@ -96,6 +100,7 @@ ABSOLUTE_YEAR_CASES = {
 _ONE_WAY_PLM_KEYS = (
     "params",
     "std_errors",
+    "cov_params",
     "test_stats",
     "p_values",
     "f_statistic",
@@ -126,7 +131,7 @@ _TWO_WAY_PLM_KEYS = (
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 def _frame(case: Case) -> pl.DataFrame:
@@ -144,10 +149,16 @@ def _plm_entry(reference: dict, case: Case) -> dict:
     return reference[section][case.name]
 
 
+def _effects(case: Case) -> list[str]:
+    """`effects`引数。2-wayのケースは`[個体列, 時点列]`、1-wayは`[個体列]`。"""
+    if case.two_way:
+        return [case.entity_col, case.time_col]
+    return [case.entity_col]
+
+
 def _options(case: Case, cov_type: str, method: str) -> REOptions:
     return REOptions(
         cov_type=cov_type,
-        time=case.time_col if case.two_way else None,
         dk_time=case.time_col if cov_type == "dk" else None,
         variance_method=method,
     )
@@ -158,7 +169,7 @@ def _fit(case: Case, cov_type: str, method: str, df=None):
         _frame(case) if df is None else df,
         y=case.y_col,
         x=list(case.x),
-        entity=case.entity_col,
+        effects=_effects(case),
         options=_options(case, cov_type, method),
     ).fit()
 
@@ -445,10 +456,8 @@ def test_default_variance_method_is_swamy_arora(case_name):
         _frame(case),
         y=case.y_col,
         x=list(case.x),
-        entity=case.entity_col,
-        options=REOptions(
-            cov_type="classical", time=case.time_col if case.two_way else None
-        ),
+        effects=_effects(case),
+        options=REOptions(cov_type="classical"),
     ).fit()
     explicit = _fit(case, "classical", "swamy_arora")
     assert default.variance_method == "swamy_arora"
@@ -509,7 +518,7 @@ def test_unknown_variance_method_is_reported_before_the_data_is_checked():
             _frame(case),
             y="y",
             x=["no_such_column"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method="nerlove"),
         ).fit()
 
@@ -623,6 +632,8 @@ def test_amemiya_rejects_regressors_without_within_variation(case):
     バランスパネルでも不均衡でも、全列がそうでも`ValidationError`で、列の名前を示す。"""
     with raises_error(
         ErrorCode.AMEMIYA_REQUIRES_WITHIN_VARIATION,
+        argument="x",
+        data_argument="data",
         columns=case.rejected_columns.split(", "),
     ):
         _fit(case, "classical", "amemiya")
@@ -652,7 +663,7 @@ def test_wallace_hussain_pooled_regression_failure_is_a_computation_error():
             df,
             y="y",
             x=["x1", "x_invariant", "z2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method="wallace_hussain"),
         ).fit()
 
@@ -674,7 +685,7 @@ def test_non_positive_sigma2_eps_is_a_computation_error():
             df,
             y="y",
             x=["x1"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method=method),
         ).fit()
 
@@ -721,7 +732,7 @@ def test_perfect_collinearity_is_a_computation_error_for_every_method(method):
             df,
             y="y",
             x=["x1", "x2", "x3"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method=method),
         ).fit()
 
@@ -730,26 +741,24 @@ def test_perfect_collinearity_is_a_computation_error_for_every_method(method):
     "method", ["swamy_arora", "wallace_hussain", "amemiya"]
 )
 @pytest.mark.parametrize("cov_type", ["classical", "cluster"])
-def test_extreme_scale_difference_is_a_computation_error_for_every_method(
+def test_extreme_scale_difference_is_invariant_to_the_units_for_every_method(
     method, cov_type
 ):
-    """変数間のスケールが極端に異なる設計行列（`x1`を1e6倍、`x2`を1e-3倍）。"""
+    """変数間のスケールが極端に異なる設計行列（`x1`を1e6倍、`x2`を1e-3倍）でも、どの分散成分
+    推定でも失敗せず、単位を揃えたデータと同じ全体F統計量・p値になる。"""
     case = _case("ow_baseline")
     df = _frame(case).with_columns(
         x1=pl.col("x1") * 1e6, x2=pl.col("x2") * 1e-3
     )
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
-    ):
-        RE(
-            df,
-            y="y",
-            x=["x1", "x2"],
-            entity="entity",
-            options=REOptions(cov_type=cov_type, variance_method=method),
-        ).fit()
+    options = REOptions(cov_type=cov_type, variance_method=method)
+    assert_unit_change_invariant(
+        lambda d: RE(
+            d, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
 def test_entity_count_equal_to_slope_count_plus_one_blocks_only_swamy_arora():
@@ -775,7 +784,7 @@ def test_entity_count_equal_to_slope_count_plus_one_blocks_only_swamy_arora():
             df,
             y="y",
             x=["x1", "x2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type="classical", variance_method=method),
         ).fit()
 
@@ -804,7 +813,11 @@ def test_singleton_entity_is_a_validation_error_for_every_method(method):
     df = _frame(case)
     kept = df.filter((pl.col("entity") != "e00") | (pl.col("time") == "t0"))
     with raises_error(
-        ErrorCode.SINGLETON_GROUP, argument="entity", group="e00"
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        data_argument="data",
+        column="entity",
+        group="e00",
     ):
         _fit(case, "classical", method, kept)
 
@@ -816,9 +829,10 @@ def test_two_way_unbalanced_panel_still_raises(method):
     with raises_error(
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
         n_obs=df.height,
-        n_entities=40,
-        n_periods=6,
-        expected_obs=240,
+        first_column=case.entity_col,
+        n_first_groups=40,
+        second_column=case.time_col,
+        n_second_groups=6,
     ):
         _fit(case, "classical", method, df)
 

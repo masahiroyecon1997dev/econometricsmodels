@@ -23,25 +23,31 @@ FE_DF_RESID_TWO_WAY = N - (2 + N_ENTITIES + N_PERIODS - 1)
 RE_DF_RESID = N - 3
 
 
-def fit_fe(df, *, two_way=False, **options):
-    """`y ~ x1 + x2`のFEを推定する。`two_way=True`で`time`を固定効果にも使う。"""
-    if two_way:
-        options["time"] = "time"
+def fit_fe(df, *, two_way=False, time_column="time", **options):
+    """`y ~ x1 + x2`のFEを推定する。
+
+    `two_way=True`で`time_column`（既定は`time`）を2つ目の効果にも使う。
+    """
+    effects = ["entity", time_column] if two_way else ["entity"]
     return FE(
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=effects,
         options=FEOptions(**options),
     ).fit()
 
 
-def fit_re(df, **options):
-    """`y ~ x1 + x2`のREを推定する。"""
+def fit_re(df, *, two_way=False, time_column="time", **options):
+    """`y ~ x1 + x2`のREを推定する。
+
+    `two_way=True`で`time_column`（既定は`time`）を2つ目の効果にも使う。
+    """
+    effects = ["entity", time_column] if two_way else ["entity"]
     return RE(
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=effects,
         options=REOptions(**options),
     ).fit()

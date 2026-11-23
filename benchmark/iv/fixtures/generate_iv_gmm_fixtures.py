@@ -51,6 +51,7 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.iv.constants import (
     CARD_REGION_COLUMN,
     CARD_X_EXOG,
@@ -505,5 +506,7 @@ def _run_cluster_case(
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures, BENCHMARKS_DIR / "iv_gmm.json", description=__doc__
+        lambda: strip_cov_params(build_fixtures()),
+        BENCHMARKS_DIR / "iv_gmm.json",
+        description=__doc__,
     )

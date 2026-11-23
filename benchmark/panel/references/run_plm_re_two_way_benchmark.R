@@ -211,6 +211,7 @@ library(jsonlite)
 result <- list(
   params = as.list(coefs),
   std_errors = as.list(ses),
+  cov_params = plm_cov_params(vc, names(coefs)),
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(

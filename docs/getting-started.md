@@ -4,11 +4,13 @@ econometricsmodels takes a polars DataFrame and column names, and returns a resu
 
 1. Create the model with the data, the column names and, optionally, an options object.
 2. Call `.fit()`. All validation happens here, and invalid input raises an error instead of being silently repaired.
-3. Read the result: attributes such as `params` and `std_errors`, or methods such as `predict()`.
+3. Read the result: print it for a quick look, or use attributes such as `params` and `std_errors`, or methods such as `predict()`.
 
 ```bash
 pip install econometricsmodels
 ```
+
+It needs Python 3.12 or later; polars (1.38.1 or later) is installed with it.
 
 ## A first regression: OLS
 
@@ -43,23 +45,39 @@ result = OLS(df, y="y", x=["x1"], options=options).fit()
 
 ## Reading the results
 
-Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
+Printing a result shows a header line (the dependent variable, the number of observations and the `cov_type`) and a short table of the coefficients and their standard errors. This is enough for a quick look in a terminal or notebook. It is not a `summary()`-style report, and its layout may change between versions, so in code read values from the attributes described below.
+
+```python
+print(result)
+```
+
+```text
+OLSResults(dep_var='y', n_obs=5, cov_type='hc1')
+       param  std_error
+const   0.14   0.135253
+x1      1.96  0.0444222
+```
+
+A result with more than ten coefficients (counting `const`, and `sigma` for Tobit) shows the first nine rows, a line such as `... (2 more)`, and the last row, so a final parameter such as Tobit's `sigma` is always visible.
+
+To use the values in code, read them from the result. Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
 
 ```python
 for row in result.params_table():
     print(row["param_name"], row["param"], row["std_error"], row["p_value"])
 ```
 
-Every method's results share these fields, so code that reads one result type works with the others:
+Every method's results share these fields (except where the table says otherwise), so code that reads one result type works with the others:
 
 | Field | Content |
 |---|---|
 | `params`, `std_errors`, `test_stats`, `p_values` | `dict` keyed by coefficient name |
 | `conf_int` | `dict` of `(lower, upper)` keyed by coefficient name |
+| `cov_params` | Covariance matrix of the coefficients under `cov_type`: a `dict` of `dict`s keyed by coefficient name on both axes (Tobit also has `"sigma"` as the last row and column) |
 | `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
 | `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
 | `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |
-| `log_likelihood`, `aic`, `bic` | Information criteria (every method except IV) |
+| `log_likelihood`, `aic`, `bic` | Log-likelihood and information criteria (every method except IV and FEIV) |
 
 The remaining fields depend on the method (for example `r_squared` for OLS, `lr_statistic` for Logit, `hausman_statistic` for RE). They are grouped by purpose at the top of each results class on the method's *Options and results* page.
 
@@ -68,24 +86,25 @@ The remaining fields depend on the method (for example `r_squared` for OLS, `lr_
 Moving to another model does not mean learning a new interface. A binary logistic regression uses the same arguments and the same result accessors; only the outcome (coded 0/1) and some extra methods differ.
 
 ```python
+import polars as pl
 from econometricsmodels import Logit
 
-df = pl.DataFrame(
+binary = pl.DataFrame(
     {
         "y": [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0],
         "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
     }
 )
 
-result = Logit(df, y="y", x=["x1"]).fit()
+logit_result = Logit(binary, y="y", x=["x1"]).fit()
 
-print(result.params)
-print(result.pseudo_r_squared)
-print(result.predict())  # fitted probabilities
-print(result.marginal_effects())  # dy/dx with delta-method standard errors
+print(logit_result.params)
+print(logit_result.pseudo_r_squared)
+print(logit_result.predict())  # fitted probabilities
+print(logit_result.marginal_effects())  # dy/dx with delta-method standard errors
 ```
 
-Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, and the panel models `FE` and `RE` take `entity`.
+Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE`, `FEIV` and `RE` take `effects`, a list of columns (the entity first, then the time period; `FE` and `FEIV` accept up to five, `RE` up to two); `FEIV` takes `x_exog`, `x_endog` and `instruments` as well. Columns that define the model are arguments; everything optional, including optional columns such as `cluster`, goes in the options object. [Arguments and options](guide/api-conventions.md) gives the rule and lists the arguments of every model.
 
 ## Handling errors
 
@@ -94,33 +113,34 @@ Invalid input or options (a missing column, missing values, ...) raise `Validati
 Both package exceptions carry a stable `code` and a `params` dictionary with the values behind the message, so a program can branch on them instead of parsing text:
 
 ```python
-from econometricsmodels import ComputationError, ErrorCode, ValidationError
+import polars as pl
+from econometricsmodels import OLS, ComputationError, ErrorCode, ValidationError
 
-try:
-    result = OLS(df, y="y", x=["x1", "x2"]).fit()
-except ValidationError as e:
-    print(e.code, e.params)  # e.g. COLUMN_NOT_FOUND {'column': 'x2', ...}
-    print("Input error:", e)  # message and hint
-except ComputationError as e:
-    if e.code == ErrorCode.DESIGN_MATRIX_SINGULAR:
-        print("Collinear columns:", e.params["columns"])
+data = pl.DataFrame(
+    {
+        "y": [2.1, 3.9, 6.2, 8.1, 9.8],
+        "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+        "x1_twice": [2.0, 4.0, 6.0, 8.0, 10.0],
+    }
+)
+
+for columns in (["x1", "x2"], ["x1", "x1_twice"]):
+    try:
+        OLS(data, y="y", x=columns).fit()
+    except ValidationError as e:
+        # "x2" does not exist: COLUMN_NOT_FOUND {'column': 'x2', ...}
+        print(e.code, e.params)
+        print("Input error:", e)  # message and hint
+    except ComputationError as e:
+        # "x1_twice" is a multiple of "x1": the design matrix is singular
+        if e.code == ErrorCode.DESIGN_MATRIX_SINGULAR:
+            print("Collinear columns:", e.params["columns"])
 ```
 
 Missing values are never dropped for you and collinear columns are never removed: see [Validation and errors](guide/validation.md#reading-an-error) for what an exception contains and why input is rejected rather than repaired, and [Error codes](guide/error-codes.md) for every `code`.
 
 ## Every method
 
-Each method has three pages: a short **usage** guide with examples, the **options and results** reference (what each option does and which fields a result has), and the **definitions** (the formulas, covariance types and test distributions).
+Each method has three pages: a short **usage** guide with examples, the **options and results** reference (what each option does and which fields a result has), and the **definitions** (the formulas, covariance types and test distributions). The [table of methods on the home page](index.md#supported-methods) says when to use each one and links to its pages.
 
-| Method | For | Usage | Options and results | Definitions |
-|---|---|---|---|---|
-| OLS | Linear regression | [Usage](usage/ols.md) | [Reference](api/ols.md) | [Definitions](methods/ols.md) |
-| WLS | Linear regression with weights | [Usage](usage/wls.md) | [Reference](api/wls.md) | [Definitions](methods/wls.md) |
-| Logit | Binary outcome (logistic) | [Usage](usage/logit.md) | [Reference](api/logit.md) | [Definitions](methods/logit.md) |
-| Probit | Binary outcome (normal) | [Usage](usage/probit.md) | [Reference](api/probit.md) | [Definitions](methods/probit.md) |
-| Tobit | Censored outcome | [Usage](usage/tobit.md) | [Reference](api/tobit.md) | [Definitions](methods/tobit.md) |
-| IV | Endogenous regressors (2SLS, GMM) | [Usage](usage/iv.md) | [Reference](api/iv.md) | [Definitions](methods/iv.md) |
-| FE | Panel data, fixed effects | [Usage](usage/fe.md) | [Reference](api/fe.md) | [Definitions](methods/fe.md) |
-| RE | Panel data, random effects | [Usage](usage/re.md) | [Reference](api/re.md) | [Definitions](methods/re.md) |
-
-The [Guides](guide/accepted-data.md) cover the data the estimators accept, validation and errors, and how the test distributions compare with other packages.
+The Guides cover [how arguments and options are named and placed](guide/api-conventions.md), the data the estimators accept ([Accepted data](guide/accepted-data.md)), validation and errors, how the test distributions compare with other packages, and how to [pickle and copy](guide/pickling.md) options and results. For categorical regressors, build the dummy columns explicitly; see [OLS: Categorical regressors](usage/ols.md#categorical-regressors-dummy-variables), which applies to every method.

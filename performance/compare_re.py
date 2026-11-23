@@ -163,7 +163,11 @@ def _fit_once_engine(ctx: FitContext):
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     return RE(
-        ctx.df, y=ctx.y_col, x=ctx.x_cols, entity=_ENTITY_COL, options=options
+        ctx.df,
+        y=ctx.y_col,
+        x=ctx.x_cols,
+        effects=[_ENTITY_COL],
+        options=options,
     ).fit()
 
 

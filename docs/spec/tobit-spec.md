@@ -1,7 +1,7 @@
 # Tobit 仕様書
 
-Tobit（打ち切り正規回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/tobit.rs`（共通基盤は
-`engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/tobit.rs`・
+Tobit（打ち切り正規回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/tobit.rs`（ファサード）と`tobit/`（入力・目的関数・標準化・限界効果と予測・`TobitFitted`・`fit`。共通基盤は
+`engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/tobit/`・
 `python_package/econometricsmodels/nonlinear/tobit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、検定分布＝標準正規分布、標準化の基本方針等）は
 [`logit-spec.md`](./logit-spec.md)・[`nonlinear-common.md`](./nonlinear-common.md)を参照し、
@@ -11,7 +11,7 @@ Logit/Probitとは尤度・予測量・内部パラメータ化が異なる。
 
 ## 1. API引数
 
-3層構成: `Tobit(data, y, x, options).fit() -> TobitResults`（python_package）→
+3層構成: `Tobit(data, y, x, options=options).fit() -> TobitResults`（python_package）→
 `fit_tobit(data, y, x, options) -> TobitResult`（engine_pybind）→ `TobitEstimator::fit`（engine、
 Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
@@ -28,12 +28,12 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - デフォルト（`lower=0.0, upper=None`）は標準的な左打ち切り0のTobit。右打ち切りのみにしたい場合は
   `lower=None`を明示的に渡す（Pythonのキーワード引数デフォルトと明示的`None`渡しの区別を利用）。
-- **打ち切り境界のバリデーション**（engine層 `TobitInput::from_columns`）:
+- **打ち切り境界のバリデーション**（engine層 `TobitInput::validate_censoring_bounds`。`from_columns`は次元だけを検証し、`fit()`が`confidence_level` → `max_iter` → `tol`の直後、観測数の前に呼ぶ。設定値の検査をデータに依る検査より先に行う順序を、他の手法と揃えるため）:
   - `lower`/`upper`が両方`None`は`CensoringBoundsMissing`、両方`Some`で`lower >= upper`は`CensoringBoundsNotOrdered`、NaN・無限大は`CensoringBoundNotFinite`
     （「境界設定自体が不正」、`ValidationError`）。
   - `y`の実測値が指定境界と矛盾する場合（`lower`指定時に`y < lower`の行、または`upper`指定時に
-    `y > upper`の行がある）は`YOutOfCensoringBounds { row, value }`（「境界設定は妥当だがデータと
-    矛盾」、`ValidationError`）。`InvalidBinaryY`と同型の「行番号＋値」パターン。
+    `y > upper`の行がある）は`YOutOfCensoringBounds { column, row, value, lower, upper }`（「境界設定は妥当だがデータと
+    矛盾」、`ValidationError`）。`InvalidBinaryY`と同型の「列名＋行番号＋値」パターン（`column`は`y`の列名。`report()`が`argument="y"`・`data_argument="data"`を足す）。
   - 検証は`fit()`冒頭のO(n)スキャン1回（非有限値チェックと同オーダー、Newton反復のO(n·k)に対して
     無視できる）。
 - **非識別データの検出**: `y`が`lower`/`upper`いずれの境界にも一致しない観測（厳密に内部の観測）が
@@ -99,7 +99,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   同じ符号、`scores()`は符号反転しない生のスコアを返す）。
 - Tobitの`(β, log σ)`尤度は**Hessianが不定符号になる領域を持つ**（Logit/Probitの大域凹な尤度とは
   異なる）。そこでは生のNewtonステップが降下方向ですらなくなるため、共有`FaerNewton`
-  （`nonlinear/common.rs`）にLevenberg-Marquardt型の減衰ステップ`regularized_newton_step`を追加した:
+  （`nonlinear/common/newton.rs`）にLevenberg-Marquardt型の減衰ステップ`regularized_newton_step`を追加した:
   `H + λI`で`cost`が減少する候補が見つかるまで`λ`を段階的に増やす。大域凹な問題では`λ=0`の生の
   ステップが最初の試行で受理される（収束点近傍で予測減少量がコストの分解能以下になった反復は、
   同じ生のステップをコスト比較なしで採る。[`nonlinear-common.md`](./nonlinear-common.md)1.2節）
@@ -107,13 +107,13 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 ### 3.2 最適化・収束判定・病理ケース
 
-- **初期値はOLS推定値**（打ち切りを無視した単純なOLSの`β`とその残差の標本標準偏差、
-  `ols_initial_params`）。ゼロベクトル初期値ではNewtonが`SingularHessian`で失敗するケースが
-  あったため。`ols_initial_params`のQRベースの階数検定が`solver`に関わらず最初に走るため、完全な
-  多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で検出される
-  （`solver`をparametrizeする必要が無い）。
-- **`TobitScaling`（`tobit.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
-  使う`common.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
+- **初期値はOLS推定値**（打ち切りを無視した単純なOLSの`β`とその残差の標本標準偏差。標準化した設計行列の
+  直交座標`Q`での`DesignCoordinates::initial_params`）。ゼロベクトル初期値ではNewtonが`SingularHessian`で
+  失敗するケースがあったため。最適化の前に`DesignCoordinates::new`のQR分解とランク判定が`solver`に
+  関わらず最初に走るため、完全な多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で
+  検出される（`solver`をparametrizeする必要が無い）。
+- **`TobitScaling`（`tobit/scaling.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
+  使う`common/standardize.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
   でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や（当時あった標準化パラメータの
   ノルムによる）分離ヒューリスティックが不安定になる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した
@@ -145,7 +145,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     コスト比較を省く（[`nonlinear-common.md`](./nonlinear-common.md)1.2節）ため、`n=10⁶`でも
     6反復・約1.3〜1.5秒で勾配基準により収束する。
   - **停滞収束判定（安全網）**: コスト比較でステップの良否を判定できなかったとき
-    （`RegularizedStep::NoProgress` / `BelowCostResolution`）、`common.rs`共有の`FaerNewton`は
+    （`RegularizedStep::NoProgress` / `BelowCostResolution`）、`common/newton.rs`共有の`FaerNewton`は
     次の3条件——(1) 生Newtonステップを1回進めても勾配ノルムが減らない（`≥0.9·前反復`）、
     (2) 勾配ノルムが収束目標近傍（`<10⁴·tol`）、(3) **コスト関数（負の対数尤度）のHessianが
     正定値**（`llt`成功＝内点最大の2階条件。`(β, logσ)`尤度は大域凹でなく鞍点でも可逆な
@@ -166,7 +166,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     正で最小約76）、この`SingularHessian`は`lbfgs`だけの挙動だった。今は全solverが未収束の結果を
     返す。初期点のHessianが正定値でない場合は`lbfgs`も従来の`γI`初期化に戻るので、そこでは
     凹でない領域に入る可能性が残る。
-    Rust（`tobit.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
+    Rust（`tobit/fit/tests/convergence.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
     とPython（`test_tobit_validation.py`の`test_truncated_point_returns_unconverged_result_for_every_solver`）
     で同じ入力に対して固定している。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
@@ -175,7 +175,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     使う。statsmodelsが`n`で正規化してから最適化するのに倣ったもの。詳細・実測値・小標本での
     精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節参照。
   - **`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`）**も
-    `run_solver`共通で、Tobitも同様に保護される（本件は実際に`nonlinear::tobit::tests::
+    `run_solver`共通で、Tobitも同様に保護される（本件は実際に`nonlinear::tobit::fit::tests::
     proptests`で発覚。devビルドで80分超のCPU時間を消費し続けるケースを実測で確認済み）。
     詳細は[`logit-spec.md`](./logit-spec.md)3.2節参照。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
@@ -203,8 +203,23 @@ Tobit固有の差分:
   両側から適用し、`β`-`σ`間の共分散も含めて`(β, σ)`空間へ変換する（対角成分＝`Var(σ)≈σ²·Var(log σ)`
   だけの変換に留めない。限界効果等での`cov_params`再利用を見据えた設計）。`std_errors()`等は
   `β∪{σ}`の`k+1`長ベクトル（`k`番目が`σ`）として公開する。
+- **`Q`の直交座標での最適化・共分散・全体Wald（ほぼ共線な傾き）**: 標準化した設計行列を`X̃ = QR`に分解し、
+  `Q`を約`√n`の2の冪倍した座標`b = (R/s)β̃`で最適化する（`tobit/coordinates.rs`の`DesignCoordinates`。
+  共通の設計・理由・受け入れ境界は[`orthogonal-coordinates.md`](./orthogonal-coordinates.md)3.2節・4.3節）。
+  `TobitProblem`は`x = sQ`を渡すだけで変更が無い。`cov_type`別の共分散は`cov_params_for_type`を
+  `Q`の座標の`H`・スコア（条件数が共線性に依らない）に適用し、`R⁻¹V_bR⁻ᵀ`（三角行列の後退代入）で
+  標準化空間`(β̃, logσ̃)`に戻して、上の`J·Cov·Jᵀ`で`(β, σ)`空間へ変換する。全体Waldは
+  `wald_chi2_test(b, V_b, k_constant, df_model)`で、`R`が上三角（先頭が切片、末尾が傾き）なので末尾の傾きの
+  統計量は`b_S'V_b,SS⁻¹b_S`、標準化は傾きを対角行列で変換するだけなので元のスケールの
+  `β_S'V_SS⁻¹β_S`と同じ値。`X`の座標で`H`を組んで`-H⁻¹`と`Ψ`をかけ合わせる式は、傾きの相関が
+  約`1 - 1e-11`以上で桁を失った（`hc0`で傾きの差`1e-5`の相対誤差が`9e-4`、`1e-6`で
+  `COEFFICIENT_COVARIANCE`）。**受け入れ境界**は他の手法と同じ（列を単位ノルムに揃えた設計の条件数
+  `5e7`で`DESIGN_GRAM`、`1e12`超・完全共線で列名つきの`DESIGN_MATRIX_SINGULAR`。`cov_type`によらない）。
+  **精度**: 再パラメータ化との相対差は傾きの差`1e-5`〜`5e-8`でWald・`σ`・`σ`のSEが`3.5e-10`以下、傾きの
+  係数・標準誤差が`2e-9`以下。同じ`H`・`S`の有理数の厳密値との差は`1e-8`未満（`coordinates.rs`の
+  単体テスト）。検証は`tests/cross_method/test_near_collinear_tobit.py`。
 - **`cov_type="opg"`が特異になるテストケースの構築**: Logit/Probitは`x`の完全な多重共線性でOPG行列を
-  特異にできるが、Tobitは`ols_initial_params`のQR階数検定が最適化前に走るため同じ手法が使えない。
+  特異にできるが、Tobitは`DesignCoordinates::new`のランク判定が最適化前に走るため同じ手法が使えない。
   実際に`SingularOpgMatrix`を踏むのは`n`が総パラメータ数`k+1`ぎりぎりの小標本での収束点の数値配置
   に依存するケースで、多重共線性とは無関係（実測ベースで検証）。
 
@@ -212,9 +227,9 @@ Tobit固有の差分:
 
 - `log_likelihood`はTobit固有（打ち切り状態で分岐する`Contribution::log_lik`の総和、元のスケールで
   評価）。`aic = -2·ℓ + 2(k+1)`、`bic = -2·ℓ + log(n)·(k+1)`（`σ`を含む総パラメータ数）。
-- **モデル全体の有意性検定はWald検定**（`wald_chi2_test`、Tobit専用で`tobit.rs`内に閉じる）。
-  OLSの`wald_f_test`と同型の構成（`ensure_well_conditioned_symmetric_matrix`による悪条件検出→
-  Cholesky分解→二次形式）だが、`F`分布ではなく**標準正規分布に基づくカイ二乗分布**を使う
+- **モデル全体の有意性検定はWald検定**（共有の`shared::wald::wald_chi2_test`）。
+  OLSの`wald_f_test`と二次形式（`wald_quadratic_form`: `cov_params`の対称化→`ensure_well_conditioned_symmetric_matrix`による悪条件検出→
+  Cholesky分解）を共有するが、`F`分布ではなく**標準正規分布に基づくカイ二乗分布**を使う
   （自由度で正規化する`F = W/df_model`の変換を行わない）。帰無仮説は「切片以外の係数が同時にゼロ」、
   自由度は`df_model = k - k_constant`。`df_model == 0`のときのみスキップ。
 - **`wald_statistic`は`cov_type`依存**: `fit()`が計算済みの`cov_params`（要求した`cov_type`の
@@ -224,9 +239,9 @@ Tobit固有の差分:
   `rank(Ŝ) ≤ G - 1`（クラスター寄与スコアの総和がゼロ）のため、`G <= q`だと`q×q`部分行列が
   数学的に常に特異になる。`G`・`q`は入力だけから判定できるため`fit()`冒頭の
   `InsufficientClustersForInference`（`ValidationError`）で弾く（OLS/WLS/Logit/Probit/Tobit/IV
-  横断で統一）。`G > q`でも傾き係数間の悪条件で`q×q`部分行列が数値的にほぼ特異になる
-  ケースは`wald_chi2_test`内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::NearSingularMatrix`、
-  `MATRIX_NEAR_SINGULAR`）が
+  横断で統一）。`G > q`でも傾き係数間の準多重共線性で`q×q`部分行列が単位を揃えても数値的にほぼ特異になる
+  ケースは`wald_quadratic_form`内の`ensure_well_conditioned_symmetric_matrix`（相関スケール化した行列に適用。
+  `CommonError::NearSingularMatrix`、`MATRIX_NEAR_SINGULAR`）が
   backstop。
 
 ### 3.5 限界効果
@@ -258,7 +273,7 @@ Tobit固有の差分:
 - 勾配: `∂ρ1/∂z_a = Pa(ρ1 - z_a)`・`∂ρ1/∂z_b = Pb(z_b - ρ1)`・`∂ρ2/∂z_a = Pa(1 - z_a² + ρ2)`・
   `∂ρ2/∂z_b = Pb(z_b² - 1 - ρ2)`から`w_a = ∂ρ2/∂z_a - 2ρ1∂ρ1/∂z_a`、`w_b`も同様に得て、
   `s_beta = -(w_a + w_b)/σ · x`、`s_sigma = -(z_a·w_a + z_b·w_b)/σ`。
-- **数値安定性**（実装は`engine/src/nonlinear/tobit.rs`の`truncation_pdf_ratios`・`uncensored_w_and_s`）:
+- **数値安定性**（実装は`engine/src/nonlinear/tobit/mills.rs`の`truncation_pdf_ratios`・`tobit/target.rs`の`uncensored_w_and_s`）:
   `W`で割るため、`μ`が境界から遠い観測（重い打ち切りの標本や外れた`x`で`z`が数十〜）で`W→0`になる。
   既存の3 targetは`W`で割らないので、この問題は新target固有。(1)`Pa`・`Pb`は`W`を作らずに直接計算する
   （片側は逆ミルズ比`λ(a)=φ(a)/Φ(-a)`、`a>=3`は連分数`a+1/(a+2/(a+3/(a+…)))`、`a<3`は`Φ(-a)`を
@@ -268,8 +283,9 @@ Tobit固有の差分:
   `w = 1 - Pa·A - Pb·B + 2·Pa·Pb`・`w_a = Pa[1 + z_a·A - z_b·Pb - 2ρ1(A - Pb)]`・
   `w_b = Pb[-1 + z_b·B - z_a·Pa - 2ρ1(B - Pa)]`で評価する。整理前の式は`z_a²`と`z_a·Pa`の
   引き算で絶対誤差が`ε·z³`になり、`z=72`の観測を含む実データ（`many_regressors`）で標準誤差が`1e-8`
-  ずれた。(3)`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`あり、`W`の逆数にかかるこの量では標準誤差へ
-  増幅されるため、`Φ(x)-1/2`を自前のテイラー級数・連分数で計算する。`w`は`[0,1]`にクランプする。
+  ずれた。(3)`W`の逆数にかかるこの量は`Φ`の誤差が標準誤差へ増幅される（`statrs`の`Normal::cdf`は絶対誤差が
+  約`1.4e-11`で、これが原因で`k=20`の標準誤差が`1e-8`ずれた。今の`Φ`は`libm::erfc`）ので、`W`の
+  裾の相対精度を保つため`Φ(x)-1/2`を自前のテイラー級数・連分数で計算する。`w`は`[0,1]`にクランプする。
 - **限界**: (a)遠い裾（`|z|≳1e3`）では`w`・`w_a`・`w_b`の相対精度が落ちる（絶対誤差は`ε`級で、
   `w≈1/z²`自体が無視できるため全観測の平均には影響しない）。(b)非打ち切り区間が`σ̂`に比べて
   狭いと`q-r·p`・`W`が桁落ちする。区間幅`δ=(upper-lower)/σ̂`に対して`w`の絶対誤差は約`ε/δ²`、
@@ -287,7 +303,7 @@ Tobit固有の差分:
 - 4対象とも`dydx_j = w(θ)·βⱼ`という同一の形（Logit/Probitと同じ骨格、`w`の中身のみ異なる）に帰着
   するため、`target_w_and_s`（`w`とその勾配`(s_beta, s_sigma)`を計算）→
   `marginal_effects_from_tobit_w_s`という2段構成で実装する。ただしパラメータ次元が`k`ではなく
-  `k+1`（`β∪{σ}`）である点が`common.rs`の`dydx_and_jacobian`と異なるため**Logit/Probitとは共有
+  `k+1`（`β∪{σ}`）である点が`common/marginal_effects.rs`の`dydx_and_jacobian`と異なるため**Logit/Probitとは共有
   せず独立実装する**（`w`/`s`の計算式そのものが共有できないため）。
 - デルタ法のヤコビアン（4対象共通）: `∂g_j/∂β_m = βⱼ·s_beta[m] + [j==m]·w`、`∂g_j/∂σ = βⱼ·s_sigma`。分散は
   `jac_j·cov_params·jac_j'`（`(k+1)`次元の二次形式）、標準誤差はその平方根、検定分布は標準正規分布。
@@ -335,7 +351,7 @@ Tobit固有の差分:
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /
   `"expected_observed"` / `"prob_uncensored"` / `"expected_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの
   慣習が無いためenum名との対応を優先）。パース関数`parse_marginal_effects_target`はTobit専用
-  （`tobit.rs`）。
+  （`engine_pybind/src/nonlinear/tobit/result.rs`）。
 
 ### 3.8 テスト
 
@@ -352,8 +368,9 @@ Tobit固有の差分:
     信頼区間・限界効果SEが ~1e-7〜3e-5 乖離するため`1e-4`（点推定・σ・対数尤度・限界効果dydx・
     予測値・打ち切り適合度は ~3e-9 で一致。engineと`survreg`は同データで ~3e-10 一致するため
     `censReg`側の収束限界であって本実装の問題ではない）。
-  - `solver="bfgs"/"lbfgs"`: `newton`と異なる最適化経路でリファレンス（solver非依存）から僅かに
-    ずれた点に収束するため全フィールドに緩めた`rtol_solver`を使う。`tobit_crosscheck`は`1e-7`
+  - `solver="bfgs"/"lbfgs"`: 勾配基準（`‖g‖ < tol·n`）で止まる点が、`newton`の解（リファレンスと
+    一致）から停止点の`|H⁻¹g|`だけずれるため、全フィールドに緩めた`rtol_solver`を使う
+    （機序は`docs/spec/nonlinear-common.md`1.3節「`bfgs`/`lbfgs`の返却点」）。`tobit_crosscheck`は`1e-7`
     （実測は変わらず）、主リファレンス`tobit_reference`は`2e-7`（`FaerLbfgs`導入後、
     `predict/expected_latent`の1点が実測1.055e-7で`1e-7`を超えたため）。
 - **`expected_uncensored`の第三者実装による照合**: `AER::tobit`・`censReg`にこの量のネイティブな
@@ -387,10 +404,10 @@ Tobit固有の差分:
   `heteroskedastic`＝`σ_i = exp(0.5·x1)`の乗法的不均一分散で Tobit MLE の等分散仮定に対する誤設定
   → ロバスト共分散 opg/hc0/hc1 と classical が乖離、点推定は擬似真値に一致）、悪条件
   （`small_n`、`moderate_multicollinearity`、`high_condition_number`、`scale_variance_mild`）。
-  `scale_variance`（比 1e6）・`perfect_multicollinearity`は`ComputationError`パス専用
-  （`scale_variance`は Tobit の全体 Wald 検定が傾き部分行列の反転を要求し全 cov_type で特異になる
-  ため成功パスにできず、`scale_variance_mild`（比 1e3）を数値リグレッション検知用の成功パスとする。
-  OLS の precedent に従う）。
+  `perfect_multicollinearity`は`ComputationError`パス専用、`scale_variance`（比 1e6）は参照実装との
+  数値比較の対象外（Tobit の全体 Wald 検定は相関スケール化した部分行列で判定するため失敗せず、
+  単位を揃えたデータと統計量が一致することを`test_tobit_validation.py`で確認する。
+  `scale_variance_mild`（比 1e3）を数値リグレッション検知用の成功パスとする。OLS の precedent に従う）。
 - **実データ**: Wooldridge `mroz`の`hours`（生スケール、左打ち切り約43%、Example 17.2）。非クラスターの
   4 cov_type で数値照合する。`TOBIT_MROZ_FORMULA`は RHS 7変数で`G=2 <= q=7`のためクラスターケース
   （`city`列）は`InsufficientClustersForInference`（`ValidationError`）になり成功パスを持たない。
@@ -398,8 +415,8 @@ Tobit固有の差分:
   newton用の全シナリオ×`cov_type`フィクスチャをそのまま使い、代表的な組み合わせ（`heavy_censoring`×
   classical/opg/hc0、`interval_censoring`×hc1、cluster・cluster_imbalanced）を全統計量で照合する
   （`rtol_solver_combination=2e-6`、実測最大~5e-7）。主リファレンスのみ`mroz`×classical/hc0も照合する
-  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~1e-6、推論`rtol_mroz_solver_inference=3e-4`・実測最大~1e-4）。`tol`を1e-10まで締めても`bfgs`/`lbfgs`はline searchの
-  停滞で打ち切られ`newton`との差が縮まない（`lbfgs`×hc0のSE系が最大）ため、許容誤差で受ける。
+  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~2e-7、推論`rtol_mroz_solver_inference=3e-4`・実測最大~2e-5）。差の機序は合成シナリオと同じ（勾配基準の停止点の`|H⁻¹g|`。
+  `nonlinear-common.md`1.3節）で、許容誤差で受ける（`lbfgs`×hc0のSE系が最大）。
   交差検証は`censReg`が`mroz`で`survreg`と~1e-4乖離するため`mroz`×`solver`を掛け合わせない。
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`
   引数（`survreg` / `censReg`）違いで構造が完全に同一のため、pytest本体は`_tobit_checks.py`に
@@ -440,6 +457,7 @@ Tobit固有の差分:
   （`tests/nonlinear/test_tobit_validation.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
   参照）。`score_s`（勾配）は今回のスコープ外（`U_CLAMP`領域でのcost/gradientの数学的非整合は
   別の既知の課題、[`probit-spec.md`](./probit-spec.md)4章参照）のため変更していない。
-- **`wald_chi2_test`とOLSの`wald_f_test`の重複**: 部分行列抽出→悪条件検出→Cholesky→二次形式の
-  構成が同型で、異なるのは検定分布（カイ二乗 vs F）のみ。現時点ではTobit1箇所のみの利用のため
-  共通化は見送り。IV等で3箇所目の重複が生まれる場合に二次形式計算のコア部分の共通化を検討する。
+- **`wald_chi2_test`とOLSの`wald_f_test`の共有**: 部分行列抽出→対称化→悪条件検出→Cholesky→
+  二次形式は`shared::wald::wald_quadratic_form`に一本化し、検定分布（カイ二乗 vs F）だけを分ける。
+  以前はTobit・IVが対称化の無い自前版を持っていたが、傾き係数が準共線のとき非対称の丸め誤差が
+  条件数倍に増幅されるため共有版へ寄せた（`iv/CLAUDE.md`「共分散・検定の共有範囲」）。

@@ -17,12 +17,12 @@ Logit/Probit 共通定義。
 
 from __future__ import annotations
 
-from statistics import NormalDist
-
 import _binary_choice_checks as _checks
 import pytest
 from _helpers import CASE_SPELLINGS
+from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions, ProbitResults
+from scipy.stats import norm
 
 from benchmark.nonlinear.constants import MLE_COV_TYPES, MLE_SOLVERS
 
@@ -134,7 +134,10 @@ def test_predict_new_data_returns_probabilities(binary_dataset):
 
 def test_predict_with_include_intercept_false_and_x_named_const():
     _checks.check_predict_with_include_intercept_false_and_x_named_const(
-        Probit, ProbitOptions, link=NormalDist().cdf
+        Probit,
+        ProbitOptions,
+        link=norm.cdf,
+        rtol=TOLERANCES["probit_api"]["rtol_predict_closed_form"],
     )
 
 

@@ -1,0 +1,158 @@
+{
+  "synthetic": {
+    "baseline": {
+      "hc1": {
+        "cragg_donald_f": 121.697232036364,
+        "rk_wald_f": 109.571960399844,
+        "effective_f": 109.239778695153
+      },
+      "cluster": {
+        "cragg_donald_f": 121.697232036364,
+        "rk_wald_f": 140.261857254877,
+        "effective_f": 97.326072752903
+      },
+      "cluster_imbalanced": {
+        "cragg_donald_f": 121.697232036364,
+        "rk_wald_f": 154.843240335061,
+        "effective_f": 109.973320112628
+      },
+      "cluster_g3": {
+        "cragg_donald_f": 121.697232036364,
+        "rk_wald_f": 33.9001573293949,
+        "effective_f": 57.4769924925142
+      }
+    },
+    "just_identified": {
+      "hc1": {
+        "cragg_donald_f": 79.6112046817082,
+        "rk_wald_f": 84.5448121280776,
+        "effective_f": 84.5448121280775
+      },
+      "cluster": {
+        "cragg_donald_f": 79.6112046817079,
+        "rk_wald_f": 49.611398348508,
+        "effective_f": 49.6113983485082
+      }
+    },
+    "weak_instruments": {
+      "hc1": {
+        "cragg_donald_f": 7.43341287224283,
+        "rk_wald_f": 6.72368674940781,
+        "effective_f": 6.67249668316914
+      },
+      "cluster": {
+        "cragg_donald_f": 7.43341287224283,
+        "rk_wald_f": 8.40111045143602,
+        "effective_f": 5.94479323728656
+      }
+    },
+    "small_n": {
+      "hc1": {
+        "cragg_donald_f": 3.64793545084784,
+        "rk_wald_f": 5.58530891125756,
+        "effective_f": 3.04840545789842
+      },
+      "cluster": {
+        "cragg_donald_f": 3.64793545084784,
+        "rk_wald_f": 4.09517080938694,
+        "effective_f": 2.21013849785823
+      }
+    },
+    "high_variance": {
+      "hc1": {
+        "cragg_donald_f": 108.940916162845,
+        "rk_wald_f": 94.7529559320182,
+        "effective_f": 95.7926240607394
+      }
+    },
+    "heteroskedastic": {
+      "hc1": {
+        "cragg_donald_f": 121.697232036364,
+        "rk_wald_f": 109.571960399844,
+        "effective_f": 109.239778695153
+      }
+    },
+    "autocorrelated": {
+      "hc1": {
+        "cragg_donald_f": 121.697232036364,
+        "rk_wald_f": 109.571960399844,
+        "effective_f": 109.239778695153
+      }
+    },
+    "moderate_multicollinearity": {
+      "hc1": {
+        "cragg_donald_f": 143.000116914637,
+        "rk_wald_f": 126.001624567491,
+        "effective_f": 143.141802192525
+      },
+      "cluster": {
+        "cragg_donald_f": 143.000116914637,
+        "rk_wald_f": 135.387041661526,
+        "effective_f": 122.445633823744
+      }
+    },
+    "high_condition_number": {
+      "hc1": {
+        "cragg_donald_f": 143.000116914637,
+        "rk_wald_f": 126.001624567491,
+        "effective_f": 143.141802192526
+      },
+      "cluster": {
+        "cragg_donald_f": 143.000116914637,
+        "rk_wald_f": 135.387041661527,
+        "effective_f": 122.445633823745
+      }
+    },
+    "scale_variance_mild": {
+      "hc1": {
+        "cragg_donald_f": 143.000116914637,
+        "rk_wald_f": 126.001624567491,
+        "effective_f": 143.141802192525
+      }
+    },
+    "invalid_instrument": {
+      "hc1": {
+        "cragg_donald_f": 258.535364653492,
+        "rk_wald_f": 234.959198245904,
+        "effective_f": 230.387400940634
+      }
+    },
+    "many_regressors": {
+      "hc1": {
+        "cragg_donald_f": 217.162898977773,
+        "rk_wald_f": 215.302778475692,
+        "effective_f": 213.045130630402
+      }
+    },
+    "outlier_regressor": {
+      "hc1": {
+        "cragg_donald_f": 82.6037213086833,
+        "rk_wald_f": 83.5707798709723,
+        "effective_f": 81.8075104406452
+      }
+    }
+  },
+  "wooldridge": {
+    "card": {
+      "hc1": {
+        "cragg_donald_f": 9.45268852707693,
+        "rk_wald_f": 9.71677075205604,
+        "effective_f": 9.64277213830984
+      },
+      "cluster": {
+        "cragg_donald_f": 9.45268852707693,
+        "rk_wald_f": 10.347717003657,
+        "effective_f": 7.20410347527742
+      }
+    }
+  },
+  "_meta": {
+    "method": "iv_weak_diagnostics",
+    "purpose": "linearmodels・MOPオラクルを主リファレンスとする弱操作変数診断（Cragg-Donald・Kleibergen-Paap・有効F）の、独立実装（R: ivDiag）によるクロスチェック用",
+    "generated_at": "2026-11-08T07:38:34.852757+00:00",
+    "r_version": "4.5.3",
+    "ivdiag_version": "1.0.8",
+    "lfe_version": "3.1.1",
+    "note": "内生変数が1個のケースだけ（ivDiagは複数の内生変数・rk LM・臨界値に対応しない）。標準誤差はhc1（robust）とcluster。cragg_donald_fはivDiagのF.standard（cov_typeに依存しない）、rk_wald_fはF.robust（hc1）またはF.cluster、effective_fはeff_F（prec=14。ivDiag()は有効Fを4桁に丸めるため別に呼ぶ）。clusterはbaselineの均等（cluster）・不均衡（cluster_imbalanced）、悪条件のシナリオ、cardの居住地域（9グループ）。"
+  }
+}

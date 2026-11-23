@@ -8,6 +8,8 @@ Every estimator raises one of three kinds of exception when it cannot run. [Vali
 | `ComputationError` | `RuntimeError` | The inputs are acceptable, but a numerical routine fails. |
 | `TypeError` (built-in) | `Exception` | An argument has the wrong type. It has no `code`. |
 
+`ErrorCode` is a `StrEnum` whose members are the stable `code` values: `ErrorCode.COLUMN_NOT_FOUND == "COLUMN_NOT_FOUND"`, so a `code` can be compared with a member or with the plain string.
+
 ::: econometricsmodels.ValidationError
 
 ::: econometricsmodels.ComputationError

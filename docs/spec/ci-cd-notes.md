@@ -26,15 +26,19 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     ライセンス一覧が`Cargo.lock`に追随していることの保証。MIT/Apache-2.0は配布時に著作権表示・
     ライセンス文の同梱を求めるため）。`cargo-about`はバージョン固定で、`.devcontainer/Dockerfile`の
     `ARG CARGO_ABOUT_VERSION`と`tool: cargo-about@<版>`を揃える（`cargo-audit`と同様）。
+    devcontainerでは、`cargo-about`のバイナリが`cli`フィーチャー必須（default featureなし）のため、
+    他のツールとは別の`RUN`で`--features cli`を付けて入れる。`--features cli`が無いと、警告だけで
+    バイナリが入らないままイメージができてしまう。そのためDockerfileの末尾で3ツールとも`--version`を
+    実行し、欠けていればビルドを失敗させる（CIは`taiki-e/install-action`のビルド済みバイナリなので影響しない）。
     失敗時はローカルで同じコマンドを実行して差分をコミットする。リリース時の再生成は`/release`の手順に含む。
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
   トリガー。`engine/**`は含めない）:
   - `test`ジョブ（Python 3.12/3.13/3.14マトリクス）: `uv sync --locked --group test` →
-    `uv run maturin develop` → **import時間チェック** → `pytest tests` → `ruff check .` →
+    `uv run maturin develop` → **import時間チェック** → `pytest tests --check-error-coverage --check-cov-coverage --check-no-skips`（スキップ・xfailが1件でもあれば失敗。`.claude/rules/testing-policy.md`「テストをスキップしない」）→ `ruff check .` →
     `ruff format --check .`。Python 3.12のジョブだけ、最後に`polars==1.38.1`（`pyproject.toml`の
     `polars>=`の下限と同じ版。変えるときは両方と`docs/guide/verification.md`の表を揃える）を
-    `uv pip install`で入れ替えて`pytest tests`をもう一度回す（サポートする最古のpolarsの確認。
+    `uv pip install`で入れ替えて`pytest tests --check-no-skips`をもう一度回す（サポートする最古のpolarsの確認。
     拡張はPython側polarsの版に依存しないのでビルドは再利用する。`uv.lock`の環境を書き換える
     ため最後に置く）。下限を決めた根拠は、1.27以下は動かず、1.28〜1.31はEnum型の時点列が静かに
     別の値になり、1.32〜1.37はFloat16を読めないこと（1.38.1で全テストが通る）。
@@ -69,7 +73,11 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 - **`cd_docs.yml`**: mkdocsドキュメントのGitHub Pagesへの自動デプロイ。
 - **`dependabot.yml`**（`cargo`・`uv`・`github-actions`・`docker`・`devcontainers`の5エコシステム。
   `docker`は`.devcontainer/Dockerfile`のベースイメージ、`devcontainers`は`devcontainer.json`の
-  featureと`devcontainer-lock.json`が対象）: `"pip"`ではなく
+  featureと`devcontainer-lock.json`が対象）。`docker`が追跡するのは`FROM`行のみ
+  （dependabot-coreの`docker/file_parser.rb`・`file_updater.rb`は`^FROM`にしか一致しない）で、
+  `COPY --from=<image>:<版>@sha256:...`への直書きは更新されない。uvの公式イメージは
+  そのため`FROM ghcr.io/astral-sh/uv:<版>@sha256:... AS uv`のステージとして先頭に宣言し、
+  `COPY --from=uv`で参照している（直書きに戻さないこと）。Python依存は`"pip"`ではなく
   **`"uv"`エコシステム**を採用（uv専用の`package-ecosystem`。`test`/`benchmark`/`dev`/`docs`
   全依存グループが更新対象になる）。`cargo audit`/`pip-audit`（CI実行時点のロックファイル検証）と
   Dependabot（レジストリの継続監視・PR自動生成）は補完関係で、統合・置き換えはしない。
@@ -80,7 +88,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     `-`と`.`を同値に扱う（Rの規則。`0.6.8`＝`0.6-8`）。
   - R本体: APT（`bookworm-cran40`）の索引に最新版しか載らず、版を固定できない。そのため
     基準を「フィクスチャJSONの`_meta.r_version`の最大値（凍結値の生成に使ったR）」とし、
-    APT索引の`r-base`最新版と比較する。
+    APT索引の`r-base`最新版と比較する。`_meta.r_version`は生成スクリプトにより書式が混在する
+    （`getRversion()`由来の`4.5.3`と`R.version.string`由来の`R version 4.5.3 (2026-03-11)`）
+    ため、比較前に正規表現で版番号だけを取り出す（日付まで数値として読むと、同じ版が別の版と
+    判定され、更新が無いのに毎週Issueが起票される）。
   - 更新があれば固定タイトルのIssue（`dependencies`/`setup`/`testing`ラベル）を自動起票し、
     未クローズの同名Issueがあれば本文を更新する。すべて最新になれば自動クローズする。
     Dependabotの`cooldown`相当の待機は設けていない（通知のみで、更新は人が判断するため）。
@@ -104,6 +115,13 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   - 更新時の手順: DockerfileのARGを上げる（`cargo-audit`は`ci_engine.yml`の`tool:`も同じ版に）
     → devcontainer再構築 → `cargo audit`再実行（`cargo-llvm-cov`/`cargo-about`が対象なら
     `cargo llvm-cov -p engine`等で動作確認）。
+  - **Rustツールチェーン**も同じワークフローで確認する。リポジトリ直下の`rust-toolchain.toml`の
+    `channel`（CIの`setup-rust-toolchain`とローカルのrustupが読む）を公式の最新stable
+    （`static.rust-lang.org`の`channel-rust-stable.toml`）と比べ、DockerfileのARG `RUST_VERSION`
+    との食い違いも報告する。`channel`は版の固定（`stable`等の名前は不可。スクリプトが異常終了する）。
+    stableは約6週ごとに更新されるので、通知のたびに上げる必要はない（上げるときは新しいclippyの
+    指摘が出うるため、`cargo clippy -p engine --all-targets -- -D warnings`と`cargo test -p engine`を
+    確認する）。更新時は`rust-toolchain.toml`とDockerfileの`RUST_VERSION`を同じ値にする。
 - **`benchmark_performance.yml`**: `performance/compare_<method>.py`（手法非依存の
   計測ハーネス `performance/_perf_harness.py`＋手法固有アダプタ）を手法ごとの
   matrixジョブ（`method: [ols, wls, ...]`、`fail-fast: false`）で定期実行
@@ -114,17 +132,29 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   手動でのローカル実測サマリーは `docs/performance/<method>.md`に記録する
   （生成JSONは`docs/performance/results/`、`.gitignore`対象）。
 - 全ワークフローでアクションをコミットSHAで固定する（サプライチェーン攻撃対策）。
-  例外は`pypa/gh-action-pypi-publish`のみ（`cd_release.yml`のコメント参照）。そのため
-  リポジトリ設定の「Require actions to be pinned to a full-length commit SHA」は有効にできない
-  （有効にするとPyPI公開ジョブが失敗する）。
+  `pypa/gh-action-pypi-publish`はDockerコンテナactionで、`uses:`のrefをそのままGHCRの
+  イメージタグに使う実装のため、SHAで固定できるのは「リリースのコミットSHAと同名の
+  イメージタグが公開されている版」（v1.13.0以降で確認）に限られる。tagオブジェクトの
+  SHAではなくコミットSHAを使う。版を上げるときは、GHCRに同名のタグがあることを確認する
+  （無いと公開ジョブが`manifest unknown`で失敗する）。SHA指定でイメージの取得とコンテナの
+  起動まで進むことは、公開しない一時的なworkflowで確認済み。したがって
+  リポジトリ設定の「Require actions to be pinned to a full-length commit SHA」を有効にできる。
 - 全`actions/checkout`に`persist-credentials: false`を付ける（以降のステップから`.git/config`経由で
   `GITHUB_TOKEN`を読ませない。gitのpush等を行うワークフローは無い）。`run:`には`${{ }}`を
   直接埋め込まず、外部から決まりうる値（タグ名等）は`env`経由で渡す（`cd_release.yml`）。
-- ワークフローの静的解析にはzizmorが使える（ローカルでは
-  `uv run --no-project --with zizmor==<版> zizmor --offline .github/workflows`。
-  `GITHUB_TOKEN`/`GH_TOKEN`が空文字で定義されているとエラーになるため`env -u`で外す）。
-  CIには組み込んでいない。既定のpersonaで残る指摘は、上記の`pypi-publish`の例外と、
-  `benchmark_performance.yml`のキャッシュ（`cache-poisoning`、信頼度Low）のみ。
+- ワークフローの静的解析にzizmorを使う。CIは`ci_workflows.yml`（`.github/**`に触れるPRと
+  週1回の定期実行。公式の`zizmorcore/zizmor-action`をSHA固定で使い、zizmor本体の版も
+  `version`で固定。オンライン監査あり）。必須ステータスチェックには入れない（pathsフィルタが
+  あるため）。`advanced-security`（SARIFをSecurityタブへ送る方式）は、送信にsecurity-events
+  書き込みが要りDependabotのPRで失敗するため使わず、annotationsでPR上に出す。指摘があれば
+  ジョブは失敗する。zizmor本体の版はDependabotの対象外なので、上げるときは手動で上げる
+  （`zizmor-action`のSHA自体はDependabotが更新する）。
+  設定は`.github/zizmor.yml`で、除外は理由とセットで書く。除外中は
+  `benchmark_performance.yml`の`cache-poisoning`（信頼度Low）のみ: 公開物を生成せず権限も
+  `contents: read`だけで、キャッシュを切るとmatrix全ジョブがengineをフルビルドするため。
+  ローカルでは`uv run --no-project --with zizmor==<版> zizmor --offline .github`
+  （`GITHUB_TOKEN`/`GH_TOKEN`が空文字で定義されているとエラーになるため`env -u`で外す。
+  `--offline`を外し`GH_TOKEN`を渡すとCIと同じオンライン監査になる）。
 
 ## パッケージ健全性メトリクス（import時間・インストール容量）
 
@@ -170,6 +200,15 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 - **`paste`（RUSTSEC-2024-0436、unmaintained）**: 経路は`faer → gemm/pulp`と`argmin`の2系統。
   proc-macroとして**実際にビルドされる**が、コンパイル時のみで実行時には含まれない。
   `faer`・`argmin`の両方が`paste`を外すまで解消できない。
+- **`zstd`系（`zstd`のRUSTSEC-2026-0391、`zstd-safe`の0398/0403、`zstd-sys`の0410）**: 経路は
+  `polars-arrow`のオプション依存。`cargo tree --target all -e normal,build,dev -i zstd`が
+  空で、リンク対象にも現れないため**実際にはビルドされない**。修正版（zstd 0.14系・zstd-safe 8系）は
+  `polars-arrow`が要求する0.13系の範囲外で、`polars`の新版待ち。同じ`zstd-safe`の`unsound`警告は
+  `cargo audit`が許可済みの警告として扱うため、失敗の原因にならずignore listにも登録していない。
+  **Dependabotが検知・修正PRを出せない理由**: security updateはGitHub Advisory Databaseの
+  アドバイザリを起点にするが、これらはRustSec DBにのみ存在した（`/advisories?ecosystem=rust`に
+  zstd系が無いことを確認）。`cargo audit`はRustSec DBを直接読むため差が出る。仮にアラートが出ても、
+  修正版が親クレートの要求範囲外なので更新PRは作れない。version updateは直接依存のみが対象。
 - **`event-listener`（RUSTSEC-2026-0221、unsound）**: 経路は`polars-lazy → polars-stream → async-channel`
   （ビルドされない）。パッチ版5.4.2へ`Cargo.lock`を更新して解消済みのため、ignore listには登録しない。
 

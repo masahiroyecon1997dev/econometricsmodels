@@ -1,3 +1,8 @@
+# uvのバイナリ取得元。Dependabot(docker)は`FROM`行しか解析せず、`COPY --from=<image>`に
+# 直接書いた参照は追跡されないため、`FROM ... AS uv`のステージとして宣言し、
+# 下の`COPY --from=uv`で参照する。版とダイジェストの更新はDependabot(docker)が行う。
+FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+
 # ベースイメージはタグだけでなくダイジェストでも固定する(同じタグの中身が差し替わっても
 # 検知できる)。ダイジェストの更新はDependabot(docker)が行う。
 FROM python:3.14-slim-bookworm@sha256:945c2676dc2b18e0c1f16879244122c57c0ffede60006bf3df159c507a31bcae
@@ -94,6 +99,9 @@ RUN apt update && apt install -y --no-install-recommends \
 # （testing-policy.md「リファレンス実装」）ために追加。
 # momentfit はIV-GMMの独立実装によるクロスチェック（ivregはGMM非対応）。sandwichに依存する
 # ため、最終ピン留めの前にupgrade="never"で導入する。
+# ivDiag はIVの弱操作変数診断（Cragg-Donald・Kleibergen-Paap・有効F）の独立クロスチェック。
+# lfe等を引き込むため、同じく最終ピン留めの前にupgrade="never"で導入し、直後に
+# library(ivDiag)で実際に読み込めること（導入の失敗が見かけ上成功扱いにならないこと）を確かめる。
 # maxLik（censRegの依存先、Tobit交差検証の最適化エンジン）は、censRegが依存として引き込む
 # バージョンが導入時期で変わる（フィクスチャ記録では1.5.2.2→1.6.10）ため、censRegより前に
 # 明示的にピン留めする。
@@ -108,6 +116,8 @@ RUN Rscript -e 'install.packages("remotes", repos = "https://cloud.r-project.org
     && Rscript -e 'remotes::install_version("AER", version = "1.2-17", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("censReg", version = "0.5-40", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("momentfit", version = "1.0", upgrade = "never", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("ivDiag", version = "1.0.8", upgrade = "never", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'library(ivDiag)' \
     && Rscript -e 'remotes::install_version("sandwich", version = "3.1.3", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("lmtest", version = "0.9.40", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'install.packages("languageserver", repos = "https://cloud.r-project.org")'
@@ -127,11 +137,12 @@ RUN mkdir -p ${R_LIBS_USER}
 
 # -------------------------
 # Rust インストール
-# ツールチェーンのバージョンを固定する(CIは`setup-rust-toolchain`でstableを使うため、
-# 数バージョン先で差が出うる。上げるときはここだけ手動で上げる)。rustupのブートストラップ
+# ツールチェーンのバージョンを固定する。CIとローカルが同じ版を使うよう、リポジトリ直下の
+# `rust-toolchain.toml`の`channel`と同じ値にする(上げるときは両方を手動で上げる。食い違うと
+# コンテナ内のrustupが`rust-toolchain.toml`の版を追加で入れる)。rustupのブートストラップ
 # 自体は公式のインストーラを`curl | sh`で実行する(HTTPS・TLS1.2以上)。
 # -------------------------
-ARG RUST_VERSION=1.99.0
+ARG RUST_VERSION=1.100.0
 ENV RUSTUP_HOME=/home/${USERNAME}/.rustup
 ENV CARGO_HOME=/home/${USERNAME}/.cargo
 
@@ -156,16 +167,28 @@ ARG CARGO_LLVM_COV_VERSION=0.9.1
 
 RUN cargo install --locked \
         cargo-audit@${CARGO_AUDIT_VERSION} \
-        cargo-about@${CARGO_ABOUT_VERSION} \
         cargo-llvm-cov@${CARGO_LLVM_COV_VERSION}
+
+# cargo-aboutはdefault featureを持たず、バイナリは`cli`フィーチャーが必須
+# （`required-features = ["cli"]`）。`--features cli`を付けないとバイナリが無いまま
+# 警告だけでインストールが終わるため、上の行とは分けて`--features cli`を付ける
+# （まとめると、featureを持たない他のcrateにも`--features cli`が掛かってしまう）。
+RUN cargo install --locked cargo-about@${CARGO_ABOUT_VERSION} --features cli
+
+# 必要なサブコマンドが実際に使えることをビルド時に確認し、欠けていればイメージのビルドを失敗させる
+# （リリース準備で`cargo about generate`等を実行するまで気づかない事態を防ぐ）。
+RUN cargo audit --version \
+    && cargo about --version \
+    && cargo llvm-cov --version
 
 # -------------------------
 # uv (Python パッケージ管理)
 # `curl | sh`ではなく、版とダイジェストを固定した公式イメージからバイナリをコピーする
 # (`uvx`は使わない方針だが、uvのイメージには同梱されるため一緒にコピーされる)。
-# バージョンとダイジェストの更新はDependabot(docker)が行う。
+# バージョンとダイジェストはファイル先頭の`FROM ... AS uv`で固定している
+# (更新はDependabot(docker)が行う)。
 # -------------------------
-COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /uvx /usr/local/bin/
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 

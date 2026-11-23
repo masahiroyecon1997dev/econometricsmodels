@@ -12,7 +12,6 @@ allowed-tools: Read, Grep, Glob, Bash(git status:*), Bash(git log:*), Bash(gh is
 
 このスキルは**候補の発見・提示・Issue起票**までを担当し、**コードは一切変更しない**
 （承認後のGitHub Issue起票・コメント追記のみ例外）。適用は`.claude/skills/refactor`に委ねる。
-コード解説の過程で気づいた候補を起票する場合も、このスキルの手順に従う。
 
 ## 対象
 

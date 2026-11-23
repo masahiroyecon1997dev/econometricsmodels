@@ -11,6 +11,9 @@ import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import (
+    EXTENSION_DTYPES,
+    NESTED_LOOKALIKE_DTYPES,
+    NESTED_UINT128_DTYPES,
     UNUSED_COLUMN_DTYPES,
     N,
     dtype_id,
@@ -21,11 +24,13 @@ from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     Logit,
     LogitOptions,
@@ -51,8 +56,20 @@ FITS = {
     "Probit": lambda d: Probit(d, "y01", ["x1"]).fit(),
     "Tobit": lambda d: Tobit(d, "yc", ["x1"]).fit(),
     "IV": lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "z2"]).fit(),
-    "FE": lambda d: FE(d, "y", ["x1"], "entity").fit(),
-    "RE": lambda d: RE(d, "y", ["x1"], "entity").fit(),
+    "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
+    "FEIV": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    ).fit(),
+    "FEIV_GMM": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(estimator="gmm"),
+    ).fit(),
+    "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
 
 
@@ -220,7 +237,7 @@ def _new_data() -> pl.DataFrame:
 
 
 def _call(result, path: str, new_data):
-    return getattr(result, path)(new_data)
+    return getattr(result, path)(new_data=new_data)
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -332,27 +349,23 @@ def test_new_data_accepts_boolean_and_dummy_columns(
 @pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("method", list(NEW_DATA_METHODS))
 @pytest.mark.parametrize(
-    "dtype",
+    ("dtype", "label"),
     [
-        pl.Date,
-        pl.Datetime,
-        pl.Struct({"a": pl.Int64}),
-        pl.Categorical,
-        pl.UInt128,
-        pl.List(pl.UInt128),
+        (pl.Date, "Date"),
+        (pl.Datetime, "Datetime"),
+        (pl.Struct({"a": pl.Int64}), "Struct"),
+        (pl.Categorical, "Categorical"),
+        (pl.Enum(["UInt128", "b"]), "Enum"),
+        (pl.UInt128, "UInt128"),
+        *NESTED_UINT128_DTYPES,
+        *NESTED_LOOKALIKE_DTYPES,
+        *EXTENSION_DTYPES,
     ],
-    ids=str,
+    ids=lambda v: str(v) if not isinstance(v, str) else None,
 )
-def test_new_data_rejects_non_numeric_dtype(frame, method, path, dtype):
+def test_new_data_rejects_non_numeric_dtype(frame, method, path, dtype, label):
     result = NEW_DATA_METHODS[method](frame)
     new = _new_data().with_columns(unused_column(dtype).head(3).alias("x1"))
-    label = {
-        "Date": "Date",
-        "Datetime": "Datetime",
-        "Categorical": "Categorical",
-        "UInt128": "UInt128",
-        "List(UInt128)": "List",
-    }.get(str(dtype), "Struct")
 
     with raises_error(
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
@@ -400,7 +413,7 @@ def test_augment_keeps_an_uint128_column_that_the_model_does_not_read(
     result = NEW_DATA_METHODS[method](data)
 
     from_training = result.augment()
-    from_new = result.augment(_new_data().with_columns(extra.head(3)))
+    from_new = result.augment(new_data=_new_data().with_columns(extra.head(3)))
 
     assert from_training["extra"].dtype == pl.UInt128
     assert from_training["extra"].equals(data["extra"])
@@ -415,7 +428,9 @@ def test_augment_of_the_estimation_data_keeps_unused_columns(frame, method):
     rng = np.random.default_rng(0)
     extra = pl.Series("extra", rng.integers(0, 100, N), dtype=pl.Int64)
 
-    augmented = result.augment(frame.with_columns(extra.cast(pl.Int8)))
+    augmented = result.augment(
+        new_data=frame.with_columns(extra.cast(pl.Int8))
+    )
 
     assert augmented["extra"].dtype == pl.Int8
 
@@ -529,7 +544,7 @@ def test_ols_diagnostics_are_not_changed_by_editing_the_data_in_place(frame):
     data = _with_uint128(frame)
     result = OLS(data, "y", ["x1", "x2"]).fit()
     white = result.white_test().statistic
-    breusch_pagan = result.breusch_pagan_test(["x2"]).statistic
+    breusch_pagan = result.breusch_pagan_test(variables=["x2"]).statistic
 
     data.replace_column(
         data.get_column_index("x2"), pl.Series("x2", [1.0] * N)
@@ -537,7 +552,9 @@ def test_ols_diagnostics_are_not_changed_by_editing_the_data_in_place(frame):
     data.drop_in_place("x1")
 
     assert result.white_test().statistic == white
-    assert result.breusch_pagan_test(["x2"]).statistic == breusch_pagan
+    assert (
+        result.breusch_pagan_test(variables=["x2"]).statistic == breusch_pagan
+    )
 
 
 # ── OLSの診断検定と取り込めないdtype ─────────────────────────────────
@@ -550,8 +567,8 @@ def test_ols_diagnostics_ignore_an_unused_uint128_column(frame):
 
     assert result.white_test().statistic == plain.white_test().statistic
     assert (
-        result.breusch_pagan_test(["z"]).statistic
-        == plain.breusch_pagan_test(["z"]).statistic
+        result.breusch_pagan_test(variables=["z"]).statistic
+        == plain.breusch_pagan_test(variables=["z"]).statistic
     )
     assert (
         result.breusch_godfrey_test("tt", 2).statistic
@@ -569,7 +586,7 @@ def test_breusch_pagan_variables_naming_an_uint128_column_are_rejected(frame):
         argument="variables",
         data_argument="data",
     ):
-        result.breusch_pagan_test(["z", "u"])
+        result.breusch_pagan_test(variables=["z", "u"])
 
 
 def test_breusch_godfrey_time_naming_an_uint128_column_is_rejected(frame):
@@ -589,7 +606,7 @@ def test_breusch_godfrey_time_naming_an_uint128_column_is_rejected(frame):
 
 
 def test_option_columns_are_read_when_an_unreadable_column_is_present(frame):
-    """`cluster`・`hac_time`・`time`・`dk_time`が指名されると読まれ、無関係の`UInt128`列は
+    """`cluster`・`hac_time`・`effects`・`dk_time`が指名されると読まれ、無関係の`UInt128`列は
     読まれない（結果は`UInt128`列が無いときと同じ）。"""
     data = _with_uint128(frame)
     cases = {
@@ -606,11 +623,11 @@ def test_option_columns_are_read_when_an_unreadable_column_is_present(frame):
             d,
             "y",
             ["x1"],
-            "entity",
+            ["entity"],
             options=FEOptions(cov_type="dk", dk_time="t"),
         ).fit(),
         "re-twoway": lambda d: RE(
-            d, "y", ["x1"], "entity", options=REOptions(time="t")
+            d, "y", ["x1"], ["entity", "t"], options=REOptions()
         ).fit(),
         "logit-cluster": lambda d: Logit(
             d,

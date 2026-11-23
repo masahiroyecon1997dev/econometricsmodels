@@ -9,7 +9,7 @@
 # （classical/hc0〜hc3/cluster/hac）ごとにvcov/sandwichで計算する。hc2/hc3は
 # `vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`のtype="stage2"、
 # 第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
-# （engine/src/iv/two_sls.rsのhc_cov_params、X̂ベースのレバレッジ）と数値一致することを
+# （engine/src/iv/two_sls/cov.rsのhc_cov_params、X̂ベースのレバレッジ）と数値一致することを
 # 実機確認済み（iv-spec.md 3.1節。旧記述「ivreg側に確立した参照実装が無い」は
 # `ivreg`がdevcontainerにインストールできなかった時期（CLAUDE.md 10章）の調査に
 # 基づく誤りだった）。
@@ -126,6 +126,16 @@ ses <- inference$ses
 test_stats <- inference$test_stats
 p_values <- inference$p_values
 
+# 係数の分散共分散行列（標準誤差の元になった`vc`そのもの）を`{行: {列: 値}}`で出す。
+# 行・列の名前は係数名に揃える。
+cov_names <- names(coefs)
+cov_params <- setNames(
+  lapply(seq_along(cov_names), function(i) {
+    setNames(as.list(as.numeric(vc[i, ])), cov_names)
+  }),
+  cov_names
+)
+
 # 信頼区間（既定confidence_level=0.95固定、../../linear/references/run_lm_crosscheck.Rと同じ
 # 手計算方式。baseのconfint(model)はclassicalのvcovしか使わないため使えない）。
 crit <- qt(0.975, df_inference)
@@ -207,6 +217,7 @@ if (is.null(diag_table_wu)) {
 result <- list(
   params = as.list(coefs),
   std_errors = as.list(ses),
+  cov_params = cov_params,
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(

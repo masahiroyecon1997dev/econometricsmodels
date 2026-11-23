@@ -45,9 +45,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -78,8 +78,12 @@ jobs:
 
       # --check-error-coverage: 全体実行の終了時に、移行済みのエラー`code`が
       # すべて一度はテストで送出されたこと（tests/support/_errors.py）を確認する。
+      # --check-cov-coverage: 全体実行の終了時に、読み込んだ係数の分散共分散行列の
+      # フィクスチャが、すべて一度はテストで比較されたこと（tests/support/_fixture_cov.py）を確認する。
+      # --check-no-skips: スキップ・xfailになったテストが1件でもあれば失敗にする
+      # （テストはスキップしない方針。.claude/rules/testing-policy.md）。
       - name: pytest
-        run: uv run --locked --group test pytest tests --check-error-coverage
+        run: uv run --locked --group test pytest tests --check-error-coverage --check-cov-coverage --check-no-skips
 
       - name: ruff check
         run: uv run --locked --group test ruff check .
@@ -97,7 +101,7 @@ jobs:
         run: |
           uv pip install polars==1.38.1
           uv run --no-sync python -c "import polars; assert polars.__version__ == '1.38.1', polars.__version__"
-          uv run --no-sync pytest tests
+          uv run --no-sync pytest tests --check-no-skips
 
   engine_pybind-lint:
     name: cargo test / clippy / fmt (engine_pybind)
@@ -108,14 +112,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           components: clippy, rustfmt
 
       # engine_pybindはci_engine.yml（-p engineのみ対象）の対象外のため、ここで担当する。
-      # pyo3のビルドスクリプトはリンク済みのPython3を必要とするが、
-      # abi3等のバージョン限定cfgを使っていないため、ubuntu-latestランナーに元から
-      # 入っているpython3で十分（マトリクス化は不要）。
+      # pyo3のビルドスクリプトはリンク可能なlibpythonを必要とするが、
+      # abi3等のバージョン限定cfgを使っていないため、どの版でも足りる
+      # （検証はtestジョブのマトリクスが担うので、このジョブのマトリクス化は不要）。
+      # ランナー標準のpython3には頼らない: ubuntu-latestが26.04になった際、
+      # pyo3が選んだpython3.12のlibpythonが見つからずリンクに失敗した。
+      # 版はtestジョブのマトリクスの最大値に合わせる（新しいPythonをマトリクスに
+      # 足すとき、ここも同時に上げる）。「>=3.12」等の範囲指定は、pyo3が未対応の
+      # 新版が出た時点でこのジョブだけ予告なく落ちるため使わない。
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
       #
       # cargo test: `crate-type = ["cdylib", "rlib"]`・`pyo3`の
       # `extension-module`フィーチャ非直接指定への変更により`cargo test -p engine_pybind`が
@@ -139,7 +152,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.12"
 

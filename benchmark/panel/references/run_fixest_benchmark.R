@@ -77,7 +77,12 @@ df <- read.csv(data_path, check.names = FALSE)
 
 suppressMessages(library(fixest))
 
-model <- feols(as.formula(formula_str), data = df)
+# 固定効果を除く反復の収束許容度を厳しくする。fixestの既定（fixef.tol = 1e-6、下限は2.2e-12）のままだと、
+# 組合せが欠ける不均衡な2-wayで参照値自体の精度が1e-8程度に落ち、機械精度で比べられない
+# （バランスパネルと1-wayは閉形式で収束するので影響しない）。
+model <- feols(
+  as.formula(formula_str), data = df, fixef.tol = 1e-11, fixef.iter = 100000
+)
 
 # fixestのvcov指定（classical以外はvcov()呼び出しに使うキーワードまたは
 # 片側formula）。小標本補正は`ssc()`既定（モジュールコメント参照）。
@@ -104,6 +109,14 @@ summ <- summary(model, vcov = vc)
 
 coefs <- coef(summ)
 ses <- se(summ)
+# 係数の分散共分散行列（`se()`の元になった行列そのもの）。
+cov_mat <- vcov(summ)
+cov_params <- setNames(
+  lapply(seq_along(coefs), function(i) {
+    setNames(as.list(as.numeric(cov_mat[i, ])), names(coefs))
+  }),
+  names(coefs)
+)
 # summ$coeftable[, col]は1行（説明変数1個）のとき行列添字の仕様で
 # rownamesが落ちる（coef()/se()はfixest専用アクセサのため影響を受けない）。
 # setNames()で明示的に名前を付け直す。
@@ -152,10 +165,17 @@ f_p_value_val <- pf(
   lower.tail = FALSE
 )
 
+# 自由度と行ごとの残差（3次元以上の固定効果の照合用。`fixef`の和`α+γ+δ`は、残差が一致する
+# ことで行ごとに照合される）。1-way・2-wayのフィクスチャは使わない。
+df_model_val <- degrees_freedom(model, "k")
+df_resid_val <- degrees_freedom(model, "resid")
+residuals_val <- as.numeric(resid(model))
+
 library(jsonlite)
 result <- list(
   params = as.list(coefs),
   std_errors = as.list(ses),
+  cov_params = cov_params,
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(
@@ -169,6 +189,9 @@ result <- list(
   log_likelihood = log_likelihood_val,
   r_squared_within = r_squared_within_val,
   f_statistic = unname(wald_res$stat),
-  f_p_value = unname(f_p_value_val)
+  f_p_value = unname(f_p_value_val),
+  df_model = df_model_val,
+  df_resid = df_resid_val,
+  residuals = residuals_val
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

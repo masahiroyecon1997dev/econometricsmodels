@@ -13,17 +13,6 @@ from _tolerances_common import (
     RTOL_MACHINE_PRECISION,
 )
 
-# 実データ（Wooldridge card）×クラスター共分散（居住地域の9グループ）のWald/F統計量
-# とそのp値だけの相対許容誤差。他の統計量（係数・SE・t/z値・信頼区間・Hansen J）は
-# 同じ比較で1e-10以下で一致する。原因: クラスター共分散行列Vの精度（相対約3e-12）が、
-# 傾き係数の部分行列の条件数（約3e7、`expersq`のスケール由来）で増幅される。
-# 60桁の10進演算で独立に計算した真値400.04600630に対する相対誤差は、R ivregが6.7e-11、
-# linearmodelsが8.5e-10、本実装が1.6e-8（真の共分散行列に本実装の係数を入れるとFは
-# 1e-14で一致する）。Wald/Fの実測最大の相対差は、本実装と各参照の間で1.7e-8
-# （2SLS linearmodels）、1.6e-8（ivreg）、8.3e-9（GMM linearmodels）、1.1e-8（momentfit）
-# なので、約3倍のマージンで5e-8とする。共分散行列の計算の精度改善は別途Issueで追う。
-RTOL_WALD_CARD_CLUSTER = 5e-8
-
 IV_TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels/R）との数値比較 ---
     # 2SLSのlinearmodelsとの比較（実測は新旧シナリオ・実データ全体）。係数・SE・t値・
@@ -31,11 +20,13 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     # Wu-Hausman統計量3.4e-11、R²2.9e-11）。p値は相対差1.9e-10（裾のSargan・
     # Wu-Hausman p値は絶対誤差の下限なしの相対比較、最大6e-10）。信頼区間の端点は
     # 0付近の値で相対差が膨らみ（最大1.9e-8）、絶対差は下限の1/10以下に収まる。
-    # card×クラスターのWald/Fだけは`rtol_wald_card_cluster`（上記定数のコメント参照）。
+    # card×クラスターのWald/Fも同じ許容誤差（実測の相対差8.5e-10）。
+    # 係数の分散共分散行列（`iv_cov.json`・`iv_gmm_cov.json`と、そのクロスチェック）も、各テストの
+    # `rtol`で比べる。要素ごとの尺度は`sqrt(V_ii·V_jj)`（`assert_cov_params_close`）。実測の最大は
+    # この尺度で、2SLSが主1.0e-10・R 3.7e-11、GMMが主2.5e-10・R 1.7e-10。
     "iv_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
-        "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER,
     },
     # GMMのlinearmodelsとの比較。係数・SE・z値・Wald・弱操作変数Fは相対差1.5e-10以下
     # （最大: 係数・z値1.5e-10、SE8.8e-11、Wald8.2e-11）。p値は1.2e-9、信頼区間端点は
@@ -44,7 +35,6 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     "iv_gmm_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
-        "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER,
     },
     # --- 独立実装（R等）とのクロスチェック ---
     # 2SLSのR ivregとの比較。係数・SE・t値・Wu-Hausman統計量・Wald・弱操作変数Fは
@@ -52,28 +42,94 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     # Wu-Hausman p値は2.1e-10（裾のSargan・Wu-Hausman p値は相対比較）。信頼区間の端点は
     # 0付近の値で相対差が膨らみ最大1.6e-8（絶対差は下限1e-8の1/500以下）。下限1e-8は、
     # 0付近の信頼区間端点とp値を吸収するためのもので、凍結フィクスチャ間の比較
-    # （linearmodelsとivreg）でも同程度の差が出る。card×クラスターのWald/Fだけは
-    # `rtol_wald_card_cluster`。
+    # （linearmodelsとivreg）でも同程度の差が出る。card×クラスターのWald/Fも同じ許容誤差
+    # （実測の相対差6.8e-11）。
     "iv_crosscheck": {
         "rtol_strict": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER,
     },
     # GMMのRクロスチェック（momentfit）。全ケースで閉形式解の機械精度一致
     # （実測最大相対誤差: 係数2.1e-12、SE8.2e-11、z値8.3e-11、ロバストWald
     # 2.5e-11、Hansen J1.3e-12。いずれも最大はWooldridge cardで、合成データはより
     # 小さい。信頼区間・p値は0付近の値で相対誤差が膨らむ（信頼区間の実測最大絶対
     # 誤差1.4e-10）ため、他のクロスチェックと共通の絶対誤差フロアを使う）。
-    # card×クラスターのWald/Fだけは`rtol_wald_card_cluster`（実測1.1e-8）。それ以外の
-    # Waldは最大7.9e-11、Hansen Jは1.9e-12、z値8.3e-11、SE8.2e-11、係数2.0e-11（新シナリオ
-    # 追加後の再実測、合成データの方が実データより小さい）。信頼区間端点は0付近の値で
+    # card×クラスターのWald/Fは直交座標の経路（`V = R⁻¹M̃R⁻ᵀ`）で求めるため特例の許容誤差は無い
+    # （実測最大: momentfitとの相対差2.1e-9、linearmodelsとは7.3e-11）。Waldは最大7.9e-11、
+    # Hansen Jは1.9e-12、z値8.3e-11、SE8.2e-11、係数2.0e-11（新シナリオ追加後の再実測、
+    # 合成データの方が実データより小さい）。信頼区間端点は0付近の値で
     # 相対差が最大4.3e-7に膨らむが、絶対差は下限の1/100以下。
     # momentfitを揃えるための設定と原因は`benchmark/iv/references/run_momentfit.R`の
     # ヘッダコメント参照。
     "iv_gmm_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER,
+    },
+    # --- MOP有効F統計量のオラクル（`benchmark/iv/references/mop_oracle.py`）の自己検証 ---
+    # `rtol_effective`: 有効F・臨界値（オラクルが保証する精度。浮動小数点の範囲で
+    # 1e-10）。linearmodelsの`cragg_donald_f`・statsmodelsの誘導形OLSの共分散・
+    # 変換に対する不変性が対象で、実測の最大相対差は一般化版臨界値の不変性の5.6e-14
+    # （`B_TSLS`の最大化が1e-15ずれた分が増幅される）、他は1e-14以下
+    # （Cragg-Donald 3.6e-15、共分散 7.1e-15、有効F・単純版臨界値の不変性 1.6e-15以下）。
+    # `rtol_b_tsls`: `B_TSLS`を2つの方法（`beta`軸・角度）で最大化した結果どうしと、
+    # 論文の式をそのまま評価した上限・下限との比較（保証は1e-8）。2つの方法の実測の
+    # 最大相対差は、D1・D2の全ケースで9.8e-16、誤差がほぼ比例するケース（`min tr(S1)/
+    # tr(W1)` が約1e-13まで）で2.1e-14。
+    # `atol_table1`: 論文Table 1は小数第2位に丸めてあるため、丸めの半分（0.005）。
+    # `atol_published_critical_value`: 2.2.3節の一般化TSLS臨界値（K=3で8.53、K=30で12.27）。
+    # Table 1と同じく小数第2位に丸めた公表値なので、丸めの半分（0.005）。
+    # `atol_rounding_slack`: 公表値の丸めの半分ちょうど（0.005）の差が浮動小数点の
+    # 誤差で超過しないための上乗せ。上の2つの`atol`に足して使う。
+    # `rtol_published_b`: 同次分散での`B_TSLS = |1 - 2/K|`は閉じた式との比較で、
+    # 最大化の格子の打ち切り（`|beta| <= 1e8`）が効く`beta`軸の方法でも1e-8に収まる。
+    "mop_oracle": {
+        "rtol_effective": 1e-10,
+        "rtol_b_tsls": 1e-8,
+        "atol_table1": 0.005,
+        "atol_published_critical_value": 0.005,
+        "atol_rounding_slack": 1e-9,
+        "rtol_published_b": 1e-8,
+    },
+    # --- 弱操作変数診断（`IVResults.cragg_donald()`等）。リファレンスはlinearmodelsの
+    # Cragg-Donald・Kleibergen-Paapと、MOPのオラクル（`mop_oracle.py`）。 ---
+    # `rtol`: 統計量・p値・臨界値。実測の最大相対差は機械精度（Cragg-Donald 4.4e-14、
+    # Kleibergen-Paap 8.7e-14（p値）、有効Fとその臨界値 1.3e-14）で、マージンは3桁。
+    # `rtol_b_tsls`: `B_TSLS`とそれを使う一般化版の臨界値（実測 4.2e-15）。
+    "iv_weak_diagnostics": {
+        "rtol": 1e-10,
+        "rtol_b_tsls": 1e-10,
+    },
+    # --- 弱操作変数診断の独立クロスチェック（R ivDiag）。 ---
+    # `rtol`: Cragg-Donaldの`F`・rk Wald `F`・有効F。実測の最大相対差はCragg-Donald
+    # 2.1e-14、rk Wald F 2.3e-14、有効F 1.7e-12（実データcard。合成データは1e-13以下）で、
+    # マージンは2桁以上。
+    "iv_weak_diagnostics_crosscheck": {
+        "rtol": 1e-10,
+    },
+    # --- C統計量（`IVResults.c_stat()`）。リファレンスはlinearmodelsの`c_stat`（内生変数の
+    # 外生性）と、`IVGMM`の部品を使った別計算（除外操作変数の直交性）、それらと一致を確認した
+    # numpy版のオラクル（`c_statistic_oracle.py`）。 ---
+    # `rtol`: 統計量・p値・J統計量。実測の最大相対差は合成データで約1e-12以下、実データcard
+    # （列のスケールが大きく違う）で8.2e-12で、マージンは1桁以上。
+    # `rtol_boundary_cluster`: クラスター数が検定するモーメント条件を含むモデルの操作変数の数
+    # ちょうど（`S_e`がほぼ階数落ちの境界）の実データcard（地域9グループ）。統計量の実測は
+    # 7.4e-11、p値は1.4e-10で、基本の1e-10を超える。`S_e`の条件数が大きく誤差が増幅される
+    # ためなので、このケースだけ方針の基本の1e-8にする。合成データの境界（7クラスター、
+    # クラスター数と列数が同数）の統計量（約0.0016）も同じで、実測の相対差は開発環境で
+    # 8.3e-11、CIの実行環境で1.0e-10（本実装の値は同一で、linearmodels側の値が環境で変わる）。
+    # `atol_just_identified`: 検定しない側が丁度識別のとき、本実装のJ_cは厳密に0で、参照
+    # （`IVGMM`の部品）は丸め誤差を持つ。実測の最大は4.4e-18。
+    "iv_c_statistic": {
+        "rtol": 1e-10,
+        "rtol_boundary_cluster": 1e-8,
+        "atol_just_identified": 1e-12,
+    },
+    # --- C統計量の独立クロスチェック（R momentfit）。 ---
+    # `rtol`: 統計量・p値・J統計量。実測の最大相対差は実データcard（列のスケールが大きく違う）の
+    # 1.0e-11、合成データは1e-12以下で、マージンは1桁以上。検定しない側が丁度識別のときのJ_cは
+    # 本実装もRも厳密に0なので、絶対誤差のフロアは置かない。クラスター数が検定前のモーメント条件の
+    # 数と同数のcard（地域9グループ）でも、実測は1.5e-12で基本の許容に収まる。
+    "iv_c_statistic_crosscheck": {
+        "rtol": 1e-10,
     },
     # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
     # 同じ入力に対して計算経路が異なる出力どうしの一致の確認（`ols_api`と同じ方針、
@@ -89,5 +145,13 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         # 5.7e-8〜1.4e-5）を分ける閾値。比較許容誤差ではなく、棄却の有無の境界。
         "overid_valid_min_p_value": 0.05,
         "overid_rejection_max_p_value": 1e-4,
+        # 2SLSのロバストな過剰識別検定（`cov_type`が`hc0`・`cluster`・`hac`）と、同じ重みの種類の
+        # GMM（2段階）のHansen J（`estimator="gmm"`）の一致。同じ`S`・同じ再推定を通る別の
+        # 入口どうしの比較で、実測の最大相対差は4.1e-15。
+        "rtol_overid_same_weight": 1e-10,
+        # Wu-Hausman検定（`cov_type`に従い、第二段階の推定量・GMMの重みに依らない補助回帰）の
+        # 2SLSとGMMの一致。同じ補助回帰を通る別の入口どうしの比較で、実測の最大相対差は0
+        # （同じ入力・同じ計算）。
+        "rtol_wu_hausman_across_estimators": 1e-10,
     },
 }

@@ -18,7 +18,10 @@ import json
 import subprocess
 from pathlib import Path
 
-from benchmark.common.reference.normalize import normalize_names
+from benchmark.common.reference.normalize import (
+    normalize_cov_params,
+    normalize_names,
+)
 from benchmark.common.reference.r import run_r
 
 _R_SCRIPT = Path(__file__).resolve().parent / "run_glm_crosscheck.R"
@@ -85,6 +88,7 @@ def run_glm_r(
         conf_from_low_high=True,
         fix_margeff=True,
     )
+    result["cov_params"] = normalize_cov_params(raw["cov_params"])
     # 名前正規化が要らない予測関連の出力（`pred_table`は2x2の`[actual][predicted]`、
     # `new_x`は`predict(new_data=...)`に渡す新規データのx列）。
     for key in _GLM_PREDICTION_KEYS:
@@ -217,6 +221,7 @@ def run_tobit_r(
         conf_from_low_high=True,
         fix_margeff=False,
     )
+    result["cov_params"] = normalize_cov_params(raw["cov_params"])
     result["margeff"] = raw["margeff"]
     result["predict_head"] = raw["predict_head"]
     result["predict_new_data"] = raw["predict_new_data"]

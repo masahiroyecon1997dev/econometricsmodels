@@ -399,7 +399,7 @@ def test_predict_target_is_case_insensitive(
 )
 def test_predict_with_include_intercept_false_and_x_named_const(target):
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
-    `predict(new_data)`が、その列の値を使って正しく計算されること。
+    `predict(new_data=...)`が、その列の値を使って正しく計算されること。
 
     `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様の
     ため、`include_intercept=False`ならユーザーが`"const"`という名前の（切片では
@@ -431,7 +431,7 @@ def test_predict_with_include_intercept_false_and_x_named_const(target):
         "expected_observed": xb * norm.cdf(z) + res.sigma * norm.pdf(z),
     }[target]
 
-    predicted = res.predict(new_data, target=target)
+    predicted = res.predict(new_data=new_data, target=target)
 
     assert len(predicted) == 3
     rtol = TOLERANCES["tobit_api"]["rtol_predict_closed_form"]
@@ -439,19 +439,23 @@ def test_predict_with_include_intercept_false_and_x_named_const(target):
         assert_close(value, exp, f"{target}/{i}", rtol=rtol, atol=0.0)
 
 
-def test_predict_augment_take_new_data_as_first_positional_arg(
+def test_predict_augment_take_new_data_as_keyword_only_arg(
     censored_dataset,
 ):
-    """`predict`/`augment`の第1引数が`new_data`であること（他手法と同じ
-    `res.predict(new_df)`の書き方がそのまま通る）。
+    """`predict`/`augment`の`new_data`はキーワード専用（他手法と同じ
+    `res.predict(new_data=new_df)`の書き方）。位置引数で渡すと`TypeError`。
     """
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
 
-    assert res.predict(new_data) == res.predict(new_data=new_data)
-    augmented = res.augment(new_data)
+    assert len(res.predict(new_data=new_data)) == 2
+    augmented = res.augment(new_data=new_data)
     assert augmented.height == 2
     assert "predicted_expected_observed" in augmented.columns
+    with pytest.raises(TypeError, match="positional"):
+        res.predict(new_data)  # type: ignore[misc]
+    with pytest.raises(TypeError, match="positional"):
+        res.augment(new_data)  # type: ignore[misc]
 
 
 # ── augment() ─────────────────────────────────────────────────────────

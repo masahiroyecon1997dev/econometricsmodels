@@ -40,7 +40,6 @@ FEでは識別できず拒否されるが、REでは識別できる（`re-spec.m
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +48,7 @@ import pytest
 from _assertions import assert_close
 from _constants import DATA_DIR
 from _errors import raises_error
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
@@ -103,7 +103,7 @@ ABSOLUTE_YEAR_SCENARIOS = {ABSOLUTE_YEAR, "wagepan_trend"}
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 def _frame(scenario: str) -> pl.DataFrame:
@@ -129,7 +129,7 @@ def _fit(
         df,
         y="y",
         x=x,
-        entity="entity",
+        effects=["entity"],
         options=_options(cov_type, cluster),
     ).fit()
 
@@ -338,7 +338,7 @@ def test_wagepan_variance_components_match_plm(reference, name, x_cols):
         _wagepan_frame(),
         y="lwage",
         x=x_cols,
-        entity="nr",
+        effects=["nr"],
         options=REOptions(cov_type="classical"),
     ).fit()
     ref = reference["wooldridge"][name]["classical"]
@@ -355,6 +355,7 @@ def _plm_stats(plm: dict, hausman: dict) -> dict:
     return {
         "params": plm["params"],
         "std_errors": plm["std_errors"],
+        "cov_params": plm["cov_params"],
         "test_stats": plm["test_stats"],
         "p_values": plm["p_values"],
         "conf_int": {k: tuple(v) for k, v in plm["conf_int"].items()},
@@ -379,7 +380,7 @@ def test_wagepan_matches_plm(reference, name, x_cols, cov_type):
         df,
         y="lwage",
         x=x_cols,
-        entity="nr",
+        effects=["nr"],
         options=REOptions(cov_type=cov_type),
     ).fit()
     ref = reference["wooldridge"][name]
@@ -416,7 +417,7 @@ def test_wagepan_hausman_matches_plm(reference, name, x_cols, cov_type):
         _wagepan_frame(),
         y="lwage",
         x=x_cols,
-        entity="nr",
+        effects=["nr"],
         options=options,
     ).fit()
     ref = reference["wooldridge"][name][HAUSMAN_KEY][cov_type]

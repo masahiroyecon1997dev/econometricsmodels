@@ -1,19 +1,20 @@
 # IV 仕様書
 
 IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two_sls.rs`/`gmm.rs`、共通基盤は
-`engine/src/iv/common.rs`）・`engine_pybind/src/iv/common.rs`・
+`engine/src/iv/common.rs`と`common/`）・`engine_pybind/src/iv/common/`・
 `python_package/econometricsmodels/iv/iv.py`として実装済み。`estimator="2sls"`/`estimator="gmm"`を
 単一の`IV`/`IVResults`ペアで扱う設計のため、本ドキュメントは2SLS/GMM両方を扱う。
 
 ## 1. API引数
 
-3層構成: `IV(data, y, x_exog, x_endog, instruments, options).fit() -> IVResults`
+3層構成: `IV(data, y, x_exog, x_endog, instruments, options=options).fit() -> IVResults`
 （python_package）→ `fit_iv(data, y, x_exog, x_endog, instruments, options) -> IVResult`
 （engine_pybind）→ `TwoSlsEstimator::fit` / `GmmEstimator::fit`（engine、`IVOptions.estimator`で
 振り分け）。
 
 ### 1.1 `y` / `x_exog` / `x_endog` / `instruments`
 
+- 引数とOptionsの置き場所の基準と、`x`ではなく`x_exog`/`x_endog`にする理由は[`api-conventions.md`](./api-conventions.md)を参照。
 - `y: str`、`x_exog: list[str]`（外生説明変数）、`x_endog: list[str]`（内生説明変数）、
   `instruments: list[str]`（操作変数）をすべて独立の引数として渡す（OLSの`y`/`x`と同格、
   bareネーミング）。
@@ -29,9 +30,14 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   判断し、`OLS`への切り替えなしにそのまま`IV`に渡せる利便性よりも誤用防止を優先した。
   `x_endog`/`instruments`は独立に検証するため、「操作変数はあるが対応する内生変数が無い」
   誤用も検出できる。
+- **`fit()`冒頭の検査順**（`engine::iv::common::validate_iv_fit_inputs`。2SLS・GMM・`engine_pybind`が共有する）:
+  `confidence_level`の範囲 → `gmm_type="iterated"`の`gmm_max_iter` → `gmm_tol` → 識別の順序条件 → 観測数 →
+  クラスター数 → 被説明変数の定数。設定値の検査をデータの大きさに依る検査より先に行い、OLS・Logit・Probit・Tobitと
+  順序を揃える（`error-handling.md`5.2節）。2SLSの`confidence_level`は段階の包みが付かない（以前は第一段階・第二段階の
+  `OlsEstimator`が検査し、観測数などの後に報告されていた）。
 - **識別の順序条件**（`len(instruments) >= len(x_endog)`）を満たさない場合は`fit()`冒頭
   （第一段階回帰の前）で`IvError::InsufficientInstruments`（`ValidationError`）にする。
-- **観測数**（`engine::iv::common::validate_observation_counts`）は`fit()`冒頭（第一段階回帰の前）で、
+- **観測数**（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_observation_counts`）は`fit()`冒頭（第一段階回帰の前）で、
   構造方程式の`n <= k`（`k = k_exog + k_endog`、定数項込み）を共通の`InsufficientObservations`で、
   次に第一段階の`n <= l`（`l = k_exog + len(instruments)`、定数項込み）を
   `IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で拒否する。`l >= k`
@@ -41,7 +47,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   傾き係数の数以下のとき全体F検定だけを`None`にできる（3.1節）のとは異なり、`X̂`の元になる推定
   そのものが成立しない。
 - **被説明変数が定数・完全フィット**: 切片があり`y`が全行で同じ値なら`OUTCOME_CONSTANT`
-  （`ValidationError`、`validate_outcome_not_constant`。第一段階より前に弾く）。構造残差
+  （`ValidationError`、`validate_iv_fit_inputs`が呼ぶ`validate_outcome_not_constant`。第一段階より前に弾く）。構造残差
   $y - X\hat\beta$（第二段階回帰の残差ではない）の平方和が`y`の総平方和の`k·ε`倍以下なら
   `PERFECT_FIT`（`ComputationError`、判定は`ols-spec.md`3.3節と同じ`is_perfect_fit`）。GMMは
   重み行列`S`が0になって逆行列が特異になる前に、初期推定（2SLSと同じ点推定）の構造残差で判定する。
@@ -49,7 +55,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   完全に予測する（第一段階の残差が0）と、その内生変数の文脈（`stage=FIRST_STAGE`）で
   `PERFECT_FIT`になる（診断ではなく`fit()`全体を拒否する。2SLSがOLSに一致する退化も含め、
   標準誤差が定義できない回帰を結果に残さない）。第二段階・部分F統計量の制限モデルは判定しない
-  （`fit_auxiliary`。第二段階は`X̂`への回帰で、判定は構造残差で行う）。Wu-Hausman拡張回帰は
+  （行列版の関数で、`OlsEstimator`を使わない。第二段階は`X̂`への回帰で、判定は構造残差で行う）。Wu-Hausman拡張回帰は
   元の`y`の回帰なので判定し、完全フィットなら3.6節のとおり検定統計量だけ`None`にする。
 - **バリデーション**（`engine_pybind::iv::common::build_iv_input`）:
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
@@ -91,7 +97,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **2SLSはGMMの特殊ケース**（`gmm_weight_type="classical"`、`gmm_type="one_step"`）として点推定は
   数値的に一致するが、実装（`TwoSlsEstimator`/`GmmEstimator`）は意図的に独立させている
   （`TwoSlsEstimator`は`cov_type`対応の推論統計量一式・Sargan・Wu-Hausmanを持つのに対し
-  `GmmEstimator`はそれらを持たないため、委譲すると過剰設計になる）。
+  `GmmEstimator`は点推定の重みと過剰識別検定（Hansen J）が別物のため、委譲すると過剰設計になる。
+  Wu-Hausmanの補助回帰だけは2SLSと共有する、3.6節）。
 - 欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。
 
 ## 2. 結果構造体
@@ -125,7 +132,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （`gmm_type="iterated"`以外は収束判定を行わないため常に`converged=true`、`n_iter`は1・2）。
 - **`gmm_type`**: `estimator="gmm"`では実際に使った推定方式（小文字に正規化）、`estimator="2sls"`では常に`None`。
   `gmm_type="one_step"`では`gmm_weight_type`は使われないため結果の`gmm_weight_type`も`None`。
-- **`n_entities`は含めない**（IVはパネル構造を前提としない）。
+- **`n_groups`（FE/REの`effects`ごとのグループ数）は含めない**（IVはパネル構造を前提としない）。
 - **`log_likelihood`/`aic`/`bic`は除外する**（2SLS/GMMは尤度ベースの推定法ではなく、
   Stataの`ivregress`もデフォルトでは出力しない。正規性を仮定した疑似尤度を計算して
   OLS/FE/REと同じフィールド名で返すと、異なる推定基準の値を同列に比較できるかのように
@@ -141,11 +148,11 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   同じ、GMMは常にロバストWald（χ²）（GMMはz分布と決定済みで古典的F検定の正当化が無い
   ため）。
 - **検定統計量の自由度**: `overid_df`（Sargan/Hansen J、χ²、`len(instruments) - len(x_endog)`、
-  丁度識別は`None`）、`wu_hausman_df_num`/`wu_hausman_df_denom`（F、分子は内生変数の数、
+  統計量が`None`のとき`None`。3.5節）、`wu_hausman_df_num`/`wu_hausman_df_denom`（F、分子は内生変数の数、
   分母は拡張回帰の`df_inference`）、`weak_instrument_f_df_num`/`weak_instrument_f_df_denom`
   （分子は除外操作変数の数、分母は第一段階回帰の残差自由度。内生変数ごとの辞書だが自由度は
   共通のためスカラー）。統計量が`None`/NaNのときは自由度も`None`。
-- **`cov_params`（k×kの分散共分散行列）はPython側に公開しない**（OLSと同じ方針）。
+- **`cov_params`（k×kの分散共分散行列）は`cov_type`に応じた値をPython側に公開する**（OLSと同じ方針、`ols-spec.md`「結果構造体」参照）。`TwoSlsEstimator`/`GmmEstimator`が`fit()`で計算した行列を保持し、`std_errors`はその対角成分の平方根。
 - **第一段階回帰結果は`first_stage()`という別メソッド**に切り出す（`fit()`の戻り値本体には
   含めない。非線形モデルの`marginal_effects()`分離方針を踏襲）。`first_stage() -> dict[str,
   OLSResults]`。キーは`x_endog`の変数名、値は既存の`OLSResults`型（新規のIV専用型は
@@ -163,24 +170,24 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `classical` / `hc0`〜`hc3` / `cluster` / `hac`をサポートする。IVはパネル構造を前提としない
 ため、`hac`はOLSの実装（グローバルな時系列順序に対する通常のNewey-West型）をそのまま
 踏襲する（Driscoll-Kraay型は不要）。デフォルトは`"classical"`（OLS踏襲。FE/REと異なり
-`entity`のような常在するグルーピング列が無いため`"cluster"`をデフォルトにする根拠が無い）。
+`effects`のような常在するグルーピング列が無いため`"cluster"`をデフォルトにする根拠が無い）。
 
 - **2SLSの分散はサンドイッチ型**: `(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`（`Ω`の推定方法が
-  `cov_type`で変わる）。`hc_cov_params`/`hac_cov_params`
-  （`engine/src/iv/two_sls.rs`）は`X̂`（射影後の予測値）ベースのレバレッジ・スコアで
-  OLSの対応する実装と同型に計算するが、コード自体はOLS（`engine::linear::ols`）に寄せず
-  **意図的に独立実装**にしている（例外: クラスターの蓄積`Σ_g S_g S_g'`と小標本補正は、
-  OLS本体ではなく共有モジュール`shared::covariance`の`cluster_meat`/`cluster_correction`
-  を、設計行列`X̂`・構造残差`e`で呼ぶ。加算順を1か所に固定するため。HACのラグ数の解決
-  （範囲検証と既定式）も同モジュールの`resolve_hac_lags`を共有する。レバレッジ・HACの
-  カーネル計算等OLS固有の調整はここに持ち込まない）（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
-  計算にも寄せない独立実装でよいという既存方針）。GMMのモーメント共分散行列計算
-  （`gmm.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
-  方針」参照）。
+  `cov_type`で変わる）。`X̂`（射影後の予測値）と構造残差`e`をOLSの対応する公式に当てはめた形で、
+  `covariance_stage`（`engine/src/iv/two_sls/cov.rs`）が`shared::covariance`の
+  `classical_cov_params`・`hc_cov_params`・`hac_cov_params`・`cluster_cov_params`を`X̂`・`e`で
+  呼ぶ。スコアに依存する部分（HCのレバレッジ定義、小標本補正の分母）は推定量ごとに決めて共有関数へ
+  値として渡し、中立な計算（古典の共分散、外積の和、Newey-WestのBartlettカーネル和、クラスターの
+  蓄積と小標本補正、HACラグ数の解決、Wald二次形式）は`shared::covariance`・`shared::wald`に
+  一本化する（加算順・`Par::Seq`の指定・対称化といった数値上の判断を1か所に固定するため）。
+  Wald二次形式（対称化込み）も共有版（`wald_f_test`・`wald_chi2_test`）を使う。
+  OLS固有の調整はここに持ち込まない。GMMのモーメント共分散行列（`shared/gmm_weight.rs`）と`cov_type`用の
+  `Ω̂`（`gmm/sandwich.rs`）も同じ共有関数を`Z`で呼ぶ（`iv/CLAUDE.md`「共分散・検定の共有範囲」参照）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
   （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`gmm_weight_type`と`cov_type`は
   独立な選択のため一般に一致せず、「効率的GMM」の特殊ケースでも`B⁻¹`のみへの簡略化分岐は
-  しない（実装が単一経路になり単純）。
+  しない（実装が単一経路になり単純）。この代数と、Hansen J統計量は、`Ω̂`・自由度を引数に取る
+  共有関数（`shared/gmm.rs`）で、固定効果つきのGMMも同じ関数を呼べる形にしてある。
 - **HC2/HC3のレバレッジ補正**: `hc2_cov_params`/`hc3_cov_params`は`h_ii = x̂_i'(X'PzX)^-1 x̂_i`
   （`X̂`ベース、実際の設計行列に対して直接計算する）。GMMの`gmm_weight_type`にはHC2/HC3相当の
   区分が無い（成分ごとに異なるレバレッジ補正はGMMの重み行列のスカラー不変性の議論と
@@ -192,10 +199,10 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   より多くなければならない**（`G <= q`は`CommonError::InsufficientClustersForInference`＝
   `ValidationError`。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
   部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。判定は
-  `engine::iv::common::validate_structural_cluster_count`に集約し、`TwoSlsEstimator::fit`/
+  `engine::iv::common::validate_iv_fit_inputs`（内部の`validate_structural_cluster_count`）に集約し、`TwoSlsEstimator::fit`/
   `GmmEstimator::fit`冒頭と`engine_pybind`の`fit`（`compute_first_stage`より前）が共有する。
-  第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
-  `SecondStageFailed`にラップされるため区別される。**構造方程式では
+  第二段階は行列版の点推定で、共分散の検証は走らない（第一段階の`OlsEstimator::fit`は第一段階の
+  `q`で検証し、`FirstStageFailed`にラップされるため区別される）。**構造方程式では
   `G > q`でも、第一段階の傾き係数の数`q_first = k_exog傾き + k_instruments (>= q)`が`G`以下の
   ときは、第一段階の全体F検定（`first_stage()`の`f_statistic`/`f_p_value`/`f_df_num`/
   `f_df_denom`）だけを`None`にして`fit()`は成功する**（第一段階のロバストWald/F検定が構造的に
@@ -209,7 +216,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **GMMの`gmm_weight_type="cluster"`の重み行列`S`（l×l、全操作変数の本数`l`）が`G<l`で
   特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる）。
   過剰識別（`l>k`）は`G<l`、丁度識別（`l==k`）は`G<=l`（`Z'ê=0`により`rank(S)≤G-1`）で
-  `IvError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
+  `CommonError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
   `gmm_type="two_step"`/`"iterated"`のとき検証する（`"one_step"`は`gmm_weight_type`を
   使わないため検証しない）。悪条件の`ComputationError`はbackstopとして残る。
 
@@ -228,6 +235,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （`debiased=False`→z分布）と一致する。
 
 ### 3.3 GMMの推定方式（`gmm_type`/`gmm_max_iter`/`gmm_tol`）
+
+- **GMMは白色化した操作変数の空間でのOLSとして解き、共分散・全体Wald・Hansen Jもその座標で求める**（初期推定・古典的重みは`Z`のQR、ロバスト・クラスター・HACの重みは`S`を明示的に作らずCholeskyか`S = A'A`の`A`のQR）。式・ガード（`GMM_BREAD`・`GMM_WEIGHT`）・精度・限界は[`orthogonal-coordinates.md`](./orthogonal-coordinates.md)4.2節。
 
 - **用語**: 「1-step GMM」（`gmm_type="one_step"`）は残差に基づく重みの再構築を一切行わず
   アドホックな`W₀=(Z'Z)⁻¹`のみで打ち切る推定（2SLSと同じ結果）。「2-step efficient GMM」
@@ -277,28 +286,216 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   引き継ぐ）、(2) `OlsEstimator`が係数の分散共分散行列全体を公開していないため。
   `estimator="2sls"`/`estimator="gmm"`ともに同じ計算方式（`engine::iv::common::
   compute_first_stage`を共有）。
-- **v1のスコープ**: 生の部分F統計量のみ返す。Stock-Yogo臨界値テーブルとの照合（弱操作変数の
-  合否判定）・複数内生変数の同時検定（Cragg-Donald統計量等）はv1スコープ外。
+- **v1のスコープ**: 生の部分F統計量のみ返す。Cragg-Donald統計量とStock-Yogo臨界値はエンジンに
+  実装済み（3.4.1節）だが、Pythonには未公開（バインディングは別途）。
 - `x_exog=[]`かつ`include_intercept=false`（制限モデルに回帰変数が1つも無い）の退化ケース
   はSSRを`y_endog`自体の二乗和として直接計算する特別扱いをしている。
 
+#### 3.4.1 Cragg-Donald統計量とStock-Yogo臨界値
+
+内生変数が複数あるとき、内生変数ごとの部分Fでは見えない、操作変数群全体としての弱さを調べる診断。
+
+- **定義**: 外生変数`X`（定数列を含む。平均を引かず、他の列と同じく偏回帰で落とす）で内生変数`Y`と
+  除外操作変数`Z`を直交化し、`Ỹ`を`Z̃`に回帰した当てはめ値`Ŷ`・残差`E`から`A=Ŷ'Ŷ`、`S=E'E`、
+  `G=S^{-1/2}'AS^{-1/2}`（`S=LL'`のCholeskyで`L⁻¹AL⁻ᵀ`）を作り、
+  `CD = λ_min(G)·(n − k_exog − q − n_absorbed)/q`（`q`は除外操作変数の数）。Stataの`ivreg2`の
+  "Cragg-Donald Wald F statistic"と同じ定義で（リポジトリで数値を照合したのはlinearmodelsだけ）、
+  内生変数が1個なら部分F統計量に一致する。`G`は半正定値なので、丸めで最小固有値が負になったら0に
+  打ち切る。ランクの判定の前に各列をノルム1にそろえるので、列の単位に依存しない。
+  `n_absorbed`は固定効果で吸収したパラメータ数（固定効果が無ければ0）。p値は無い（検定ではない）。
+- **`cov_type`に依存しない**（等分散前提。3.4節と同じ判断）。ロバスト版はKleibergen-Paap（3.4.2節）と
+  Montiel Olea-Pflueger（3.4.3節）。
+- **定義できないとき共有関数は`None`**（`compute_cragg_donald`が`WeakInstrumentStatisticUndefined`に直す。理由は区別しない）: 内生変数が
+  無い、識別不足（`q < k`）、自由度が1未満、`X`がフルランクでない、`Z`または`Y`の列が`X`の張る空間に
+  ほぼ入っている（直交化で元のノルムの`√ε`未満）、`Z̃`がフルランクでない、`S`が数値的に特異
+  （内生変数が共線。固有値で確かめる）、いずれかの内生変数の第一段階が完全フィット
+  （`SSR <= q·ε·SST`）、入力に非有限値がある。Pythonへの公開（3.4.4節）では、`compute_*`が入力を見るだけで分かる理由を先に
+  `Err`にし、残りは1つの`Err`（`WeakInstrumentStatisticUndefined`）にまとめる。正本はここ（`cragg_donald`のdocと`iv/CLAUDE.md`は要点だけ）。
+- **臨界値**（`shared/stock_yogo.rs`）: 2SLSの相対バイアス（`b`=0.05/0.10/0.20/0.30。内生変数1〜3個、
+  `K2`が`n+2`〜30）と、5%のWald検定のサイズ歪み（`r`=0.10/0.15/0.20/0.25。内生変数1〜2個、
+  `K2`が`n`〜30）の2表のみ。表に無い組み合わせは`None`。統計量が臨界値を超えれば5%水準で
+  「操作変数は弱い」を棄却する。LIMLとFullerの表は、そのような推定量が無いので持たない。
+- **値の出典と検証**: 表は著者のワーキングペーパー（NBER Technical Working Paper 284、2001年8月、
+  2002年10月改訂版）のTable 1・Table 2を、PDFから機械的に取り出して転記した。第二の独立な出典
+  （`ivreg2`のソース）は取得できなかったため、全セルの独立な照合はしていない。代わりに、欠損セルの
+  位置・水準と`K2`と内生変数の数に対する単調性・隣り合う`K2`の差の滑らかさ・広く引用される値との
+  一致を単体テストで固定した（`shared/stock_yogo.rs`）。
+- **統計量の検証**: linearmodels 7.1の`cragg_donald_f`と、エンジンの単体テストと同じデータで
+  相対差1e-15（内生変数1個・2個）で一致する。その値をテストに定数として埋めて回帰ガードにした
+  （`weak_instruments.rs`）。単体テストは、閉形式（2×2の固有値）、
+  内生変数1個での部分Fとの一致、`n_absorbed`の自由度、Frisch-Waugh-Lovell（個体ダミー入りと
+  within変換+`n_absorbed`）、列のスケール不変性（単位が1e-14〜1e9違う列を含む）、操作変数が
+  無関係でも非負、`q=1`で除外操作変数が`X`の張る空間にある場合、内生変数の一方だけ完全フィット、
+  非有限値、`None`になる各条件を固定する。Pythonからの数値照合はバインディングの後（別途）。
+
+出典:
+
+- Stock, J. H. and Yogo, M. (2005), "Testing for Weak Instruments in Linear IV Regression", in
+  Andrews, D. W. K. and Stock, J. H. (eds.), *Identification and Inference for Econometric Models:
+  Essays in Honor of Thomas Rothenberg*, Cambridge University Press（臨界値表とg_min統計量の定義）。
+  ワーキングペーパー版はNBER Technical Working Paper 284。
+- Cragg, J. G. and Donald, S. G. (1993), "Testing Identifiability and Specification in Instrumental
+  Variable Models", *Econometric Theory* 9(2), 222-240（ランク統計量）。
+- Baum, C. F., Schaffer, M. E. and Stillman, S. (2007), "Enhanced routines for instrumental
+  variables/generalized method of moments estimation and testing", *Stata Journal* 7(4), 465-506
+  （`ivreg2`の"Cragg-Donald Wald F statistic"との対応）。
+
+#### 3.4.2 Kleibergen-Paap統計量
+
+Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健にした診断。`shared/kleibergen_paap.rs`の
+`kleibergen_paap_lm`（rk LM。過小識別の検定）と`kleibergen_paap_f`（rk Wald F）を、
+`iv/common/weak_instruments.rs`の`compute_kleibergen_paap(&IvInput, &CovType)`が`IvInput`から呼ぶ。
+
+- **定義**: 外生変数で直交化した`Ỹ`・`Z̃`（列は二乗平均1にそろえる）の`Θ̂ = Q_zz^{-1/2}'Q_zx Q_xx^{-1/2}`
+  （`Q`は`Z̃'Z̃/n`等）を特異値分解し、最小特異値に属する右特異ベクトル`B⊥`（長さ`k`）と、
+  それ以降の左特異ベクトルの基底`A⊥`（`q−k+1`本）で`λ = A⊥'Θ̂B⊥`を作る。
+  統計量は`n·λ'V̂_λ⁻¹λ`で、帰無仮説（`Θ`のランクが`k−1`）の下で`χ²(q−k+1)`に従う（Kleibergen and Paap
+  2006）。`V̂_λ`は一次段階のスコア`v_i⊗z̃_i`（`vec(Q_zx)`の標本平均の被積分）を`λ`の方向へ射影した
+  `q−k+1`次元のスコア`ψ_i = (v_i'·B⊥'Q_xx^{-1/2}')·(z̃_i'·A⊥'Q_zz^{-1/2}')`の共分散（平均を引かず、
+  自由度補正なし）。**射影するとクロネッカー積の`qk×qk`行列を作らずに済み**、meatは共有の
+  `hc_meat`・`cluster_meat`・`hac_meat`をそのまま使える。LMのスコアの`v_i`は`Ỹ`、rk Wald Fでは
+  `Ỹ`を`Z̃`に回帰した残差。
+- **`cov_type`ごとの共分散**: `Classical`（射影後は`ω·I`。LMはAndersonの`n·r²_min`、FはCragg-Donaldに
+  一致）、`Hc0`〜`Hc3`（スコア全体に行スケールを掛ける。`Hc1`は`√(n/(n−q−k_exog−n_absorbed))`、
+  `Hc2`・`Hc3`は`[X_exog, Z]`のレバレッジ`h_i`による`1/√(1−h_i)`・`1/(1−h_i)`）、`Cluster`、`Hac`（Bartlett核。
+  `lags`は共有の`hac_meat`と同じ定義）。`1−h_i ≤ 1e-10`の行があるHC2・HC3は`None`（診断統計量なので`fit()`を止めない。閾値と検査は共有の`hc_scales`と同じ`UNIT_LEVERAGE_TOLERANCE`。係数の標準誤差のHC2・HC3は同じ条件で`UNIT_LEVERAGE_OBSERVATION`の`ComputationError`）。レバレッジは`[X_exog, Z]`だけから計算し、吸収した効果の分を
+  含まないので、`n_absorbed > 0`のHC2・HC3も`None`（個体ダミーを回帰子に入れた定義と食い違うため。固定効果つき
+  2SLSで吸収した効果のレバレッジを受け取る口を足すまでの扱い）。
+- **rk Wald Fの小標本の補正**（`l = q + k_exog`）: `F = W/q`に、`Classical`・`Hac`は`(n−l−n_absorbed)/n`、
+  `Cluster`は`(n−l−n_absorbed)(G−1)/(G(n−1))`を掛ける。`Hc1`は行スケールの中に同じ補正を含むので
+  追加の係数が無く、`Hc0`・`Hc2`・`Hc3`は補正なし。これはStataの`ivreg2`・linearmodelsの定義（`robust`は
+  HC0のWald統計量`W`に`(n−l)/n`を掛ける。meatに`n/(n−l)`を掛けるHC1と同じ）と同じ値になるよう置いたもので、**linearmodelsの`robust`のFは
+  このプロジェクトの`Hc1`に、`robust`のLMは`Hc0`に対応する**。LMには自由度補正が無い
+  （`Hc1`のLMだけ行スケールで`√(n/(n−l−n_absorbed))`が入る）。
+- **参照が無い範囲**: linearmodelsとivreg2が持つのは`robust`（HC0）・クラスター（一元）・Bartlett HACだけ
+  なので、`Hc2`・`Hc3`、`Hc1`のLM、`n_absorbed`つきのロバスト版はこのプロジェクトの拡張で、
+  linearmodelsの`_rk_chi2`に行スケールを掛けたスコアを渡す独立な計算（クロネッカー積をそのまま使う形）と
+  照合した。DK（Driscoll-Kraay）は未対応で、固定効果つき2SLSで時点ごとに合計したスコアを`hac_meat`に
+  渡す分岐を足す（`ScoreCovariance`に1バリアント）。
+- **定義できないとき`None`**（LMとWald Fは独立に判定する）: 3.4.1節と同じ条件に加えて、最小の正準相関が1
+  （完全フィット）、スコアの共分散が正定値でない（クラスター・観測が少なすぎる。linearmodelsは一般化逆行列と
+  自由度の減少で警告つきの値を返すが、ここでは使わない）、クラスターが2未満、クラスターや時間順の長さが行数と
+  違う。LMの共分散は`q−k+1`次元でクラスター数が階数の上限、Wald Fのスコアは合計が0なので`q−k+2`個
+  以上のクラスターを要する。
+- **fixestの`kpr`は参照にしない**: `fitstat(m, "kpr")`はiid、または内生変数と操作変数が同数のときだけ実装
+  され、実測ではrk LM・rk Wald Fのどちらにも一致しない（n=240で内生変数1個・操作変数3個のiid:
+  `kpr`=0.904に対しLM=35.77・F=13.72。同数でiid: 1.64に対しLM=22.99・F=25.10。同数のheteroは24.51で、
+  rk Wald Fの24.82に`(n−l)/n`を掛けた値に近い）。参照はlinearmodelsを使う。
+- **検証**: linearmodels 7.1の`kleibergen_paap`・`kleibergen_paap_f`と、unadjusted・robust・clustered・
+  kernelで相対差1e-9以内に一致する（n=12の2種類と、n=240の合成データ。値を定数として埋めて回帰ガードにした）。
+  `Classical`のWald FはCragg-Donald、LMは`n·λ/(1+λ)`（`λ`はCragg-Donaldの最小固有値）に一致する。単体テストは、
+  列のスケール・操作変数の正則な線形結合への不変性、行の並べ替えと`Hac`の時間順、`n_absorbed`が入る場所、
+  個体ダミー入り（`n_absorbed=0`）とwithin変換＋`n_absorbed`の一致（Frisch-Waugh-Lovell。等分散・HC0・HC1・
+  クラスター・HAC）、`q = k`、`None`になる各条件を固定する。最小の2つの特異値が重なるとき`λ`の方向が一意でなく、
+  ロバスト版の値が不安定になりうるが、検出はしていない（既知の限界）。Pythonからの数値照合はバインディングの後（別途）。
+
+出典（3.4.1節に加えて）:
+
+- Kleibergen, F. and Paap, R. (2006), "Generalized reduced rank tests using the singular value
+  decomposition", *Journal of Econometrics* 133(1), 97-126（rkランク統計量）。
+- Kleibergen, F. and Schaffer, M. E. (2007), "ranktest: Stata module to test the rank of a matrix using
+  the Kleibergen-Paap rk statistic", Statistical Software Components S456865, Boston College
+  （`ivreg2`が使うrk LMとrk Wald Fの実装）。
+
+#### 3.4.3 Montiel Olea-Pflueger有効F統計量
+
+内生変数が1個のときの、ロバストな弱操作変数の診断。`shared/effective_f.rs`の`effective_f`（行列版）を、
+`iv/common/weak_instruments.rs`の`compute_effective_f(&IvInput, &CovType, alpha)`が呼ぶ。
+
+- **定義**（Montiel Olea and Pflueger 2013）: 外生変数（定数列を含む。平均は引かない）で内生変数`Y`と除外操作変数`Z`を
+  直交化し、`Z̃'Z̃/n = I`となるように直交正規化する（統計量はこの変換に依らない）。`π̂ = Z̃'Y/n`、`V̂2`を`π̂`の
+  共分散の推定値（`Ŵ2 = n·V̂2`）として、
+  `F_eff = π̂'π̂/tr(V̂2)`（論文 Eq. (3)）。`Classical`なら`Ŵ2 = ω̂_22·I`でCragg-Donaldの`F`に一致し、操作変数1個なら
+  頑健な`t²`（Kleibergen-PaapのWald F）に一致する。
+- **`cov_type`と小標本の係数**: Kleibergen-Paap（3.4.2節）と同じ規約（`shared/score_covariance.rs`）。`Ŵ2 = c·meat/n`で、
+  `Classical`・`Hac`は`c = n/(n−l−n_absorbed)`、`Hc1`は行スケール`√(n/(n−l−n_absorbed))`に含み、`Hc0`・`Hc2`・`Hc3`は補正なし、
+  `Cluster`は`G/(G−1)·(n−1)/(n−l−n_absorbed)`（`l`は除外操作変数と外生変数の数）。`Hc2`・`Hc3`のレバレッジは`[X_exog, Z]`
+  だけから計算し、吸収した効果の分を含まないので、`n_absorbed > 0`では`None`。
+- **臨界値**（Patnaik近似）: 有効自由度
+  `K_eff(x) = tr(Ŵ2)²(1+2x)/[tr(Ŵ2²) + 2x·tr(Ŵ2)·λ_max(Ŵ2)]`（Eq. (4), (33)。`Ŵ2`のスケールに依らず`1 ≤ K_eff ≤ K`）、
+  臨界値は`χ²_{K_eff}(x·K_eff)`の上側`α`点を`K_eff`で割ったもの（Eq. (32)）。有効Fがこれを超えれば、水準`α`で
+  「Nagarバイアスがベンチマークの`τ`倍を超える」を棄却する。**単純版TSLS**は`x = 1/τ`（`τ`は5/10/20/30%）。
+  非心カイ二乗分布の分位点は`statrs`に無いので、ポアソン混合のCDFと二分法で自前に実装した
+  （`shared/noncentral_chi_squared.rs`）。ポアソンの重みは最頻値を1とした相対値を漸化式でたどって正規化する
+  （`ln Γ`を使わず、非心度が大きくても桁落ちが共通の係数になって消える）。非心度の上限は`ncp/2 ≤ 1e9`（超えると`None`）。
+  水準`1 − α`が1に近すぎる（`α`が1e-8より小さい）と、CDFの丸め誤差が水準に対して無視できず、分位点の精度が落ちる。
+- **一般化版（非単純版）TSLS**: 被説明変数`y`を渡すと、`y`の誘導形の残差もスコアに加えた`2K×2K`の`Ŵ`（ブロックは`W1`（`y`）・`W12`・
+  `W2`（内生変数））から、`x = B_TSLS(Ŵ)/τ`で臨界値を作る（Eq. (5)）。`B_TSLS`は`β`ごとに`S1 = W1 − 2βW12 + β²W2`、
+  `S12 = W12 − βW2`、`S2 = W2`として、`sup_{β, C0} |tr(S12) − 2C0'S12C0| / √(tr(S1)·tr(S2))`（Eq. (19), (21)）。
+  `C0`についての上限は`S12`の対称部分の最小・最大固有値で解析的に取れ、`β`についての上限は、`β = c + s·sinh u`
+  （`u ∈ [−30, 30]`の3000区間の等間隔の格子。`c`の近くは線形、遠くは対数間隔）で局所最大を探し、左隣より丸め誤差を超えて
+  大きい点のうち値の大きい上位16個を黄金分割で詰め、`β → ±∞`の極限（`max_λ |1 − 2λ/tr W2|`）も候補にする。
+  `(c, s)`は2通り: `(0, β₀)`（`β₀ = √(tr W1/tr W2)`）と、`tr S1(β)`の最小点まわり`(β*, δ)`（`β* = tr W12/tr W2`、
+  `δ = √(min tr S1/tr W2)`、`tr S1(β) = min tr S1 + tr W2 (β − β*)²`の形で桁落ちを避ける）。**後者が要る理由**: 被説明変数と
+  内生変数の誘導形の誤差がほぼ比例する（`min tr S1/tr W1`が小さい。内生性が強いと起こる）と、`β*`の近くに幅`δ`の鋭い山ができ、
+  前者の格子の刻みでは取りこぼして`B_TSLS`を過小評価する（反保守的）。`min tr S1 ≤ 1e-12·tr W1`は未定義として`None`にする。
+  格子は`tan`ではなく`sinh`にした（`tan`だと`|β|`の非常に大きいところの山が端の1区間に埋もれた）。1回の計算で`K×K`の固有値分解を
+  約6000回＋精緻化に行うので、`K`が数十を超えると秒単位になりうる（公開時に計測して格子の粗さを見直す）。
+  同次分散（`Ŵ = Ω⊗I_K`、`classical`）では`B_TSLS = |1 − 2/K|`で、論文の公表値（`τ = 0.10`、`α = 0.05`で`K = 3`が8.53、
+  `K = 30`が12.27）を再現する。被説明変数の形が不正・`Ŵ`が不定値・`v1 = βv2`の完全な比例などでは、一般化版だけが`None`
+  （統計量と単純版は返す）。
+- **未実装**: LIML（このプロジェクトに推定量が無い）、内生変数が2個以上（原論文は1個。拡張を実装した参照実装が無く、
+  検証手段が無いので`None`）。
+- **`Ŵ2`が特異のとき**: 論文は`Ŵ2`の正定値を仮定するので、Kleibergen-Paapに揃えて未定義とする（最小固有値が最大固有値の
+  `1e-10`倍以下は`None`。以前はトレースと固有値だけで値を返していた）。丸め誤差の範囲の負の固有値は0にそろえ、最小固有値が
+  最大固有値の`-1e-10`倍より小さい不定値も`None`。
+- **定義できないとき共有関数は`None`**（`compute_effective_f`が`WeakInstrumentStatisticUndefined`に直す。内生変数が1個でない・`alpha`が範囲外は先に`EffectiveFEndogenousCount`・`AlphaOutOfRange`）: 内生変数が1個でない、操作変数が無い、`alpha`が(0,1)の外、
+  3.4.1節と同じ前処理の条件（`X`がフルランクでない、`Z`が`X`の張る空間に入る、`Z̃`が共線）、一次段階が完全フィット
+  （`1 − R² ≤ 1.4e-14`。Kleibergen-Paapと同じ基準で、Cragg-Donaldの`q·ε`に合わせて境界を確かめる）、
+  HC2・HC3でレバレッジが1・`n_absorbed > 0`、クラスターが2未満、`Hac`の`lags >= n`・時間順の長さの不一致、
+  自由度`n − l − n_absorbed`が1未満、非有限値。
+- **検証**: 論文のTable 1（`K_eff = 1..30`、`x = 3.33・5・10・20`の上側5%点）の120セルを、公表値の小数第2位まで
+  再現する（`x = 3.33`の列は`10/3`）。非心カイ二乗分布はscipy 1.18と照合した。単体テストは、`Classical`でCragg-Donald、
+  操作変数1個でKleibergen-PaapのWald Fとの一致（`Classical`・HC0〜HC3・クラスター・HAC）、固有値(3, 1)の手計算、
+  `1 ≤ K_eff ≤ K`、列のスケール・操作変数の線形結合・行の並べ替えへの不変性、個体ダミー入りとwithin変換＋`n_absorbed`の
+  一致（Frisch-Waugh-Lovell）、`None`になる各条件を固定する。第三者のソフトウェアを実行した値との照合は、
+  ivDiagで行う（`tests/iv/test_iv_weak_diagnostics_crosscheck.py`、3.4.4節）。
+
+出典（3.4.1節に加えて）:
+
+- Montiel Olea, J. L. and Pflueger, C. (2013), "A Robust Test for Weak Instruments", *Journal of Business &
+  Economic Statistics* 31(3), 358-369（有効F統計量とPatnaik臨界値）。
+
 ### 3.5 過剰識別検定（`overid_statistic`/`overid_p_value`）
 
-Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含める（別メソッド化しない）。
+過剰識別検定（2SLSは`cov_type`に追従、GMMはHansen J）を`fit()`の結果本体に含める（別メソッド化しない。
+推定量そのものの妥当性・識別に属する検定のため。`docs/spec/api-conventions.md`）。定義式は
+[`docs/methods/iv.md`](../methods/iv.md)が正本。
 
 - 自由度は`len(instruments) - len(x_endog)`。**丁度識別（自由度0）の場合は`None`**。
-- **Sargan検定**（`two_sls.rs`）は常に古典的（`e'Z(Z'Z)⁻¹Z'e/σ̂²`、`σ̂²=e'e/n`）な計算式を
-  使い`cov_type`には依存しない（定義自体が等分散前提の検定であり、不均一分散に頑健な版が
-  欲しい場合はGMM＋Hansen Jを使うのが標準的な使い分けのため）。
-- **Hansen J検定**（`gmm.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
+- **2SLSは`cov_type`に追従する**（Wu-Hausmanと同じ。弱操作変数診断が常に等分散前提なのとは対照的）。
+  `classical`は従来どおりSargan、それ以外は2SLS残差から`cov_type`に対応する重み`S`を作り、その`S`で
+  GMMを再推定した解でのHansen J（`two_sls/overid.rs`。再推定は`shared/gmm_iteration.rs`の
+  `gmm_whiten_for_weight`と`shared/gmm.rs`の`gmm_solve`で、`gmm_iterate`のループ本体と共有する）。理由と性質:
+  - **2SLS推定値そのものでの`(Z'e)'S⁻¹(Z'e)`は採らない**。2SLSは`S⁻¹`を重みに使わないので`Z'e`の
+    漸近分散は`S`ではなく（階数`l-k`の特異行列）、`S⁻¹`はその一般化逆行列にならず、不均一分散下で
+    χ²に従わない（単発のMonte Carlo（テストには含めない）、不均一分散・n=400・自由度3・名目5%・3000回で棄却率6.5%。再推定した版は3.5%）。
+    再推定した`J`は、ロバストなscore検定（Wooldridge, 1995）と代数的に同じ量で、同じ重みの2段階GMMの
+    Hansen Jと一致する（`two_sls/overid.rs`の`equals_the_two_step_gmm_hansen_j_of_the_same_weight`、
+    Pythonの`test_overid_statistic_of_2sls_equals_gmm_hansen_j_of_the_same_weight`）。
+  - **`hc0`〜`hc3`は同じ値**。`S`は小標本補正もレバレッジ補正も入れない素の`Σ ε̂ᵢ²zᵢzᵢ'`
+    （`gmm_weight_type="robust"`と同じ。`J`は`S`の尺度に依存するので、`n/(n-k)`のような一様な補正も
+    入れない。クラスターの`(G/(G-1))((n-1)/(n-k))`、HACのBartlettカーネル以外の補正も同様）。
+  - **`None`になる条件**（`fit()`は失敗させない。診断1つのために必須の出力を捨てないという線引きは
+    `iv/CLAUDE.md`）: 丁度識別、`cov_type=cluster`でクラスター数`G`が全操作変数の数`l`より少ない
+    （`rank(S) ≤ G`で`S`が必ず特異。`gmm_weight_type="cluster"`は点推定に必要なので
+    `InsufficientClustersForWeightMatrix`で弾くのとは対照的）、重みの白色化・`Ĝ`の分解が
+    `NearSingularMatrix`（`GmmWeight`・`GmmBread`）で失敗する（近共線な外生変数×クラスターの重みなど。
+    同じ入力で`gmm_weight_type="cluster"`のGMMも失敗する）。この2種類以外の失敗は伝播する。
+    `None`のとき`overid_df`も`None`。
+  - 検証: linearmodelsの`IVGMM`（2段階、同じ重み）のHansen J（主）と、hc0では`wooldridge_overid`（同じ値）、
+    R `momentfit`の2段階GMMのHansen J（クロスチェック）。`hc2`・`hc3`は補正を入れない定義のため
+    `hc0`と同じ参照値と比べる（`tests/iv/test_iv_reference.py`・`test_iv_crosscheck.py`）。
+- **GMMのHansen J検定**（`gmm/hansen_j.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
   流用するのが定義そのもの（`J=(Z'ê)'S⁻¹(Z'ê)`）。`S`は`n`で正規化していない生の和のため
   `n`で割ってはならない（標準形`J=n·ḡₙ'Ŝ⁻¹ḡₙ`に代入すると`n`は完全に相殺する）。
   `one_step`・`gmm_weight_type=Classical`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、
   Classical以外の`Robust`/`Cluster`/`Hac`と絶対スケールを揃えるため）。
   `gmm_weight_type=Classical`かつ`two_step`のHansen Jは2SLSのSargan統計量と数値的に
   一致する。
-- どちらも計算失敗は`None`にせず`IvError`として伝播する（使う行列はいずれも点推定計算で
-  既に反転成功済みの行列の再利用であり、理論上ここでの特異性は到達不能なため）。
+- **Sargan・GMMのHansen Jの計算失敗は`None`にせず`IvError`として伝播する**（使う行列はいずれも
+  点推定計算で既に反転成功済みの行列の再利用であり、理論上ここでの特異性は到達不能なため）。
+  2SLSのロバストな版は新しい行列（`S`・`Ĝ`）を作るので、上のとおり別扱い。
 
 ### 3.6 内生性検定（`wu_hausman_statistic`/`wu_hausman_p_value`）
 
@@ -311,15 +508,25 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
   仕様のため。
 - `fit()`の結果本体に含める（内生変数全体のジョイント検定のみ、変数ごとのサブセット検定は
   v1スコープ外）。
-- **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
+- **`estimator="gmm"`でも計算する。同じデータ・`cov_type`なら2SLSと同じ値になる（検定分布もF分布のまま。GMMの係数のz・χ²とは違い、補助回帰の最小二乗のWald検定）**: 補助回帰は第一段階残差を
+  足した最小二乗で、第二段階の係数もGMMの重みも使わないため。そのため`cov_type`に従い、`gmm_weight_type`
+  には従わない（重みを使う内生性検定は事後診断の`c_stat()`、3.9節）。計算は`iv/common/wu_hausman.rs`
+  で2SLSと共有する（`fit`・`failure`の扱いも同じ）。GMMの`fit`は、点推定・共分散・Waldの後（構造式のエラーを
+  先に返す）に補助回帰を回す。第一段階の残差は、`GmmEstimator::fit`が自分で第一段階を回して求めるか、
+  `fit_with_first_stage_residuals`で呼び出し側から借用で受け取る（`engine_pybind`は診断のために第一段階を先
+  に回しているので、その`OLSResult`の残差を借りて、二重に回さず複製もしない。渡す残差は第一段階のOLS残差で、
+  engineは列の数と長さしか検査しない）。点推定に使った行列と重みは補助回帰の前に手放し、第一段階の
+  残差と同時に持つ時間を短くする。`fit`が回す側（`engine`の単体利用）の第一段階の失敗は`FirstStageFailed`。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
-  `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は2つ:
+  `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は3つ:
   (1) 拡張回帰が完全フィット（`y`が第二段階の説明変数と第一段階残差で丸め誤差の範囲で
   厳密に説明される。`sigma^2 = 0`でワルド統計量が定義できない）、第一段階残差が他の列と共線に
   なり設計行列が特異になる（第一段階の残差が0になる退化ケースは第一段階が`PERFECT_FIT`で
   先に止めるので、この経路には来ない）、(2) 拡張回帰は第二段階より内生変数の数だけ
   列が多い（`k_exog+2*k_endog`列）ため、境界的なサンプルサイズでは第二段階は成功するが
-  拡張回帰は観測数不足になりうる。**それ以外の失敗（数値的なほぼ特異性等）は`None`へ
+  拡張回帰は観測数不足になりうる。(3) `cov_type`がHC2・HC3で、拡張回帰のレバレッジが1の行がある
+  （`UnitLeverage`。構造式・第一段階が通っても、列が多い拡張回帰では起こりうる。係数の標準誤差の
+  `UnitLeverage`は`fit()`を失敗させる。FE-IVも同じ扱い）。**それ以外の失敗（数値的なほぼ特異性等）は`None`へ
   握りつぶさず`IvError::HausmanRegressionFailed`として伝播する**（広すぎる`Err(_)`
   キャッチで実装バグを隠さないため）。
 - `x_endog=[]`のときも`None`（同じ意味論に統合）。
@@ -331,9 +538,12 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - `estimator`によらず`engine::iv::common::compute_first_stage`から構築する共通ロジック
   （GMMでも2SLSと同じ診断情報を提供する）。
 - **`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、
-  `TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため
-  `TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、
-  OLS自体が軽量という前提で許容した設計判断。
+  `TwoSlsEstimator::fit`が内部でもう1回）。`TwoSlsEstimator`は第一段階の推定量を保持せず
+  （第二段階に要る当てはめ値とWu-Hausmanに要る残差の列だけを取り出して手放す）、`IVResult`へ
+  移せる推定量が無いため、OLS自体が軽量という前提で許容した設計判断。第一段階の推定量
+  （設計行列を持つ）は`compute_first_stage_with`が内生変数ごとに消費して手放し、
+  同時に持つ設計行列を1つに抑える（内生変数の数だけ`fit`の終わりまで持つと、ピークメモリが
+  その数に比例して増えた）。
 - 返す`OLSResults.f_statistic`/`f_p_value`は`x_exog`の寄与を含む通常のOLS F検定であり、
   弱操作変数診断の部分F統計量（3.4節）とは別物。
 - **`cov_type="cluster"`でクラスター数`G`が第一段階の傾き係数の数`q_first`以下（構造方程式は
@@ -348,8 +558,8 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 
 ### 3.8 engine_pybind: エラー変換
 
-`engine::iv::common::IvError` → `PyErr`対応（`iv_error_to_pyerr`、`engine_pybind/src/iv/
-common.rs`）:
+`engine::iv::common::IvError` → `PyErr`対応（`iv_error_to_pyerr`、`engine_pybind/src/iv/common/
+error.rs`）:
 
 | `IvError` | `code`（カタログ） | 例外 |
 |---|---|---|
@@ -365,14 +575,67 @@ common.rs`）:
 より`impl From`は書けず、関数として実装し`.map_err(iv_error_to_pyerr)?`で変換する
 （`ErrorInfo::report()`の`code`・`params`から例外を作る）。
 
+### 3.9 C統計量（difference-in-Hansen、`engine::iv::gmm::compute_c_statistic`）
+
+定義: 同じ構造方程式（`X = [x_exog, x_endog]`）を、検定するモーメント条件`B`を含む操作変数`Z_full = [x_exog, B₁, instruments]`と、
+含まない`Z_c`で推定し、Hansen Jの差`C = J_e − J_c`を`χ²(|B|)`で検定する。`B₁`は外生性を検定する`x_endog`の一部（自分自身を
+操作変数に加える）、`B₂`は直交性を検定する除外操作変数の一部（`Z_c`から外す）で、同時に指定してよい（`Z_c = [x_exog, instruments \ B₂]`）。
+手順はHayashi (2000) pp. 218-221, 232-234、Baum-Schaffer-Stillman (2003) 4.4節、linearmodelsの`IVGMMResults.c_stat`と同じ:
+
+1. `Z_full`で2段階GMM。1段階目の重みは`(Z_full'Z_full)⁻¹`、2段階目は1段階目の残差から作った`S_e`の逆行列。このJが`J_e`。
+2. `S_e`のうち`Z_c`に当たる行・列の部分行列`S_c`を取り、`S_c⁻¹`を重みに`Z_c`で推定したJが`J_c`（**`S_e⁻¹`の部分行列ではない**）。
+3. 共通の`S`から作るので`C ≥ 0`（丸めで負になる分は0に丸める）。`Z_c`が丁度識別なら`J_c = 0`で`C = J_e`。
+
+判断:
+
+- **`gmm_type`・`gmm_max_iter`・`cov_type`に依存せず、重みの種類だけを引き継ぐ**（常に2段階）。`one_step`の結果でも、`gmm_weight_type`と同じ設定の2段階の統計量になる。
+  linearmodelsも元のモデルの方式に関係なく、同じ重みの種類で2段階（既定）で推定する。
+- **2SLSには`weight_type_for_cov_type`で重みを決める**: `Classical`→`Classical`（差のSargan）、`Hc0`〜`Hc3`→`Robust`（`S`にHC1・HC2・HC3の補正は無い）、`Hac`・`Cluster`は同じ。
+  2SLSの`overid_statistic`は`cov_type`に追従する（3.5節）。C統計量の重みの決め方（ここ）と、過剰識別検定の
+  重みの決め方（`two_sls/overid.rs`）は同じ対応（`Hc0`〜`Hc3`→素のロバスト）。
+- **クラスターは`G < l_full`（`Z_full`の列数）を構造的な特異として未定義**にする（`S_e`のランクは`G`以下。`Z_full`は常に過剰識別）。linearmodelsも、クラスター数が足りないと無効な統計量（`InvalidTestStatistic`）を返す（`G=6`・`l_full=7`で確認）。
+  検定する変数が増えるほど`l_full`が増えるので、`fit()`が通るクラスター数でも未定義になりうる。
+- **定義できないときはエラー**: `C_STATISTIC_UNDEFINED`（`ComputationError`。操作変数の共線・初期推定の完全フィット・`S_e`のランク落ち）と、`C_STATISTIC_NOTHING_TO_TEST`（`ValidationError`）。
+  外した後の除外操作変数が内生変数より少ないときは`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`（`ValidationError`。既存の`INSUFFICIENT_INSTRUMENTS`は文面と`hint`が「操作変数を足す」で、検定する操作変数を減らす案内にならない）。`target`の添字の誤りは`INTERNAL_ERROR`（呼び出し側の責務）。
+- `Z_c`が丁度識別なら`J_c`は厳密に0を返す（推定しない）。
+- **定数項なしの`Classical`はlinearmodelsと一致しない**: linearmodelsは`Classical`の`σ̂²`を残差を中心化して作るが、ここでは`fit()`のHansen Jと同じく中心化しない。定数項があれば残差の平均が0で一致する。`Robust`・`Hac`・`Cluster`は定数項なしでも一致する（`robust`・`hac`をテストで固定）。
+- `S`は`n`で割らない生の和、Jも`n`で割らない（`iv/CLAUDE.md`）。重み行列の構築は`shared/gmm_weight.rs`の`moment_covariance`で、`gmm_iterate`と共有する。
+
+検証: 内生性の検定はlinearmodels 7.1の`c_stat`（`1e-14`台で一致するnumpy版を介して、`engine/src/iv/gmm/c_statistic/tests/reference.rs`に値を固定）、
+操作変数の直交性はlinearmodelsに無いので、同じnumpy版の値（`IVGMM`の`weight_matrix`・`estimate_parameters`・`_j_statistic`を部品にした別の計算と`1e-13`で一致を確認）。
+恒等式（`C = J_e − J_c`、丁度識別で`C = J_e`、`J_e`が`GmmEstimator`のHansen Jと一致）と、操作変数・被説明変数のスケール、行の並べ替えへの不変性もテストする。
+
+#### 3.9.1 Python公開（`IVResults.c_stat`）
+
+`IVResults.c_stat(*, variables=None, instruments=None)`。弱操作変数診断（3.4.4節）と同じく、`fit()`では計算しない事後診断のメソッドで、`source_data`・`options`から`build_iv_input`で入力を作り直して
+`compute_c_statistic`を呼ぶ（2SLSでも1段階GMMでも2段階GMMでも同じ）。判断:
+
+- **戻り値は`CStatisticResult(DiagnosticResult)`**: 統計量・p値・自由度・分布を持つ検定なので、ルートCLAUDE.md 2章の「検定は`DiagnosticResult`の継承型」に沿う。継承型に、検定した変数名（`x_endog`の順）・操作変数名（`instruments`の順）・2つのJ統計量を足す。`distribution`は`"chi2"`、`df_denom`は`None`。
+- **重みの決め方**: `estimator="gmm"`で`gmm_type`が`two_step`・`iterated`なら`gmm_weight_type`（`cluster`・`hac_lags`・`hac_time`を含む）、2SLSと`gmm_type="one_step"`（重み行列を持たない）は`cov_type`の系統（`weight_type_for_cov_type`）。1段階GMMは点推定が2SLSと同じなので2SLSと同じ扱いにした。
+  `gmm_type`・`gmm_max_iter`・`gmm_tol`・（GMMの）`cov_type`には依存しない。
+- **名前はPython側で位置にする**: `variables`は`x_endog`、`instruments`は除外操作変数の名前。空の一覧は`ROLE_EMPTY`、重複は`ROLE_DUPLICATE_COLUMN`、モデルに無い名前は`C_STATISTIC_UNKNOWN_VARIABLE`（`ColumnNotFound`は`hint`が`data`の列の綴りを指し、役割の名前としては合わないので別コード）、
+  両方とも指定が無い場合・外した後の操作変数が足りない場合・`S_e`が特異な場合は、engineの`C_STATISTIC_NOTHING_TO_TEST`・`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`・`C_STATISTIC_UNDEFINED`。型の誤りは`TypeError`。
+- **検証**: 内生変数の外生性はlinearmodelsの`IVGMMResults.c_stat`とライブで照合（フィクスチャJSONは作らない。3.4.4節のCD・KP・有効Fと同じ）。除外操作変数の直交性と同時の検定は、linearmodelsに無いので`benchmark/iv/references/c_statistic_oracle.py`（numpyの独立実装）と照合し、
+  オラクル自体を`tests/iv/test_c_statistic_oracle.py`でlinearmodelsの`c_stat`と`IVGMM`の部品（`weight_matrix`・`estimate_parameters`・`_j_statistic`）に照合する。Rには該当する実装が無い（`momentfit`・`ivreg`・`AER`・`plm`にC統計量は無い）。
+  Rのクロスチェックは、`benchmark/iv/references/run_momentfit_c_stat.R`が`momentfit`の部品（モーメント共分散`S`・GMM推定・Hansen J）で出し、「`S`の部分行列を重みにする」「Jの差を取る」手順はスクリプトが組む。
+  独立性は部品の範囲（HAC・クラスターの`S`、推定、Jを本実装・numpyと別実装で確認）で、手順そのものの正しさはlinearmodelsとの照合が担保する（`gmm`パッケージは1段階目の重みが単位行列で、既存のGMMクロスチェックでも不採用）。
+  `tests/iv/test_iv_c_statistic_crosscheck.py`が`iv_c_statistic_crosscheck.json`（生成は`generate_iv_c_statistic_crosscheck_fixtures.py`、検定の定義は`benchmark/iv/constants.py`の`C_STAT_*`）と照合する。
+  対象は全`NUMERIC_SCENARIOS`（外生性・除外操作変数`z2`の直交性）、複数内生変数（`MULTI_ENDOG_SCENARIOS`、外生性・同時・直交性）、切片なし、`card`で、重みはclassical/robust/hac/cluster。
+  `momentfit`の設定は`run_momentfit.R`と同じ（HACの`bw`はラグ数+1・`adjust=FALSE`、クラスターは`cadjust=FALSE`、HAC/クラスターの重みは`vcov()`から作って明示的に渡す、classicalの`S`は非中心化の`σ̂²`を自前で組む）。
+  実測の最大相対差はlinearmodels等との照合で合成データ約1e-12以下・`card`で8.2e-12（許容は1e-10）、Rとの照合で合成データ1e-12以下・`card`で1.0e-11（許容は1e-10）。2SLSは対応する重みの`IVGMM`で照合する。
+
 ## 4. テスト
 
 - **Python主リファレンス**: `linearmodels`（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。
 - **Rクロスチェック（2SLS）**: `ivreg`。`classical`/`hc0`〜`hc3`/
   `cluster`/`hac`の`vcov`を`coeftest()`経由でそのまま使える。`summary(model,
   diagnostics=TRUE)`は`vcov.`に行列を渡すと常にclassical（iid）vcovにフォールバックする
-  仕様のため、`weak_instrument_f_statistics`/`overid_statistic`（設計自体が常にclassical）
-  はcov_typeによらず一律クロスチェックできる。`wu_hausman_statistic`/`wu_hausman_p_value`も
+  仕様のため、`weak_instrument_f_statistics`（設計自体が常にclassical）と、classicalの
+  `overid_statistic`（Sargan）はcov_typeによらず一律クロスチェックできる。`cov_type`が
+  classical以外の`overid_statistic`はivregに対応する検定が無いので、`momentfit`の2段階GMMの
+  Hansen J（同じ重みの種類）と比べる（`generate_iv_crosscheck_fixtures.py`の`_run_ivreg`。
+  `ivreg`の`summary`のSarganは`cov_type`に追従しない）。主リファレンスの`IVGMM`も同じ量
+  （`benchmark/iv/references/linearmodels_ref.py`の`_overid_for_cov_type`）。`wu_hausman_statistic`/`wu_hausman_p_value`も
   `summary(diagnostics=TRUE, vcov.=<関数>)`でcov_type別のロバスト共分散を診断表に反映できるため、
   全cov_typeでクロスチェックする（`benchmark/iv/references/run_ivreg.R`参照）。ただしclusterの
   p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致しない。
@@ -431,7 +694,29 @@ common.rs`）:
 
 ## 5. 未実装・未対応
 
-- Stock-Yogo臨界値テーブルとの照合（弱操作変数の合否判定）
-- 複数内生変数の同時検定（Cragg-Donald統計量等）
-- Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
+- Montiel Olea-Pflueger有効Fの複数内生変数への拡張（3.4.3節）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）
+
+### 3.4.4 弱操作変数診断のPython公開
+
+`IVResults.cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha=0.05)`。`fit()`では計算しない事後診断のメソッドで、
+結果が`fit()`に渡した`DataFrame`への参照（`source_data`）・列名・`IVOptions`の複製を保持し、呼び出し時に`build_iv_input`で
+`IvInput`を作り直して`compute_*`を呼ぶ（2SLSでもGMMでも同じ）。判断:
+
+- **事後診断のメソッドにする**: `alpha`・`cov_type`の選択が利用者のものになる、`fit()`の計算量（IVの性能比較）を増やさない、
+  C統計量（`source_data`を保持して2回GMMを推定し直す）と同じ仕組みを共有できる。Sargan・Wu-Hausman（2SLSとGMM）・部分Fは従来どおり`fit()`のプロパティ。
+- **`cov_type`は`fit()`のものを使う**（メソッドの引数にしない）。`cluster`・`hac_lags`・`hac_time`の列も`fit()`のオプションから。
+  CDは等分散で`cov_type`に依存しない。
+- **戻り値は診断ごとの専用のfrozen dataclass**（`DiagnosticResult`を継承しない。CDと有効Fにp値が無いため）。臨界値は
+  水準をキーにした`dict`（CD: バイアス表0.05/0.10/0.20/0.30・サイズ表0.10/0.15/0.20/0.25、有効F: `tau`0.05/0.10/0.20/0.30）で、
+  表に無い組合せは`None`。KPはrk LM（統計量・自由度・p値）とrk Wald Fを独立に`Optional`で持つ（Wald Fはクラスターが1つ多く要る）。
+- **定義できないときは`None`ではなくエラー**: エンジンの`compute_*`は`Result<_, IvError>`。理由は、入力を見るだけで分かるもの
+  （`ALPHA_OUT_OF_RANGE`・`EFFECTIVE_F_ENDOGENOUS_COUNT`、`ValidationError`）と、行列の特異性（`WEAK_INSTRUMENT_STATISTIC_UNDEFINED`、
+  `ComputationError`、文面は診断名のみを変える）。後者はエンジンの下位関数の`None`をまとめたもので、原因（共線・完全フィット・共分散のランク落ち）は
+  文面の括弧内に列挙するだけで区別しない（識別不足・自由度・設定の誤りは`fit()`が先に弾くので、診断では事実上到達しない）。
+  KPはLMとWald Fの両方が未定義のときだけエラー。
+- 検証: CD・KPはlinearmodelsの`first_stage`（`cragg_donald_f`・`kleibergen_paap`・`kleibergen_paap_f`。`robust`のFは`hc1`、LMは`hc0`に対応）、
+  有効Fは`benchmark/iv/references/mop_oracle.py`（`tests/iv/test_iv_weak_diagnostics.py`）。実測の最大相対差は1e-13。
+- ivDiagとの照合（独立クロスチェック）: 内生変数1個・`hc1`/`cluster`の範囲で、`ivDiag()`の`F.standard`をCD、`F.robust`/`F.cluster`をKPのrk Wald F、`eff_F`（`prec=14`。`ivDiag()`は有効Fを4桁に丸める）を有効Fと比べる。
+  ivDiagはrk LM・臨界値・複数の内生変数を返さない。フィクスチャは`iv_weak_diagnostics_crosscheck.json`（`generate_iv_weak_diagnostics_crosscheck_fixtures.py`、アダプタ`ivdiag_ref.py`・`run_ivdiag.R`）。
+  実測の最大相対差はCD 2.1e-14・rk Wald F 2.3e-14・有効F 1.7e-12（実データ`card`。合成データは1e-13以下）。

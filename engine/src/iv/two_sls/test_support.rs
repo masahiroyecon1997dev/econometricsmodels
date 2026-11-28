@@ -158,8 +158,8 @@ pub(super) fn x_endog_empty_input() -> IvInput {
 /// クラスターロバストSEのテスト専用データ・グループ。`nontrivial_x_exog_input()`
 /// （操作変数2個）だと第一段階の傾き係数`q=3`（x1, z1, z2）に対しクラスター数`G=4`が
 /// 際どく、`Ŝ`（rank≤G）の傾き部分行列が数値的にほぼ特異になり`fit()`自体が
-/// `NearSingularMatrix`で失敗する（`engine/src/linear/CLAUDE.md`「クラスター数`G`と
-/// 傾き係数の数`q`の関係」参照、IVの第一段階にも同じ制約が当てはまる）。操作変数を
+/// `NearSingularMatrix`で失敗する（`docs/spec/ols-spec.md`
+/// 3.2節「クラスター」参照、IVの第一段階にも同じ制約が当てはまる）。操作変数を
 /// 1個に減らし（`q=2`）安全な余裕を持たせた専用データを使う。
 pub(super) fn cluster_test_input_and_groups() -> (IvInput, Vec<String>) {
     let y = vec![5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];

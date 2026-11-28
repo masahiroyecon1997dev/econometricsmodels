@@ -269,7 +269,7 @@ pub(crate) fn hcat(a: &Mat<f64>, b: &Mat<f64>) -> Mat<f64> {
 /// 一方、`k_constant`が誤って`0`になり、本来は傾き係数のみを対象とすべきWald F検定が
 /// 定数項列まで「傾き係数」として検定対象に含めてしまう（クラスターロバストSEでは
 /// 検定対象の次元`q`が実際より1個多くなり、`G≤q`の構造的特異性
-/// （`engine/src/linear/CLAUDE.md`「G≤qで構造的に特異」参照）に不必要に近づく。
+/// （`docs/spec/ols-spec.md`3.2節「クラスター」参照）に不必要に近づく。
 /// `docs/spec/iv-spec.md`3.7節に記録した`G=2`クラスター境界の
 /// `ComputationError`の根本原因であり、この関数の導入で修正した）。
 ///

@@ -96,7 +96,7 @@ pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), Co
 /// （`iv::two_sls`の`validate_second_stage`）。`OlsEstimator::fit`では`confidence_level`の検査の後に呼ぶ。
 /// `FeEstimator::fit`が直接呼ぶ
 /// `shared::least_squares::least_squares`（固定効果のみモデル、`x=[]`でk=0になりうる
-/// 正当なケース）はこの関数を経由しない（`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
+/// 正当なケース）はこの関数を経由しない（`docs/spec/ols-spec.md`3.1節「回帰変数が0個」参照）。
 ///
 /// `n`はエラーメッセージ（`CommonError::NoRegressors { n }`）用。呼び出し側は
 /// `InsufficientObservations`と同じ引数順（`n`→`k`）で渡す。

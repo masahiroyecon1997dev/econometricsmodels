@@ -62,7 +62,9 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
   と同じくキーが利用者の列名で決まる結果なので`dict`にする（`docs/spec/inference-conventions.md`6章）。
   `std_errors`はこの対角成分の平方根で、全手法・全`cov_type`で一致する（`tests/cross_method/
   test_cov_params.py`）。`OlsEstimator`自体は非公開フィールドとして保持し、クレート内の他系統からの
-  部分Wald検定の再利用にも使う（`engine/src/linear/CLAUDE.md`参照）。
+  部分Wald検定の再利用にも使う（`OlsEstimator::wald_test_last_columns(q)`。設計行列の末尾`q`列の係数を、その推定量を`fit()`した
+  `cov_type`の共分散と自由度で検定する。IVのWu-Hausmanが使う。外部で計算した共分散・自由度で検定したいFE・REは、下位の
+  `shared::wald::wald_f_test`を直接呼ぶ）。
 - `summary()`（テキスト整形）・DataFrame版の`params_table()`/`conf_int()`は作らない
   （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
   しないため）。
@@ -86,7 +88,8 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 ### 3.1 設計行列・係数計算
 
 - 係数は、ピボットなしQR `X = QR`から`β̂ = R⁻¹Q'y`で求める（残差は`y - Q(Q'y)`）。共分散・全体Fと同じQR
-  1本を使い、n×kの列ピボットQRと`(X'X)⁻¹`は走らせない（時間の根拠は`engine/src/linear/CLAUDE.md`）。
+  1本を使い、n×kの列ピボットQRと`(X'X)⁻¹`は走らせない（最初の実装は列ピボットQRを残して2本目のQRを足し、n=100万の
+  classicalで146→229ms（+50〜60%）遅くなった。QR1本への統合後は変更前より約20〜30%速い）。
   以下の特異性判定は、列を単位ノルムに揃えたこの`R`（k×k）の列ピボットQRに対して行う（`X`の列を揃えた
   行列と同じ特異値を持ち、閾値は相対`k·ε`で、列の単位に依らない。2SLS・FE・RE・FE-IVも同じ`new_checked`で判定する。条件数が1e12を超える設計は完全な共線として列名つきの`DESIGN_MATRIX_SINGULAR`にする（ダミー変数トラップ・重複列の条件数は1e14〜1e16で、ランク判定の閾値の境界に来て`DESIGN_GRAM`に転ぶのを防ぐ）。Logit・Probit・Tobitだけが`X`の列ピボットQRで求める従来の形）。以下の説明のうち`X`の`col_piv_qr`とあるのは、
   OLSでは`R`の`col_piv_qr`に読み替える。さらに、列を単位ノルムに揃えた`R`の条件数が5e7を超える設計は
@@ -102,6 +105,21 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 - `(X'X)⁻¹`（`shared::covariance::xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
   導出する案は実測で高速化しないことを確認済み）。OLSの標準誤差は`R⁻¹M̃R⁻ᵀ`で作るので使わない
   （RE・Wallace-Hussainのトレース形は`(Z'Z)⁻¹ = R⁻¹R⁻ᵀ`を`OrthonormalDesign::gram_inverse`で作る）。
+- **回帰変数が0個（k=0）**: 公開の`OlsEstimator::fit`は`NoRegressors`で拒否する。0列を扱えるのは`OrthonormalDesign`
+  （係数が空・残差が`y`）で、構造的にk=0が起こりうるFE（`x=[]`の固定効果のみのモデル）だけがこれを直接使う。
+  REのbetween回帰（切片固定）と最終回帰（定数列を必ず足す）は構造的にk=0にならない。WLSは利用者の入力をそのまま受け、
+  `fit`の検査に守られているだけ。IVの第二段階は`OlsEstimator`を使わないので`validate_second_stage`が自前で
+  `NoRegressors`（`SecondStageFailed`）にする（Pythonからは`engine_pybind`の`x_endog`の空の検査が先）。nonlinearは
+  別の`validate_has_regressors`で拒否する。
+- **設計行列を手放す経路**: `OlsEstimator::fit_releasing_design`は`OrthonormalDesign::new_checked_owned`で設計行列をその場で
+  分解し、設計行列・QRの格納・`Q`（`3·n·k`）が同時に生きる`fit`を`2·n·k`にする（推定量は設計行列を持たず、
+  `OlsInput::x()`を後で呼ぶとpanicする）。係数・標準誤差・統計量・残差は`fit`とビット単位で同じで、違うのは
+  `fitted_values()`が`Q·b̃`になる点だけ（`Xβ̂`と丸めの範囲でずれ、条件数に応じて上限`5e7`で相対`1e-8`級まで）。
+  `engine_pybind`のOLS・WLSが使う。REの最終回帰・IVの第一段階のように後で`input().x()`を読む呼び出し元は`fit`のまま。
+  `AuxiliaryFit`は`OlsEstimator`を作らず`Q`・`R`・`b̃`・残差だけを持つ補助回帰（REのハウスマン検定、IVのWu-Hausman）。
+  事前検査（回帰変数の有無・信頼水準・観測数・クラスター数・被説明変数）は`preflight`を`fit_ols`と`AuxiliaryFit::fit`が
+  共有し、検査や順序を片方だけ変えない。非有限値を含む入力で特定される列名は`fit`と異なりうる（復元した設計行列で
+  特定するため）。
 
 ### 3.2 標準誤差
 
@@ -172,6 +190,23 @@ KP・有効Fの診断は従来どおり`None`（診断統計量なので`fit()`�
     ほぼ特異になるケースは事前判定できないため、`ensure_well_conditioned_symmetric_matrix`による
     `ComputationError`（次節）がbackstopとして残る。
 - `G < 2`は`InsufficientClusters`で検証（0除算によるNaN伝播・パニックを防ぐため）。
+- **集計は`shared::covariance::cluster_meat`・`cluster_correction`に一本化**（OLS・nonlinear・2SLS・GMM・panelが共有し、
+  加算順をここ1か所で保つ）。行を観測順に1回走査して`G×k`のバッファへコードで足し込む。1つの`(g, a)`の合計は
+  「そのクラスターの行を観測順に足す」ままなので、クラスターごとに行インデックスを引く旧実装とビット単位で一致する。
+  旧実装はクラスターの行が散らばったデータで読み出しが飛び飛びになり遅かった（n=100万・k=5で1回0.05〜0.13秒、
+  行走査は0.003〜0.02秒。列ごとに全行を走査する形は行走査より遅い）。
+- **コード化は呼び出し側で一度だけ**: `engine_pybind`の`extract_cluster_groups`は行ごとの`String`を作らず、列の値そのもの
+  （文字列・整数の内部表現・浮動小数のビット列）でハッシュして仮コードを振り、ユニークな値ごとにだけ文字列表現を作って
+  `GroupCodes::from_factorized_without_keys`に渡す。順序（ラベルの辞書順）と同じ文字列になる値のまとめ方は`engine`の
+  `GroupCodes`だけが持つので、`from_labels`と同じコードになる。浮動小数の`-0.0`と`0.0`は文字列表現が違うので別グループ
+  （polarsの`unique`/`group_by`は同一視するので置き換えない）。以前は`String`列を検証で`HashSet`、集計で`BTreeMap`と
+  走査し直し、n=100万・G=10万で1回約0.17秒と約0.43秒かかった。抽出+コード化は約0.05〜0.15秒→約0.02〜0.08秒、
+  `Vec<String>`の約60MBを節約。クラスター用のコードはキーを持たない（`keys()`を呼ぶとpanic。キーが要るのはパネルの
+  entity/time/固定効果だけ）。コードの行数が`n`と違う入力は`ClusterDimensionMismatch`（`GroupCodes`が公開型のため。
+  無いと長いコードはpanic、短いコードは先頭の行だけの標準誤差を静かに返す）。`GroupCodes`の`==`はキーを見ない。
+- **HC・HAC・クラスターの演算順序は変えない**（`resid * x`を先に作ってから積み上げる、`bread * meat * bread`の結合順）。
+  変えると最終桁がずれ、`1e-8`の照合は通っても過去の出力とのビット一致が崩れる。HACとクラスターはスコアを返す
+  クロージャ`score(i, a)`で受け、n×kの行列を追加で確保しない（HCは`S'S`のためスコア行列を作る）。
 
 ### 3.3 適合度統計量
 
@@ -375,7 +410,7 @@ classical/HC1/clusterはstatsmodels以上に高速、HACも大規模データで
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
 faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`で常時`Par::Seq`に固定
 している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
-不安定になったため。`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
+不安定になったため。`.claude/rules/rust-style.md`「パフォーマンス」、実測は`docs/performance/ols.md`）。
 
 ### 3.9 `white_test()`（事後診断）
 
@@ -455,6 +490,9 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   `SSR_u`を直接求める（必要なのは`SSR_u`だけ）。Whiteと違い列を標準化（中心化）しないのは、切片なしの
   モデルを元の`X`のまま扱うため中心化すると列空間が変わるから（`SSR_u`は列の正のスケールでは変わらない）。
   完全適合（`SSR_u`が`k_aux·ε·Σû²`以下）はFの分母が0になるため`ComputationError`。
+  補助回帰の行列は`allocate_aux_matrix`で`try_reserve`してから埋め（サイズのオーバーフローと確保失敗を
+  `BREUSCH_GODFREY_MATRIX_TOO_LARGE`にする。QRの内部複製分も試しに確保する）、列のスケールはその場で書き換えて複製を増やさない。
+  `nlags`に割合・固定値の上限を置かないのは統計的に正当化できないため（上限は`n > k + nlags`のみ）。
 - **エラー**: `statistic`不正・`nlags < 1`・観測数が補助回帰の列数`k + nlags`以下
   （`InsufficientObservationsForAuxRegression`）・`time`列の不備・元のデータが無い結果は
   `ValidationError`、型違い（`time`/`statistic`が`str`でない・`nlags`が`int`でない）は`TypeError`。

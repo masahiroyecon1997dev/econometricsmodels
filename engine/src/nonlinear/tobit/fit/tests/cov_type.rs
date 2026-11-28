@@ -214,8 +214,8 @@ fn fit_cov_type_opg_hc0_hc1_match_independently_recomputed_values() {
 /// クラスターのグループ数は`G=4`（2件ずつ）にする。`multivariate_censored_input`は
 /// 傾き係数`q=2`（`x1`・`x2`、切片を除く）を持ち、Wald検定が`fit()`に
 /// 常時組み込まれたことで、クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約
-/// （`rank(Ŝ)≤G`、`engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の
-/// 関係」参照）がWald検定の`q×q`部分行列にも及ぶことが判明した。`G=2`（`q`と同数）
+/// （`rank(Ŝ)≤G`、`docs/spec/ols-spec.md`3.2節「クラスター」
+/// 参照）がWald検定の`q×q`部分行列にも及ぶことが判明した。`G=2`（`q`と同数）
 /// では実測でこの部分行列が特異になり`fit()`全体が`NearSingularMatrix`
 /// （`ComputationError`）になったため、
 /// `G>q`を満たす`G=4`に変更した（OLSの既存ガイドライン「境界の成功パスのテストでは
@@ -277,7 +277,7 @@ fn fit_non_classical_cov_types_work_with_bfgs_and_lbfgs() {
 /// `multivariate_censored_input`ではなく`censored_regression_input`（傾き係数
 /// `q=1`、`x1`のみ）を使う。Wald検定が`fit()`に常時組み込まれたことで、
 /// クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約（`rank(Ŝ)≤G`、
-/// `engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の関係」参照）が
+/// `docs/spec/ols-spec.md`3.2節「クラスター」参照）が
 /// Wald検定の`q×q`部分行列にも及ぶことが判明した。`multivariate_censored_input`
 /// （`q=2`）に対し`G=2`（G=2の境界値）を組み合わせると`q`と
 /// 同数になり、実測でこの部分行列が特異になり`fit()`全体が`NearSingularMatrix`

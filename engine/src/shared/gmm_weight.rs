@@ -92,8 +92,8 @@ pub(crate) fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: us
 /// クラスター頑健なモーメント分散共分散行列: `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（l×l）。
 /// `shared::covariance::cluster_meat`で`êᵢzᵢ`を集計するだけで小標本補正は無し
 /// （`gmm.rs`のモジュールdoc参照）。グループの反復順は`GroupCodes`のコード順
-/// （キーの辞書順）で、`cluster_meat`と同じ（`engine/src/linear/CLAUDE.md`
-/// 「踏んだ罠」参照、`HashMap`はグループの反復順序が実行のたびに変わりうる）。`groups`が
+/// （キーの辞書順）で、`cluster_meat`と同じ（`docs/spec/ols-spec.md`
+/// 3.2節「クラスター」参照、`HashMap`はグループの反復順序が実行のたびに変わりうる）。`groups`が
 /// `G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
 pub(crate) fn cluster_moment_covariance(
     z: &Mat<f64>,

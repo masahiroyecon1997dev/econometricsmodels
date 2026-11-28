@@ -23,14 +23,14 @@
 - **計測範囲の対称性**: engine は係数・標準誤差と同じ呼び出しの中で R²・調整済みR²・対数尤度・AIC・BIC・F統計量・F検定のp値まで**常に一括計算**する。statsmodels はこれらを遅延評価（`cached_value`）にしているため、`.fit()`直後に該当プロパティへ明示アクセスして「フルセットの適合度統計量込み」で計測範囲を揃えている
 - **スレッド数を1に固定**: engine・statsmodels（numpy/BLAS）とも`RAYON_NUM_THREADS=1`等でシングルスレッドに固定する（`_perf_harness._SINGLE_THREAD_ENV`）。engine側は faer のグローバル並列度を常時`Par::Seq`にしたため実質的に冗長だが、リファレンス実装と対称にする（両者とも逐次）目的で維持している。この選択がユーザー実環境（マルチスレッドBLAS）とどう乖離するかは下記「マルチスレッド環境での挙動」参照
 - **実行時間**: ウォームアップ1回 + `repeats`回実行（今回`repeats=3`）の中央値（`time.perf_counter()`）
-- **メモリ**: プロセス単位のピークRSS（`resource.getrusage(RUSAGE_SELF).ru_maxrss`）。`tracemalloc`はRust内部（faerの行列確保等）やnumpyバッファのようなネイティブメモリ確保を捕捉できないことを実測で確認したため不採用（設計行列だけで80MB相当のケースで3.8KB程度しか検知しなかった）
+- **メモリ**: プロセス単位のピークRSS（`resource.getrusage(RUSAGE_SELF).ru_maxrss`）。`tracemalloc`はRust内部（faerの行列確保等）やnumpyバッファのようなネイティブメモリ確保を捕捉できないことを実測で確認したため不採用（設計行列だけで80MB相当のケースで3.8KB程度しか検知しなかった）。**ピークRSSはライブヒープの見積り（`engine/examples/memory_probe.rs`）と食い違うことがある**: glibcの既定ではmmap閾値が動的に上がり、8MB級の列を早く`drop`してもRSSが下がらない（解放した領域を、後で確保する大きい行列が使えない）。RSSに効くのは、確保そのものをなくす変更（複製・設計行列の保持）と、mmapされる大きい行列の解放で、変更の効果は変更前後のピークRSSで確かめる
 - **サブプロセス隔離**: 1計測点＝1サブプロセス。同一プロセス内で連続測定するとアロケータが解放済みメモリを保持したままになり後続の計測のRSSが汚染されるため
 - **変換コスト除外**: polars→pandas変換（`df.to_pandas()`）は計測区間の外で1回だけ実施し、各試行で使い回す（リファレンス実装本体の処理ではないため）。engine側はArrowゼロコピーでpolarsをそのまま渡す
 - **スイープ軸**: n軸（k=5固定、n=10,000 / 100,000 / 1,000,000）、k軸（n=10,000固定、k=5・20）、cov軸（上記）。n軸・k軸は既定の classical のみ。
 
 ## 既知の限界
 
-- **engineのマルチスレッド線形代数が多コア機・負荷下で不安定だった（対応済み）**: スレッド数を制限しないと、classical n=1,000,000 でengineの実行時間がシングルスレッド時の約0.13秒から、全コア並列＋背景CPU負荷下では**中央値24.9秒**（無負荷でも中央値0.24秒・単発スパイク1.0秒）に膨れ上がる現象を実測。faerが`rayon` feature既定ONでグローバル並列度が`Par::Rayon(0)`（全コア）のまま、tall-skinnyな設計行列のQR/Gramを暗黙並列化していたことが原因（コードリグレッションではない）。**対策**: `engine::shared::parallelism::ensure_serial()`でfaerのグローバル並列度を常時`Par::Seq`に固定（全`Estimator::fit()`冒頭＋`#[pymodule]`初期化）。対応後は全コア並列＋負荷下でも0.39秒、無負荷で0.14秒（分散1/14）に安定。並列化は今後、実測で有効な箇所のみ`Par::Rayon`を明示opt-inする方針（`.claude/rules/rust-style.md`「パフォーマンス」・`engine/src/linear/CLAUDE.md`）。tall-skinny OLS では暗黙の全コア並列化が高速化しないのは OpenBLAS も同様で、statsmodels 側も1スレッドの方が速い（下記「マルチスレッド環境での挙動」）。WSL2固有か native 多コア Linux でも同程度かは未検証（傾向自体はスレッドプールのオーバーサブスクリプションの一般的挙動でOS問わず出るはず）。
+- **engineのマルチスレッド線形代数が多コア機・負荷下で不安定だった（対応済み）**: スレッド数を制限しないと、classical n=1,000,000 でengineの実行時間がシングルスレッド時の約0.13秒から、全コア並列＋背景CPU負荷下では**中央値24.9秒**（無負荷でも中央値0.24秒・単発スパイク1.0秒）に膨れ上がる現象を実測。faerが`rayon` feature既定ONでグローバル並列度が`Par::Rayon(0)`（全コア）のまま、tall-skinnyな設計行列のQR/Gramを暗黙並列化していたことが原因（コードリグレッションではない）。**対策**: `engine::shared::parallelism::ensure_serial()`でfaerのグローバル並列度を常時`Par::Seq`に固定（全`Estimator::fit()`冒頭＋`#[pymodule]`初期化）。対応後は全コア並列＋負荷下でも0.39秒、無負荷で0.14秒（分散1/14）に安定。並列化は今後、実測で有効な箇所のみ`Par::Rayon`を明示opt-inする方針（`.claude/rules/rust-style.md`「パフォーマンス」）。tall-skinny OLS では暗黙の全コア並列化が高速化しないのは OpenBLAS も同様で、statsmodels 側も1スレッドの方が速い（下記「マルチスレッド環境での挙動」）。WSL2固有か native 多コア Linux でも同程度かは未検証（傾向自体はスレッドプールのオーバーサブスクリプションの一般的挙動でOS問わず出るはず）。
 - 計測は開発コンテナ（devcontainer）上の1回のスイープ（`repeats=3`の中央値）。環境ノイズ・実行順序の影響を排除しきれていない。CI（`benchmark_performance.yml`、`ubuntu-latest`）でも同じスクリプトを回すが、共有ランナーのため数値は参考値。
 
 ## マルチスレッド環境での挙動（1スレッド固定の妥当性）

@@ -63,7 +63,7 @@
 
 ## fit中のメモリ（ピークRSS）
 
-- **Python側のピークRSSに効くのは、確保そのものをなくす変更と、mmapされる大きい行列の解放だけ。変更は`resource.getrusage`で前後のピークRSSを測って確かめる（ライブヒープの`engine/examples/memory_probe.rs`は見積りで代わりにならない）**: glibcの動的なmmap閾値のため、8MB級の列を早く解放してもRSSは下がらない。詳細: `docs/spec/nonlinear-common.md`1.5節、`engine/src/linear/CLAUDE.md`。
+- **Python側のピークRSSに効くのは、確保そのものをなくす変更と、mmapされる大きい行列の解放だけ。変更は`resource.getrusage`で前後のピークRSSを測って確かめる（ライブヒープの`engine/examples/memory_probe.rs`は見積りで代わりにならない）**: glibcの動的なmmap閾値のため、8MB級の列を早く解放してもRSSは下がらない。詳細: `docs/spec/nonlinear-common.md`1.5節、`docs/performance/ols.md`「メモリ」。
 - **設計行列の複製を、最適化に使い続ける行列と同時に生かさない**: Logit/Probitの`ols_based_initial_params`はその場でQRし（`col_piv_qr_in_place_lstsq`）、Tobitは`OrthonormalDesign::new_checked_owned`で`x_std`を消費する。スコアを使う`cov_type`は上の`run_solver_keeping_problem`。詳細: `docs/spec/nonlinear-common.md`1.5節。
 
 ## Tobitのproperty-basedテスト（`tobit/fit/tests/proptests.rs`・`tobit/target.rs`・`tobit/problem.rs`の`mod proptests`）

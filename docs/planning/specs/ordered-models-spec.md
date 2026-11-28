@@ -89,8 +89,8 @@
 | F1 | 主リファレンスと交差検証 | 主=statsmodels`OrderedModel`（Issue）か主=R`MASS::polr`（`nonlinear-common.md`8章）か。statsmodelsの限界（`params`が`log`増分・既定`nm`・`hc1`の補正なし・限界効果なし）と、両者のHessianが数値微分である点 | **9章**。主=statsmodels（`newton`）、交差検証=R（`polr`＋`sandwich`）。statsmodelsに無い・合わない量（`hc1`・`opg`・限界効果）はRが主。SE等は参照実装間の実測の差から許容誤差を決める。自前のオラクルは参照にしない | **確定**: 9章の表のとおり |
 | F2 | 比較する量 | `params`（`β`・`τ`）・`std_errors`・LR・対数尤度・AIC/BIC・カテゴリ別確率・（E6を含めるなら）限界効果。statsmodelsの`log`増分尺度の共分散はデルタ法で`τ`の尺度へ変換して比べる | 左のとおり | 未決 |
 | F3 | 許容誤差 | 既定`RTOL=1e-8`。最適化器の許容誤差の差で`polr`は`~1e-6`ずれうる（Probitの`glm`の前例）。再fitで消す手順を使うか | 実測してから`tests/support/_tolerances_nonlinear.py`に例外を足す | 未決 |
-| F4 | 合成データ | `generate_ordered_choice_dataset(scenario, link)`を`benchmark/nonlinear/datasets.py`に足す。シナリオ候補: `baseline`（`K=4`）・`k3`（最小）・`k30`（最大）・`near_separation`・`sparse_category`（少数セル）・相関の強い`x`・`no_x`相当（B7次第）・`cluster`・`large_means` | 候補を確認してから決める | 未決 |
-| F4' | 実データ | 順序の被説明変数を持つ公開データ。Wooldridgeの`beauty`（`looks`が1〜5）等が候補（**データの内容は未確認**）。既存の実データは`mroz`・`apple` | 利用者に候補を確認する | 未決 |
+| F4 | 合成データ | `generate_ordered_choice_dataset(scenario, link)`を`benchmark/nonlinear/datasets.py`に足す。2値モデルの共通シナリオに順序モデル固有のシナリオを足す | **10章**。共通11＋固有7シナリオと、`baseline`の派生（クラスター・信頼水準・`solver`・コードのずらし）。全シナリオで試作の生成関数の成立を確認済み | **確定**: 10章のとおり |
+| F4' | 実データ | 順序の被説明変数を持つWooldridgeのデータ。候補を走査（118データセット） | **10章**。`happiness`（`happy`、K=3、n=16991、地域G=9でクラスター）と`beauty`（`looks`、K=5、両端が少数）を推奨。`beauty`に`belavg`を入れると実データの分離の例になる。`affairs`（`ratemarr`、K=5）は予備 | **確定**: 10章のとおり |
 | F5 | テストの網羅性 | `testing-policy.md`の網羅性要件（`cov_type`×`solver`×切片なしの扱い・クラスター境界・信頼水準・検証順序・pickle・GIL・panic境界・エラー`code`）。`/test-new`と`/review-testing`で確認 | 左のとおり | 確定 |
 | F6 | 性能比較 | `performance/compare_ordered_logit.py`・`compare_ordered_probit.py`。statsmodelsの最適化器（`bfgs`か`newton`）をどれにするか（`nm`は不公平）。`n`の掃引に加え`K`の掃引 | `solver`軸と`n_sweep_engine_only=(200_000, 1_000_000)`の大標本ガードを既存手法と同型に | 未決 |
 
@@ -303,3 +303,51 @@
 - **自前実装のオラクルは参照にしない**（ユーザーの方針: 実装者と同じ理解を共有するので客観性が弱い）。使うのは、参照実装同士が食い違ったときにどちらが真値に近いかを確かめる補助に限る。
 - Probitの前例（Rの`glm()`の既定`vcov`が非正準リンクで期待情報行列になるため、R側で観測情報行列を解析式で組んだ）は、順序モデルでは不要。`polr`の`vcov`は最適化の数値Hessian（観測情報行列）なので種類は一致し、差は数値微分の誤差だけ。
 - `nonlinear-common.md`8章（順序モデルの主リファレンスを`MASS::polr`としている）は、`docs/spec/`への集約時にこの表に合わせて直す。
+
+## 10. F4の検討結果（合成データと実データ）
+
+### 10.1 合成データ
+
+`benchmark/nonlinear/datasets.py`に`generate_ordered_choice_dataset(scenario, link, n=500, k=3, K=4, seed)`を足す。潜在変数`y*=Xβ+ε`（`ε`はロジスティックまたは標準正規）を閾値で切って`y=1..K`を作る。2値モデル（`generate_binary_choice_dataset`）と同じく`tests/fixtures/benchmarks/data/`にCSVで固定し、テストはCSVを読む。閾値は真の値として固定する（真の係数と比べられるように）。
+
+**試作の生成関数で成立を確認した**（seed 0〜19、logitとprobit。LPで分離が無いこと、statsmodels（`newton`）が収束すること）: `baseline`・`small_n`・`k_min`・`k_max`・`sparse_category`・`near_separation`・`many_regressors`は20/20で成立。`boundary_df1`（`n=k+K`）は20本中16〜17本が分離せず成立するので、成立するseedを選ぶ。
+
+| シナリオ | 内容 | 目的 | 結果の扱い |
+|---|---|---|---|
+| `baseline` | `n=500`・`k=3`・`K=4` | 標準 | 参照と照合 |
+| `small_n` | `n=40`・`K=3` | 小標本 | 参照と照合 |
+| `moderate_multicollinearity` | 2値と同じ | ある程度の多重共線性 | 参照と照合 |
+| `high_condition_number` | 相関0.99超 | 悪条件 | 参照と照合 |
+| `scale_variance` | 列のスケールが`1e6`・`1e-3` | 極端なスケール差 | 参照と照合 |
+| `many_regressors` | `k=20`、係数を小さく較正 | 列数依存のバグ | 参照と照合 |
+| `outlier_regressor` | 5%の観測が極端な値 | 高レバレッジ行 | 参照と照合 |
+| `near_separation` | `x1`の係数を大きく（logit 8・probit 4程度、実装時に較正） | 分離に近いが有限のMLE | 参照と照合 |
+| `perfect_multicollinearity` | 完全な共線 | ランク落ち | `ComputationError`のみ確認 |
+| `complete_separation` | カテゴリが`x1`の区間で決定論的に決まる | 完全分離 | `SEPARATION_DETECTED`のみ確認 |
+| `quasi_complete_separation` | 最上位カテゴリにだけ現れるダミー | 準完全分離 | 同上。最下位だけ・1観測違い（`near_miss`、分離なし）もLPの回帰ガードとして使う（6章） |
+| **`k_min`**（固有） | `K=3` | カテゴリ数の下限 | 参照と照合 |
+| **`k_max`**（固有） | `K=30`（約17観測/カテゴリ） | カテゴリ数の上限。閾値29個・LPの変数32個 | 参照と照合 |
+| **`sparse_category`**（固有） | 最上位カテゴリが約1%（5観測） | 閾値が近い・小さい確率（C4） | 参照と照合 |
+| **`boundary_df1`**（固有） | `n=k+K`（`df_resid=1`）、`k=1`・`K=3` | 自由度ちょうど1の成功パス | 参照と照合（分離しないseed） |
+| **`large_means`**（固有） | 平均が標準偏差より大きい列（中心化しないと悪条件） | 中心化（C2）の回帰ガード | 参照と照合 |
+| **`heteroskedastic`**（固有） | 潜在誤差の尺度が`x`に依存（誤設定） | ロバストSEが`classical`と実質的に異なる状況での`cov_type`の検証 | 参照と照合 |
+
+**`baseline`の派生**（2値モデルと同じ形）: `cluster`（均等）・`cluster_imbalanced`（不均衡）・`cluster_g4`（`G=q+1`の境界、`q=k=3`。`G≤q`は`ValidationError`のテスト）・`confidence_level`（0.90）・`solver`（`bfgs`・`lbfgs`）。順序モデル固有の派生として**`shifted_codes`**（`y`のコードを`0..K-1`や負の値にずらす。推定値は`baseline`と同じで、閾値の名前（`"-1|0"`等）・`categories`・`predict()`のキーを確かめる）。`no_intercept`は切片が無いので無い。
+
+**テスト方針の観点との対応**: 「分散が大きい」は、順序モデルでは潜在誤差の尺度が識別されない（`β/σ`しか推定できない）ので、小さい係数（`many_regressors`）と同じで別のシナリオは作らない。「不均一分散」は`heteroskedastic`。「自己相関」はHACが無いので対象外。
+
+### 10.2 実データ（Wooldridge）
+
+118データセットを走査し、整数で3〜10個の連続した値をとる列のうち、順序の意味を持つものを候補にした。`happiness`の`happy`は文字列（3水準）なので、読み込みで`1..3`に直す。
+
+| データ | `y` | `K` | `n` | カテゴリの観測数 | 説明変数（案） | クラスター | statsmodels・`polr` |
+|---|---|---|---|---|---|---|---|
+| **`happiness`**（GSS） | `happy`（1=not too happy, 2=pretty happy, 3=very happy） | 3 | 16991（使う列の欠損を除く） | 2076・9707・5208 | `educ`・`female`・`black`・`babies`・`preteen`・`teens` | `region`（9地域、`G=9>q=6`） | 両方収束、対数尤度一致 |
+| **`beauty`** | `looks`（1〜5） | 5 | 1260 | **13**・142・722・364・**19** | `lwage`・`educ`・`exper`・`female`・`married`・`black`・`goodhlth` | 無し | 両方収束、対数尤度一致 |
+| `affairs`（予備） | `ratemarr`（結婚生活の評価1〜5） | 5 | 601 | **16**・66・93・194・232 | `age`・`yrsmarr`・`kids`・`relig`・`educ`・`male` | 無し | 両方収束、対数尤度一致 |
+
+- **`beauty`の`belavg`・`abvavg`は`looks`から作られた列**（`looks≤2`、`looks≥4`）で、説明変数に入れると準完全分離になる。実測でLPは分離と判定し（マージン0.87）、statsmodelsはlogitで`LinAlgError`、probitで`|β|=29`の未収束になった。**実データでの`SEPARATION_DETECTED`の回帰ガード**に使う（参照との照合はしない）。成功パスの説明変数からは必ず除く。
+- `happiness`は実データのクラスターロバストSEを担う（Logit/Probitの`apple`に相当）。`region`は文字列で、クラスター列として受け付ける型。
+- その他の候補（不採用）: `loanapp.action`（承認・条件変更・却下。順序の解釈に議論の余地がある）、`alcohol.status`・`injury.injtype`・`discrim.chain`（名義尺度）、`apple.hhsize`等（個数）。
+
+**決定（確定）**: 実データは`happiness`（全`cov_type`、`cluster`は`region`）と`beauty`（`cluster`以外の全`cov_type`、`belavg`入りは分離のエラーパス）。`affairs`は予備（中くらいの`n`と小さいカテゴリの組み合わせが必要になったら足す）。Wooldridgeのデータは固定化の対象外なので、既存と同じく`load_wooldridge.py`経由で読み、`happy`の数値化と欠損行の除外はローダー側で行う。

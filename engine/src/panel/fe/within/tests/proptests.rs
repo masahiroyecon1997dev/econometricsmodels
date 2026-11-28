@@ -3,8 +3,8 @@
 //! `N != T`の非対称なバランスパネルでも「entity→time逐次quasi-demean」が閉形式の
 //! 二重デミーニングと一致することをランダムデータで検証する。閉形式側は
 //! `quasi_demean_column`/`within_transform_two_way`を一切経由せず素朴な二重ループで
-//! 独立に計算する（`engine/src/iv/CLAUDE.md`「自己参照的なオラクルは実装と同じ間違いを
-//! 複製する」と同じ教訓を踏まえ、実装の内部関数を再利用しない独立実装にしている）。
+//! 独立に計算する（実装と同じ式を再利用する自己参照的なオラクルは実装と同じ間違いを
+//! 複製する、という教訓（`docs/spec/iv-spec.md`3.1節・3.5節）を踏まえ、実装の内部関数を再利用しない独立実装にしている）。
 
 use crate::panel::fe::input::FeInput;
 use crate::panel::fe::within::within_transform_two_way;

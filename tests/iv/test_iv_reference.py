@@ -32,8 +32,8 @@ Note:
       モジュールdocコメント参照）。独立実装のR `ivreg`は`test_iv_crosscheck.py`で
       検証している。df1（自由度1境界）はaugmented regressionが
       saturated（残差自由度0）になるため全cov_typeでフィクスチャが`None`に
-      なり、本実装側も同じ理由でNoneを返す（`engine/src/iv/CLAUDE.md`
-      「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）。
+      なり、本実装側も同じ理由でNoneを返す（`docs/spec/iv-spec.md`
+      3.6節参照）。
     - `weak_instrument_f_statistics`は本実装が常にclassical（等分散前提）で
       計算する設計のため、フィクスチャの`weak_instrument_f_independent`
       （statsmodelsで独立計算した同じ定義のnested F検定）と比較する
@@ -260,7 +260,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
 
 def test_cluster_g2_matches_linearmodels(fixtures):
     """クラスタ数境界（G=2ちょうど）の成功パス。`x_exog=[]`・`instruments`1本・
-    行番号%2の疑似グループ（`engine/src/iv/CLAUDE.md`「修正済み」の再現条件と
+    行番号%2の疑似グループ（`docs/spec/iv-spec.md`3.7節の再現条件と
     同じ。構造確認は
     `test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）。
     """

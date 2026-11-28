@@ -20,7 +20,7 @@ pub type FirstStageOutput<T> = (Vec<(String, T)>, Vec<(String, f64)>);
 /// `TwoSlsEstimator::fit`（`two_sls/fit.rs`、第二段階の予測値`x̂_endog`を得るために内部で
 /// 使う）・`engine_pybind`の`fit`（`estimator="gmm"`でも同じ診断情報を独立に提供するため、
 /// `GmmEstimator`を経由せず直接呼ぶ）の両方から使う、2SLS/GMM間で真に共有されるロジック
-/// （`iv/CLAUDE.md`「2SLSとGMMの独立実装方針」参照——GMMはモーメント条件`Z'(y-Xβ)=0`を
+/// （`docs/spec/iv-spec.md`3.7節参照——GMMはモーメント条件`Z'(y-Xβ)=0`を
 /// 直接解くため点推定自体には第一段階回帰を必要としないが、第一段階回帰・弱操作変数診断
 /// 自体は`estimator`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
 /// SEサンドイッチ計算（2SLSは`X̂`、GMMは`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`で代数が異なる）とは性質が異なる）。

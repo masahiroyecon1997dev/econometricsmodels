@@ -182,7 +182,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   一本化する（加算順・`Par::Seq`の指定・対称化といった数値上の判断を1か所に固定するため）。
   Wald二次形式（対称化込み）も共有版（`wald_f_test`・`wald_chi2_test`）を使う。
   OLS固有の調整はここに持ち込まない。GMMのモーメント共分散行列（`shared/gmm_weight.rs`）と`cov_type`用の
-  `Ω̂`（`gmm/sandwich.rs`）も同じ共有関数を`Z`で呼ぶ（`iv/CLAUDE.md`「共分散・検定の共有範囲」参照）。
+  `Ω̂`（`gmm/sandwich.rs`）も同じ共有関数を`Z`で呼ぶ。カーネル和やWaldの形まで推定量ごとに持つと、`Par::Seq`の指定や
+  Waldの対称化のような数値上の修正が複製の数だけ必要になり、適用漏れが起きる（IV・Tobitだけ対称化が無く、傾きが
+  準共線だとWald統計量が大きく外れた。`tests/cross_method/test_wald_ill_conditioned.py`）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
   （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`gmm_weight_type`と`cov_type`は
   独立な選択のため一般に一致せず、「効率的GMM」の特殊ケースでも`B⁻¹`のみへの簡略化分岐は
@@ -219,6 +221,19 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   `CommonError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
   `gmm_type="two_step"`/`"iterated"`のとき検証する（`"one_step"`は`gmm_weight_type`を
   使わないため検証しない）。悪条件の`ComputationError`はbackstopとして残る。
+- **GMMの重み行列`S`には小標本補正を入れない**: `β̂(W)`は`S`の正のスカラー倍で変わらない（`W=S⁻¹`が分子・分母で
+  相殺する）ので、HC1の`n/(n-k)`やクラスターの`(G/(G-1))((n-1)/(n-k))`のような一様な補正は意味を持たない
+  （`gmm_point_estimate_is_invariant_to_positive_scaling_of_s`）。HC2/HC3のレバレッジ補正は成分ごとに違うので、この
+  理屈が使えず、`gmm_weight_type`にHC2/HC3相当の区分は無い。共分散のサンドイッチも同じスケール不変性で、`one_step`の
+  `S_used`に`σ̂²₀Z'Z`を使っても`cov_params`は変わらない（`fit_computes_hc1_std_errors_matching_manual_formula_with_one_step_gmm`）。
+- **GMMの`cov_type=classical`は残差を中心化して`σ̂² = Σ(êᵢ-ē)²/df_resid`を作る**: 2SLS/OLSは定数項があれば正規方程式で
+  `ē=0`だが、GMMの一次条件`X'ZWZ'ê=0`は`gmm_weight_type=classical`以外では`ē=0`を保証しない（`robust`・`cluster`・`hac`で
+  最大0.003%程度ずれる）。linearmodelsの`HomoskedasticWeightMatrix`も常に中心化する（docstringに明記）。HC0-3・HAC・
+  クラスターの`Ω̂`はlinearmodelsも`center=False`が既定なので中心化しない。手計算のオラクルが実装と同じ非中心化を
+  複製すると検出できないので、`gmm_weight_type≠classical`で独立に検証する。
+- **クラスター列は`engine_pybind`が一度だけ整数コード（`GroupCodes`）にして渡し、engineは借りて使う**（検証・集計・
+  第一段階・Wu-Hausmanの拡張回帰で同じコード）。`cov_type`と`gmm_weight_type`のコードは、同じ列名でも別々に渡される
+  別物。第一段階には`cov_type`ごと渡すが、2SLSは第一段階の推定量を保持しないのでコードは結果の寿命まで残らない。
 
 ### 3.2 検定分布
 
@@ -290,6 +305,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   実装済み（3.4.1節）だが、Pythonには未公開（バインディングは別途）。
 - `x_exog=[]`かつ`include_intercept=false`（制限モデルに回帰変数が1つも無い）の退化ケース
   はSSRを`y_endog`自体の二乗和として直接計算する特別扱いをしている。
+- 制限モデルの設計行列は、full column rankと検証済みの制限なしモデルの列の部分集合なので必ずfull column rankで、
+  列を単位ノルムに揃えた条件数も全体以下（特異値の交差定理）。そのため制限モデルの`OrthonormalDesign::new_checked`の
+  失敗は理論上到達不能として`?`で伝えるだけにしている（`xtx_inverse`と同じ防御的な`Result`化）。
 
 #### 3.4.1 Cragg-Donald統計量とStock-Yogo臨界値
 
@@ -476,8 +494,8 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
   - **`hc0`〜`hc3`は同じ値**。`S`は小標本補正もレバレッジ補正も入れない素の`Σ ε̂ᵢ²zᵢzᵢ'`
     （`gmm_weight_type="robust"`と同じ。`J`は`S`の尺度に依存するので、`n/(n-k)`のような一様な補正も
     入れない。クラスターの`(G/(G-1))((n-1)/(n-k))`、HACのBartlettカーネル以外の補正も同様）。
-  - **`None`になる条件**（`fit()`は失敗させない。診断1つのために必須の出力を捨てないという線引きは
-    `iv/CLAUDE.md`）: 丁度識別、`cov_type=cluster`でクラスター数`G`が全操作変数の数`l`より少ない
+  - **`None`になる条件**（`fit()`は失敗させない。診断1つのために必須の出力を捨てない。近共線な外生変数×クラスターで、
+    以前成功していた2SLSが`ComputationError`になる退行が実際に出た。`tests/cross_method/test_near_collinear_exact.py`が守る）: 丁度識別、`cov_type=cluster`でクラスター数`G`が全操作変数の数`l`より少ない
     （`rank(S) ≤ G`で`S`が必ず特異。`gmm_weight_type="cluster"`は点推定に必要なので
     `InsufficientClustersForWeightMatrix`で弾くのとは対照的）、重みの白色化・`Ĝ`の分解が
     `NearSingularMatrix`（`GmmWeight`・`GmmBread`）で失敗する（近共線な外生変数×クラスターの重みなど。
@@ -530,6 +548,9 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
   握りつぶさず`IvError::HausmanRegressionFailed`として伝播する**（広すぎる`Err(_)`
   キャッチで実装バグを隠さないため）。
 - `x_endog=[]`のときも`None`（同じ意味論に統合）。
+- **p値のF分布の分母自由度は拡張回帰自身の`df_resid`（主構造式の`df_resid - n_endog`）**（`OlsEstimator::wald_test_last_columns`
+  と同じ）。統計量は主モデルの自由度に依存しないので、主構造式の`df_resid`を流用しても統計量は機械精度で一致し、p値
+  だけが最大0.2%程度（`small_n`、自由度37と36）ずれる。統計量とp値は別々に照合する。
 
 ### 3.7 `first_stage()`
 
@@ -544,6 +565,13 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
   （設計行列を持つ）は`compute_first_stage_with`が内生変数ごとに消費して手放し、
   同時に持つ設計行列を1つに抑える（内生変数の数だけ`fit`の終わりまで持つと、ピークメモリが
   その数に比例して増えた）。
+- **第一段階の`OlsInput`には、焼き込み済みの定数項列を除いた素の`x_exog`と`include_intercept=input.has_intercept()`を渡す**
+  （`common/input.rs`の`without_baked_in_intercept`）。`OlsInput.has_intercept`は切片列の追加と`k_constant`の両方を兼ねるので、
+  二重切片を避けようとして`false`を渡すと`k_constant=0`になる。`r_squared`・`adj_r_squared`（TSSの中心化）はエラーにならず
+  静かに誤り、F検定の`q`が1つ増えて`G=2`・`q=1`の最小ケースが`ComputationError`になる。`params`・`std_errors`は
+  `k_constant`に依存しないので、参照実装との比較では検出できない（`tests/iv/test_iv_first_stage.py`が同じ入力の`OLS`と
+  直接比べる）。Wu-Hausmanの拡張回帰も同じ渡し方。第二段階・部分Fの制限モデル・Sarganは`OlsInput`を経由せず、
+  定数項込みの`x_exog`をそのまま行列として使う。
 - 返す`OLSResults.f_statistic`/`f_p_value`は`x_exog`の寄与を含む通常のOLS F検定であり、
   弱操作変数診断の部分F統計量（3.4節）とは別物。
 - **`cov_type="cluster"`でクラスター数`G`が第一段階の傾き係数の数`q_first`以下（構造方程式は
@@ -599,7 +627,7 @@ error.rs`）:
   外した後の除外操作変数が内生変数より少ないときは`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`（`ValidationError`。既存の`INSUFFICIENT_INSTRUMENTS`は文面と`hint`が「操作変数を足す」で、検定する操作変数を減らす案内にならない）。`target`の添字の誤りは`INTERNAL_ERROR`（呼び出し側の責務）。
 - `Z_c`が丁度識別なら`J_c`は厳密に0を返す（推定しない）。
 - **定数項なしの`Classical`はlinearmodelsと一致しない**: linearmodelsは`Classical`の`σ̂²`を残差を中心化して作るが、ここでは`fit()`のHansen Jと同じく中心化しない。定数項があれば残差の平均が0で一致する。`Robust`・`Hac`・`Cluster`は定数項なしでも一致する（`robust`・`hac`をテストで固定）。
-- `S`は`n`で割らない生の和、Jも`n`で割らない（`iv/CLAUDE.md`）。重み行列の構築は`shared/gmm_weight.rs`の`moment_covariance`で、`gmm_iterate`と共有する。
+- `S`は`n`で割らない生の和、Jも`n`で割らない（3.5節）。重み行列の構築は`shared/gmm_weight.rs`の`moment_covariance`で、`gmm_iterate`と共有する。
 
 検証: 内生性の検定はlinearmodels 7.1の`c_stat`（`1e-14`台で一致するnumpy版を介して、`engine/src/iv/gmm/c_statistic/tests/reference.rs`に値を固定）、
 操作変数の直交性はlinearmodelsに無いので、同じnumpy版の値（`IVGMM`の`weight_matrix`・`estimate_parameters`・`_j_statistic`を部品にした別の計算と`1e-13`で一致を確認）。
@@ -687,6 +715,17 @@ error.rs`）:
   チェックする。GMMも同じ`card`で、`test_iv_gmm_reference.py`（linearmodels、classical重み×
   全cov_type＋robust/hac重み×classical共分散）・`test_iv_gmm_crosscheck.py`（momentfit）の
   両方を照合する（`card`にはクラスター列が無いためcluster重み・cluster共分散は含めない）。
+- **HACのテストは`lags=None`（自動）・`lags=Some(正の値)`（Bartlettの重み付けループ本体）・`time_order`の3種をそろえる**:
+  `lags=Some(0)`（HC0と一致する退化ケース）とエラーパスだけではループ本体が一度も通らず、`cargo llvm-cov`の%では
+  気づきにくかった。2SLSは`two_sls/cov/tests/hac.rs`の`manual_hac_std_errors`（素朴な二重ループの独立計算）、GMMの重みは
+  `gmm/fit/tests/weight_robust_hac.rs`。単純なgetter（`dep_var_name()`・`nobs()`・`k()`）も値のテストが読まずに
+  未カバーになったので、`fit_succeeds_when_over_identified`でまとめて読む。
+- **property-basedテスト**: 生成器・`IvCase`・`assert_approx_eq`は`common/proptest_support.rs`に一本化し、2SLSとGMMが
+  共有する。`x_endog`は操作変数の正の重み付き和＋第一段階誤差で生成し、`prop_assume!(fit().is_ok())`を安全弁にする。
+  丁度識別と過剰識別を生成器の引数で切り替える。2段階GMMの重みは`Z`の列の変換に追従するので、`Z`の列を定数倍する
+  バグ注入は列順序の不変性では検出されない見込みで、注入は`X`側の列で行う（そうして失敗を確認した）。`n > 50`のときだけ
+  発現する注入にすると、`n`が小さい固定値のテストでは出ずproptest（`n=40..=80`）だけが失敗することを確かめられる。
+  注入で生成された`proptest-regressions/`はコミットしない。
 - テストファイル: `tests/iv/test_iv_api.py`（成功パスの構造・API・オプション反映）/
   `test_iv_validation.py`（`ValidationError`/`ComputationError`パス）/
   `test_iv_reference.py`（linearmodels、2SLS）/ `test_iv_gmm_reference.py`（linearmodels、

@@ -841,7 +841,7 @@ def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_l
 ):
     """`estimator="gmm"`固有のValidationErrorパス。`gmm_weight_type="cluster"`の重み行列`S`
     （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
-    （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
+    （`docs/spec/iv-spec.md`3.1節参照）。
     `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`、過剰識別）
     だと`S`が構造的に特異になるため、`fit()`冒頭で`ValidationError`
     （`IvError::InsufficientClustersForWeightMatrix`）として弾く。`gmm_type="one_step"`
@@ -900,7 +900,7 @@ def test_gmm_cluster_weight_type_cluster_count_boundaries(
     """`gmm_weight_type="cluster"`のクラスター数の境界の、失敗の反対側（成功）。
     `test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_
     than_instrument_count`（過剰識別でG<l）と対にする（閾値は識別状態で異なる、
-    `engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
+    `docs/spec/iv-spec.md`3.1節参照）。
     `cov_type="classical"`のため、この検証だけが効く。
 
     過剰識別でG=lちょうどは`two_step`のみ確認する。`iterated`では、重みを残差から

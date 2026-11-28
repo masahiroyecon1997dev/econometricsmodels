@@ -354,8 +354,8 @@ def _run_cluster_case(
 
 def _run_cluster_g2_case(tmpdir: Path) -> dict:
     """G=2境界の成功パス確認用（`generate_iv_fixtures.py`の
-    `_run_cluster_g2_case`と同じ再現条件、`engine/src/iv/CLAUDE.md`
-    「修正済み」参照）。
+    `_run_cluster_g2_case`と同じ再現条件、`docs/spec/iv-spec.md`
+    3.7節参照）。
     """
     csv_path = DATA_DIR / "iv_baseline_g2.csv"
     df, _ = load_frozen_dataset("iv", "baseline_g2")
@@ -491,7 +491,7 @@ def build_fixtures() -> dict:
             "同じ構成）。"
             "perfect_multicollinearityはここに含まない（ComputationErrorの"
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
-            "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"
+            "パス）は`docs/spec/iv-spec.md`3.7節に記録の`k_constant`"
             "取り違えバグの修正後にフィクスチャ化した。"
             "high_condition_number・moderate_multicollinearityはclusterも持つ。"
             "cardはクラスター（居住地域から作った9グループ）も持つ。three_endogは"

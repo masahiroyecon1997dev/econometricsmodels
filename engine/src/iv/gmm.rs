@@ -44,7 +44,7 @@
 //! 達しても収束しなかった場合、`raise_on_non_convergence=true`（既定）なら
 //! `CommonError::GmmNonConvergence`、`false`なら`converged=false`のまま結果を返す
 //! （`nonlinear::common::run_solver`の`raise_on_non_convergence`と同じ設計、
-//! `engine/src/iv/CLAUDE.md`参照）。`OneStep`/`TwoStep`は収束判定自体を行わないため
+//! `docs/spec/iv-spec.md`3.3節参照）。`OneStep`/`TwoStep`は収束判定自体を行わないため
 //! `converged`は常に`true`、`n_iter`は実際の推定回数（1・2）。
 //!
 //! `S`は「その逆行列を重みとして使う」以外の用途を持たないため、**任意の正のスカラー倍で
@@ -205,7 +205,7 @@
 //! 共分散・検定の中立な計算（外積の和・カーネル和・クラスターの蓄積と小標本補正・Waldの形・
 //! サンドイッチの代数・Hansen J統計量）は`shared::covariance`・`shared::wald`・`shared::gmm`の
 //! 共有関数を使い、スコアに依存する部分（レバレッジと補正係数）と`Ω̂`の組み立てだけを
-//! 推定量ごとに決める（`iv/CLAUDE.md`「共分散・検定の共有範囲」参照）。
+//! 推定量ごとに決める（`docs/spec/iv-spec.md`3.1節参照）。
 
 use crate::iv::common::{IvError, IvEstimate, IvInput};
 use crate::linear::ols::CovType;

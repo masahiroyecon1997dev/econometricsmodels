@@ -22,8 +22,8 @@
 # このため`vcov.`を渡さないデフォルト呼び出し（`diag_table`、classical固定）から
 # 抽出する。
 #
-# Wu-Hausmanは`fit()`に渡されたcov_typeに追従する設計（engine/src/iv/CLAUDE.md
-# 「Wu-Hausman検定（回帰ベース）はfit()に渡されたcov_typeに対応させる」）のため、
+# Wu-Hausmanは`fit()`に渡されたcov_typeに追従する設計（docs/spec/iv-spec.md
+# 3.6節）のため、
 # 全cov_typeでクロスチェックする。`ivreg:::ivdiag`のソースを確認したところ
 # `vcov.`は**関数**として渡せば診断表（Wu-Hausman行含む）に正しく反映される
 # （行列を渡すと上記の通りNULLにフォールバックするため、これまで見落とされていた。
@@ -193,7 +193,7 @@ sargan_p_value_val <- unname(sargan_row["p-value"])
 # 境界的なサンプルサイズ（自由度1境界シナリオ等）ではaugmented regressionが
 # saturated（残差自由度0）になり、HC0等のロバストvcovが厳密に特異になって
 # solve()がエラーを投げる（本実装が同じ状況でwu_hausman_statistic/
-# wu_hausman_p_valueをNoneにする設計、engine/src/iv/CLAUDE.md参照）。tryCatchで
+# wu_hausman_p_valueをNoneにする設計、docs/spec/iv-spec.md 3.6節参照）。tryCatchで
 # 捕捉しNAにして揃える。
 diag_table_wu <- tryCatch(
   summary(model, diagnostics = TRUE, vcov. = vcov_fn)$diagnostics,

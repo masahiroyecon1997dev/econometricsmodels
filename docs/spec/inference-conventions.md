@@ -28,11 +28,11 @@
 
 - v1スコープでは内生変数ごとの生の部分F統計量のみを返す。Stock-Yogoの臨界値テーブルは経験的なシミュレーション値でクローズドフォームでなく実装コストが高いため、照合（合否判定）は実装しない（`iv-spec.md`3.4節）。
 - 複数内生変数の同時弱操作変数診断（Cragg-Donald統計量）も同様の理由でv1スコープ外。複数内生変数（`k_endog>=2`）シナリオが実際にサポートされた後もこの判断を維持するかは再検討中。
-- 部分F統計量が`cov_type`に依存しない理由（Stock-Yogoの臨界値表が等分散前提でキャリブレーションされている、`OlsEstimator`の`cov_params()`は第一段階の`cov_type`の行列で、制限モデルの比較には使えない）は`engine/src/iv/CLAUDE.md`参照。
+- 部分F統計量が`cov_type`に依存しない理由（Stock-Yogoの臨界値表が等分散前提でキャリブレーションされている、`OlsEstimator`の`cov_params()`は第一段階の`cov_type`の行列で、制限モデルの比較には使えない）は`docs/spec/iv-spec.md`3.4節参照。
 
 ## 4. 過剰識別検定（Sargan/Hansen J）の設計判断
 
-- Sargan検定（2SLS）が`cov_type`に依存しないのは、定義自体が等分散前提の検定であるため（`engine/src/iv/CLAUDE.md`）。Hansen J検定（GMM）は点推定に使った重み行列`S`をそのまま使うのが定義そのもので、`gmm_weight_type`に連動する。
+- Sargan検定（2SLS）が`cov_type`に依存しないのは、定義自体が等分散前提の検定であるため（`docs/spec/iv-spec.md`3.5節）。Hansen J検定（GMM）は点推定に使った重み行列`S`をそのまま使うのが定義そのもので、`gmm_weight_type`に連動する。
 - **頑健な過剰識別検定が必要な場合はGMM（Hansen J）を使う**、という役割分担が設計方針（実装時にユーザー確認済み）。
 - **不採用にした案**: `linearmodels`には2SLSの枠組みのままでも頑健な過剰識別検定（`wooldridge_overid`、スコア検定形式）が存在するが採用していない。GMMへの切り替えで頑健な検定が可能なため、2SLS側への追加実装は見送った。
 

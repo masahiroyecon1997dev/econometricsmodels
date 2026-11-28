@@ -46,8 +46,8 @@ pub(super) fn fit_two_sls(
     validate_iv_fit_inputs(&input, &cov_type, confidence_level, None)?;
 
     // 第一段階回帰・弱操作変数診断（部分F統計量、docs/spec/iv-spec.md 3.4節）は
-    // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
-    // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
+    // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`docs/spec/iv-spec.md`
+    // 3.7節参照——GMM自体は第一段階回帰を必要としないが、
     // `engine_pybind`が`estimator="gmm"`でも同じ診断情報を独立に提供するために使う）。
     //
     // 第一段階の`OlsEstimator`（設計行列を持つ）は、内生変数ごとに当てはめ値と残差の列だけを取り出して

@@ -270,7 +270,7 @@ pub(crate) fn hcat(a: &Mat<f64>, b: &Mat<f64>) -> Mat<f64> {
 /// 定数項列まで「傾き係数」として検定対象に含めてしまう（クラスターロバストSEでは
 /// 検定対象の次元`q`が実際より1個多くなり、`G≤q`の構造的特異性
 /// （`engine/src/linear/CLAUDE.md`「G≤qで構造的に特異」参照）に不必要に近づく。
-/// `engine/src/iv/CLAUDE.md`「修正済み」節に経緯を記録した`G=2`クラスター境界の
+/// `docs/spec/iv-spec.md`3.7節に記録した`G=2`クラスター境界の
 /// `ComputationError`の根本原因であり、この関数の導入で修正した）。
 ///
 /// この関数で定数項列を先に取り除いてから`OlsInput::from_columns`に

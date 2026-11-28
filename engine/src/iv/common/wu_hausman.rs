@@ -23,7 +23,7 @@ pub(crate) struct WuHausmanTest {
 /// `wooldridge_regression`相当）、追加した残差係数のジョイント有意性を
 /// `fit()`に渡された`cov_type`と同じcov_typeでのロバストWald検定（F統計量）で
 /// 調べる（弱操作変数診断とは異なり、cov_typeに追従させる設計。
-/// `engine/src/iv/CLAUDE.md`参照）。`x_endog=[]`なら検定対象が無いため`None`。
+/// `docs/spec/iv-spec.md`3.6節参照）。`x_endog=[]`なら検定対象が無いため`None`。
 ///
 /// 拡張回帰は元の第二段階（k_exog+k_endog列）より内生変数の数だけ列が多い
 /// （k_exog+2*k_endog列、残差列が追加分）ため、境界的なサンプルサイズでは
@@ -44,7 +44,7 @@ pub(crate) struct WuHausmanTest {
 /// これらはWu-Hausman検定固有の問題であり、`params`/`std_errors`等の主要な推定
 /// 結果とは無関係に正しく計算できるため、`fit()`全体を失敗させず`None`を返す
 /// （`FirstStageFailed`/`SecondStageFailed`が`fit()`全体を失敗させる
-/// all-or-nothing方針とは意図的に異なる扱い、`engine/src/iv/CLAUDE.md`参照）。それ以外の
+/// all-or-nothing方針とは意図的に異なる扱い、`docs/spec/iv-spec.md`3.6節参照）。それ以外の
 /// `LeastSquaresError`バリアント（`confidence_level`・`cov_type=Cluster/Hac`の
 /// 妥当性は`fit()`の第二段階側で既に検証済み、設計行列の列数は常に1以上、行数は
 /// 常に`y`と一致するため理論上到達不能）は`None`へ握りつぶさず、`xtx_inverse`と

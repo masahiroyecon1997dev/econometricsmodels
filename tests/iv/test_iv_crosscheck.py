@@ -213,7 +213,7 @@ def _check_result(
     # check_wu_hausman=Falseの場合は比較自体を丸ごとスキップする（cluster_g2:
     # 拡張回帰の傾き係数がq=2（endog1・第一段階残差）に対しG=2クラスタでは
     # G-1=1<qとなり構造的にクラスタロバスト共分散が特異になる——本実装のG≤qの
-    # 罠と同じ原理（engine/src/iv/CLAUDE.md参照）——ため本実装は正しくNoneを
+    # 罠と同じ原理（docs/spec/iv-spec.md 3.1節参照）——ため本実装は正しくNoneを
     # 返すが、ivreg側はこの構造的特異性を検出せず値を返すため比較不能）。
     if not check_wu_hausman:
         pass

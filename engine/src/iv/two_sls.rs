@@ -163,7 +163,7 @@ impl TwoSlsEstimator {
     /// Wu-Hausman検定（`wu_hausman_statistic()`/`wu_hausman_p_value()`）の
     /// 拡張回帰が想定内の理由（設計行列の特異性・観測数不足・Wald検定側の数値的な
     /// ほぼ特異性）で失敗する場合は`fit()`自体を失敗させず、該当フィールドが`None`に
-    /// なるのみ（`engine/src/iv/CLAUDE.md`参照）。それ以外の理論上到達不能な理由で
+    /// なるのみ（`docs/spec/iv-spec.md`3.6節参照）。それ以外の理論上到達不能な理由で
     /// 拡張回帰が失敗した場合のみ`IvError::HausmanRegressionFailed`。
     ///
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照

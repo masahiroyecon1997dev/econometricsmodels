@@ -447,7 +447,7 @@ fn fit_returns_gmm_non_convergence_error_when_not_converged_within_max_iteration
 
 /// 上記と同じ非収束ケースで`raise_on_non_convergence=false`なら、`fit()`は
 /// エラーにせず`converged=false`のまま結果を返す（`nonlinear::common::run_solver`の
-/// `raise_on_non_convergence`と同じ設計、`engine/src/iv/CLAUDE.md`参照）。
+/// `raise_on_non_convergence`と同じ設計、`docs/spec/iv-spec.md`3.3節参照）。
 #[test]
 fn fit_returns_result_with_converged_false_when_raise_on_non_convergence_is_false() {
     let (y, x_endog, z1, z2) = heteroskedastic_test_columns();

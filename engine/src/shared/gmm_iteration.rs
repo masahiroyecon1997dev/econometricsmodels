@@ -101,7 +101,7 @@ pub(crate) struct GmmInitialStep {
     /// 初期推定の残差 `ê₀ = y - Xβ̂₀`。
     pub(crate) residuals: Mat<f64>,
     /// 等分散の重み行列 `σ̂²₀・Z'Z`（`σ̂²₀ = ê₀'ê₀/n`、中心化しない）。点推定には不要だが、
-    /// 反復が回らない場合のHansen Jの`S`に必要（`iv/CLAUDE.md`「Hansen Jの`OneStep`」参照）。
+    /// 反復が回らない場合のHansen Jの`S`に必要（`docs/spec/iv-spec.md`3.5節参照）。
     pub(crate) classical_s: Mat<f64>,
 }
 
@@ -278,7 +278,7 @@ pub(crate) fn gmm_whiten_for_weight(
 ///
 /// 点推定は正のスカラー倍不変のため`classical_s`相当（`σ̂²・Z'Z`）を使っても`Z'Z`単体を使った場合と
 /// `β̂`は変わらない。Hansen Jにそのまま使い回せるよう、あらかじめ正しくスケーリングされた`S`を使う
-/// （`iv/CLAUDE.md`参照）。白色化は[`gmm_whiten_for_weight`]。
+/// （`docs/spec/iv-spec.md`3.5節参照）。白色化は[`gmm_whiten_for_weight`]。
 ///
 /// # Errors
 /// [`gmm_whiten_for_weight`]のエラーと、`Ĝ = Z̃'X`のランク落ち・条件数超過の`NearSingularMatrix`

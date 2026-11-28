@@ -7,8 +7,8 @@
 `confidence_level`・HAC/クラスター設定をどう引き継ぐか）はOLSのテストでは
 検出できない。実際に`compute_first_stage`が`has_intercept=false`を渡していた
 過去のバグでは、`params`/`std_errors`は正しいまま`r_squared`/`adj_r_squared`/
-`f_statistic`/`f_p_value`だけが静かにずれていた（`engine/src/iv/CLAUDE.md`
-「修正済み」参照）。このため`params`/`std_errors`に加えて、`k_constant`に依存する
+`f_statistic`/`f_p_value`だけが静かにずれていた（`docs/spec/iv-spec.md`
+3.7節参照）。このため`params`/`std_errors`に加えて、`k_constant`に依存する
 統計量（`r_squared`・`adj_r_squared`・`f_statistic`・`f_p_value`・自由度）も
 必ず比較する。
 
@@ -287,7 +287,7 @@ def test_first_stage_regression_for_past_k_constant_bug():
     `first_stage()["endog1"].r_squared`が切片ありのOLSの0.338で、
     切片を誤って`k_constant=0`扱いにした場合の0.430にならないこと
     （0.338は同じデータを`OLS(y="endog1", x=["x1", "z1", "z2"])`で直接
-    fitした値、`engine/src/iv/CLAUDE.md`「修正済み」参照）。
+    fitした値、`docs/spec/iv-spec.md`3.7節参照）。
     """
     df, x_exog, x_endog, instruments = _load("baseline")
     res = IV(

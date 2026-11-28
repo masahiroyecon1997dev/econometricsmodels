@@ -14,8 +14,8 @@
 //! ## `first_stage()`/`weak_instrument_f_statistics`は`estimator`に依存しない共通ロジック
 //!
 //! 第一段階回帰（`x_endog[j] ~ x_exog + instruments`）・弱操作変数診断（部分F統計量）は、
-//! `engine::iv::common::compute_first_stage`（2SLS/GMM間で共有、`engine/src/iv/CLAUDE.md`
-//! 参照）を`fit`が`estimator`によらず常に呼ぶことで、GMMでも2SLSと同じ診断情報を提供する。
+//! `engine::iv::common::compute_first_stage`（2SLS/GMM間で共有、`docs/spec/iv-spec.md`
+//! 3.7節参照）を`fit`が`estimator`によらず常に呼ぶことで、GMMでも2SLSと同じ診断情報を提供する。
 //! `TwoSlsEstimator::fit`は内部でも同じ関数を呼ぶため、`estimator="2sls"`では第一段階回帰が
 //! 二重計算になるが、OLS自体が軽量なため許容する（`GmmEstimator`のように第一段階回帰を
 //! 必要としない推定器に合わせて`IVResult`側を単純にする方を優先した）。

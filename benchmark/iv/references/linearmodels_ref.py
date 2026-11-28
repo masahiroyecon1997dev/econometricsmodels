@@ -418,8 +418,8 @@ def run(
     # 残差自由度が0以下（境界的なサンプルサイズ、df=1境界シナリオ等）だと
     # `res.wooldridge_regression`の内部でZeroDivisionErrorになる。本実装は
     # 同じ状況で`InsufficientObservations`を検出しwu_hausman_statistic/
-    # wu_hausman_p_valueをNoneにする設計（`engine/src/iv/CLAUDE.md`
-    # 「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）のため、
+    # wu_hausman_p_valueをNoneにする設計（`docs/spec/iv-spec.md`
+    # 3.6節参照）のため、
     # ここでも同じくNoneにして揃える。
     #
     # `cov_type="cluster"`ではF分布の分母自由度が`G-1`になる（本実装は拡張回帰の
@@ -489,7 +489,7 @@ def run(
 
     if x_endog_cols:
         # weak_instrument_f_statisticsは本実装では常にclassical（等分散前提）で
-        # 計算する設計（`engine/src/iv/CLAUDE.md`「弱操作変数診断」参照、cov_typeに
+        # 計算する設計（`docs/spec/iv-spec.md`3.4節参照、cov_typeに
         # 依存しない）。ここでも常にclassical/debiased=Trueで再fitして計算する
         # （リクエストされたcov_typeに合わせて計算すると、本実装の固定値と
         # 意味の異なる比較になってしまうため）。

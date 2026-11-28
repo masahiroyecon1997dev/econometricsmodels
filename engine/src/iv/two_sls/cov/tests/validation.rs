@@ -128,8 +128,8 @@ fn fit_succeeds_when_cluster_count_is_between_structural_and_first_stage_slopes(
 }
 
 /// `G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、
-/// ベンチマーク作成中に発見した`ComputationError`（`engine/src/iv/CLAUDE.md`
-/// 「修正済み」参照）の再現条件そのもの。第一段階回帰の`OlsInput::
+/// ベンチマーク作成中に発見した`ComputationError`（`docs/spec/iv-spec.md`
+/// 3.7節参照）の再現条件そのもの。第一段階回帰の`OlsInput::
 /// from_columns`に`has_intercept=false`を渡していたため、`IvInput::x_exog()`が
 /// 焼き込み済みの定数項列まで「傾き係数」としてWald F検定の対象に含めてしまい
 /// （真のq=1のところq=2）、`rank(Ŝ)≤G-1=1`の構造的特異性で必ず失敗していた
@@ -209,7 +209,7 @@ fn fit_succeeds_with_cluster_g2_boundary_when_x_exog_is_empty() {
 
     // `has_intercept=false`を渡していた旧版では、`first_stage()`が返す`r_squared`/
     // `wald_statistic`も定数項を傾き係数扱いした非中心化TSS・過大なqで静かに間違って
-    // いた（`engine/src/iv/CLAUDE.md`「修正済み」参照）。修正後は素の
+    // いた（`docs/spec/iv-spec.md`3.7節参照）。修正後は素の
     // `OlsEstimator::fit`と一致する。
     assert!((first_stage_estimator.r_squared() - expected.r_squared()).abs() < 1e-10);
     assert!(

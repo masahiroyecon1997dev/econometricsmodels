@@ -55,7 +55,7 @@ from benchmark.iv.references.linearmodels_ref import run
 # 直下のシナリオ名。generate_iv_gmm_fixtures.py・クロスチェック側
 # （generate_iv_crosscheck_fixtures.py等）もここをimportして単一の定義元にする。
 # x_exog_emptyは`x_exog=[]`かつ切片なしで、弱操作変数診断の制限モデルが
-# 回帰変数0個になる退化ケース（`engine/src/iv/CLAUDE.md`参照）。
+# 回帰変数0個になる退化ケース（`docs/spec/iv-spec.md`3.4節参照）。
 NO_INTERCEPT_SCENARIOS: dict[str, dict] = {
     "baseline": {
         "dataset": "baseline",
@@ -140,8 +140,8 @@ def build_fixtures() -> dict:
             # `TwoSlsEstimator`の第一段階回帰（`x_exog=[]`・instruments=1本・G=2の
             # クラスターロバストF検定）が`ComputationError`（"near-singular"）を
             # 返すバグが発覚したが、原因（`without_baked_in_intercept`未導入による
-            # `k_constant`取り違え）は判明・修正済み（`engine/src/iv/CLAUDE.md`
-            # 「修正済み」参照）。修正後にフィクスチャ化した。
+            # `k_constant`取り違え）は判明・修正済み（`docs/spec/iv-spec.md`
+            # 3.7節参照）。修正後にフィクスチャ化した。
 
     # 複数内生変数（k_endog>=2）の成功パス確認。fixtures["multi_endog"][シナリオ]
     # [cov_type]。x_exog=['x1']・x_endog=['endog1', 'endog2']・instruments=
@@ -272,8 +272,8 @@ def build_fixtures() -> dict:
             "全cov_typeでComputationError）より緩いスケール差（x1*1e2, x2*1e-1）"
             "の成功パス（OLSの"
             "scale_variance_mildと同じ発想）。"
-            "cluster_g2（G=2境界の成功パス）は、`engine/src/iv/CLAUDE.md`"
-            "「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化"
+            "cluster_g2（G=2境界の成功パス）は、`docs/spec/iv-spec.md`"
+            "3.7節に記録の`k_constant`取り違えバグの修正後にフィクスチャ化"
             "した。"
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）を全cov_type"
@@ -354,7 +354,7 @@ def _run_cluster_case(
 def _run_cluster_g2_case() -> dict:
     """G=2境界の成功パス確認用（`tests/iv/test_iv_api.py::test_cluster_g2_boundary_
     succeeds_when_x_exog_is_empty`と同じ再現条件: `x_exog=[]`・`instruments`1本
-    ・行番号%2の疑似グループ、`engine/src/iv/CLAUDE.md`「修正済み」参照）。
+    ・行番号%2の疑似グループ、`docs/spec/iv-spec.md`3.7節参照）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     n = df.height

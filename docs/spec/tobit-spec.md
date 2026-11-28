@@ -486,4 +486,4 @@ Tobit固有の差分:
 - **`wald_chi2_test`とOLSの`wald_f_test`の共有**: 部分行列抽出→対称化→悪条件検出→Cholesky→
   二次形式は`shared::wald::wald_quadratic_form`に一本化し、検定分布（カイ二乗 vs F）だけを分ける。
   以前はTobit・IVが対称化の無い自前版を持っていたが、傾き係数が準共線のとき非対称の丸め誤差が
-  条件数倍に増幅されるため共有版へ寄せた（`iv/CLAUDE.md`「共分散・検定の共有範囲」）。
+  条件数倍に増幅されるため共有版へ寄せた（`iv-spec.md`3.1節）。

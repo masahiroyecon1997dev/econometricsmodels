@@ -366,11 +366,10 @@
 
 ### 11.2 新しい`code`（案）
 
-**確定（2026-11-28、実装済み）**: 名前は表のとおり。文面はカタログ（`error_catalog.rs`）が正本で、下の下書きから次を変えた。
-`OUTCOME_NOT_INTEGER`・`OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE`は多項ロジットが同じ`code`を使えるよう「ordered」と書かない
-（「codes a category」「this model needs from {min_categories} to {max_categories} categories」）。`hint`は1文・先頭の動詞の規則に
-合わせた（`Code the categories as integers.`・`Use Logit or Probit for an outcome with 2 categories, or combine categories so that at most
-{max_categories} remain.`・`Code the outcome as consecutive integers.`）。範囲（`2^53`）は文面に書かない。
+**確定（2026-11-28、実装済み）**: 名前は表のとおり。文面はカタログ（`error_catalog.rs`）が正本で、下の下書きから
+変えている（公開ページの校閲を反映済み）。`OUTCOME_NOT_INTEGER`・`OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE`は多項ロジットが同じ`code`を
+使えるよう「ordered」と書かない。`OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE`の`hint`（Logit/Probitへの誘導）は最小カテゴリ数3が前提で、
+最小が3でない手法が再利用するなら別の`code`にする。範囲（`2^53-1`）は文面に書かない。
 
 | `code` | クラス | `params` | 文面（下書き） | `hint`（下書き） |
 |---|---|---|---|---|
@@ -380,7 +379,7 @@
 | `CUTPOINT_NAME_COLLISION` | Validation | 三つ組（`column`は衝突した`x`の列） | Column '{column}' of {argument} in {data_argument} has the same name as a cutpoint, which the result names after the two adjacent categories. | Rename the column. |
 | `REGRESSOR_CONSTANT_WITH_CUTPOINTS` | Validation | `argument`・`data_argument`・`columns`（該当列を全て、5.3章） | These columns of {argument} in {data_argument} have the same value in every row up to rounding, so they are collinear with the cutpoints, which take the place of an intercept: {columns}. | Remove these columns from {argument}. |
 
-- `OUTCOME_NOT_INTEGER`の「整数」は、`f64`で正確に表せる範囲（絶対値`2^53`以下）に限る。それを超える値は連続性も判定できないので同じ`code`にする（文面に範囲を書くかは実装時に決める）。
+- `OUTCOME_NOT_INTEGER`の「整数」は、元の整数を一意に決められる範囲（絶対値`2^53-1`以下）に限る。`2^53`は`f64`で表せるが、`Int64`の`2^53+1`も変換で`2^53`に丸まるので、元のコードを特定できない。それを超える値は連続性も判定できないので同じ`code`にする（範囲は文面に書かない）。
 - 欠番を自動で詰めない理由: `{1, 2, 4}`を黙って`1..3`に直すと、空のカテゴリ（データの誤りの可能性）を隠し、閾値の名前・`categories`も利用者のコードとずれる。
 - `CUTPOINT_NAME_COLLISION`: 閾値の名前は`y`のコードから決まるので、静的に検査できるTobitの`"sigma"`（`TOBIT_SIGMA_NAME_COLLISION`、`params`なし）と違い、衝突した列名を`column`で返す。`column`を持つので三つ組にする。
 - 定数列の`code`: FEの`REGRESSOR_CONSTANT`と同じ形（`columns`で全列）だが、文面が「固定効果と共線」でFE専用のため別の`code`にする。名前は`REGRESSOR_CONSTANT`系で「閾値と共線」を表すもの（`REGRESSOR_CONSTANT_WITH_CUTPOINTS`は仮）。判定は`has_no_variation`（定数の`y`・FEと同じ相対閾値）。
@@ -465,6 +464,8 @@
 - `verify_no_ordered_separation`の`means`には、`fit`が最適化で平均を引くか（C2）によらず列の平均を渡す。
 - 分離のLPは1ラウンドに長さ`3n`の一時領域を確保する（2値は`n`）。`n=10^6`のコストを性能比較（F6）で計る。
 - `OUTCOME_*`等の新しい`code`を`UNREACHABLE_CODES`から`MIGRATED_CODES`へ移す（バインディングの後）。
+- 既存の`OUTCOME_CONSTANT`の文面「so a model with an intercept has nothing to explain」は、切片の無い順序モデルにそのまま当てはまらない。
+  配線時に「an intercept or cutpoints」のように一般化する（`params`は変えないので非破壊。`error-handling.md`5.4章の表も更新）。
 
 ### 12.3 プロトタイプについて
 

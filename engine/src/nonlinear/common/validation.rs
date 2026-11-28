@@ -62,8 +62,11 @@ pub(crate) fn validate_outcome_not_constant(
     Ok(())
 }
 
-/// `f64`で隣り合う整数を区別できる絶対値の上限（`2^53`）。これを超える値は整数とみなさない。
-const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
+/// 元の整数を一意に決められる`f64`の絶対値の上限（`2^53-1`）。`2^53`は正確に表せるが、`Int64`の
+/// `2^53+1`も変換で`2^53`に丸まる（偶数への丸め）ので、届いた値から元のコードを特定できない。
+/// `2^53-1`以下には、丸めてそこへ来る別の整数が無い（表せない整数は絶対値が`2^53`を超え、
+/// 丸めた結果も`2^53`以上になる）。これを超える値は整数とみなさない。
+const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_991.0;
 
 /// コードの範囲（最大−最小）がこれ未満なら、異なる値をフラグの配列で数える（通常の経路。
 /// 順序モデルの上限30カテゴリを十分に含む）。超えるときは集合で数える（カテゴリの数が範囲外か
@@ -72,7 +75,7 @@ const DENSE_RANGE_LIMIT: u64 = 1024;
 
 /// カテゴリの`y`（順序モデル・多項モデル）を検査し、異なるコードを昇順で返す。
 ///
-/// 1. 値が整数か（`f64`で正確に表せる、絶対値`2^53`以下）。最初に違反した行を
+/// 1. 値が整数か（元の整数を一意に決められる、絶対値`2^53-1`以下）。最初に違反した行を
 ///    `MleError::OutcomeNotInteger`で返す。非有限値は`engine_pybind`が先に弾くが、ここでも同じエラーになる。
 /// 2. 異なる値の数が`min_categories..=max_categories`か（`MleError::OutcomeCategoryCountOutOfRange`）。
 ///    値が1種類以下のときは数の検査をしない: 定数の`y`は手法横断の`OutcomeConstant`
@@ -104,7 +107,7 @@ pub(crate) fn validate_categorical_y(
             });
         }
     }
-    // 絶対値`2^53`以下の整数なので`i64`へ正確に変換できる。
+    // 絶対値`2^53-1`以下の整数なので`i64`へ正確に変換できる。
     let categories = distinct_sorted((0..y.nrows()).map(|i| *y.get(i, 0) as i64));
     let n_categories = categories.len();
     if n_categories > 1 && !(min_categories..=max_categories).contains(&n_categories) {
@@ -133,7 +136,7 @@ where
     else {
         return Vec::new();
     };
-    // 両端とも絶対値`2^53`以下なので、差は`2^54`以下で`u64`に収まる。
+    // 両端とも絶対値`2^53-1`以下なので、差は`2^54`未満で`u64`に収まる。
     let range = highest.abs_diff(lowest);
     if range < DENSE_RANGE_LIMIT {
         let mut seen = vec![false; (range + 1) as usize];
@@ -666,7 +669,8 @@ mod tests {
 
     #[test]
     fn validate_categorical_y_reports_the_first_non_integer_row() {
-        for bad in [1.5, f64::NAN, f64::INFINITY, 2.0 * MAX_EXACT_INTEGER] {
+        let two_pow_53 = MAX_EXACT_INTEGER + 1.0;
+        for bad in [1.5, f64::NAN, f64::INFINITY, two_pow_53, -two_pow_53] {
             let y = column(&[1.0, 2.0, bad, 0.5]);
             let err = validate_categorical_y(&y, "rating", 3, 30).unwrap_err();
             assert!(
@@ -678,12 +682,10 @@ mod tests {
                 "{bad}: {err:?}"
             );
         }
-        // 絶対値`2^53`ちょうどは整数として受け付ける。
-        let y = column(&[
-            MAX_EXACT_INTEGER,
-            MAX_EXACT_INTEGER - 1.0,
-            MAX_EXACT_INTEGER - 2.0,
-        ]);
+        // 絶対値`2^53-1`は受け付け、`2^53`（`2^53+1`の丸めでもありうる）は整数とみなさない。
+        assert_eq!(two_pow_53, 2.0_f64.powi(53));
+        assert_eq!(9_007_199_254_740_993_i64 as f64, two_pow_53);
+        let y = column(&[MAX_EXACT_INTEGER, -MAX_EXACT_INTEGER, 0.0]);
         assert!(validate_categorical_y(&y, "y", 3, 30).is_ok());
     }
 

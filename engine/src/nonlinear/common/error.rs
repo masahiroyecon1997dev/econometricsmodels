@@ -189,9 +189,9 @@ pub enum MleError {
     #[error("{}", self.catalog_message())]
     SeparationCheckFailed { detail: String },
 
-    /// カテゴリの`y`（順序モデル）: 値が整数でない行がある（最初の1行）。`f64`で正確に表せる
-    /// 整数（絶対値`2^53`以下）だけを整数とみなし、それを超える値も同じエラーにする
-    /// （隣り合う整数を区別できず、カテゴリの数も連続性も判定できないため）。
+    /// カテゴリの`y`（順序モデル）: 値が整数でない行がある（最初の1行）。元の整数を一意に決められる
+    /// 絶対値`2^53-1`以下の整数だけを整数とみなし、それを超える値も同じエラーにする（`2^53`以上では
+    /// 別の整数が同じ`f64`に丸まりうるので、カテゴリの数も連続性も判定できないため）。
     #[error("{}", self.catalog_message())]
     OutcomeNotInteger {
         /// 被説明変数の列名。
@@ -538,7 +538,7 @@ mod tests {
                     value: 1.5,
                 },
                 ErrorCode::OutcomeNotInteger,
-                "The outcome at row 2 (0-based) of column 'y' (given as y) in data must be a whole number that codes a category, got 1.5.",
+                "The outcome at row 2 (0-based) of column 'y' (given as y) in data must be a whole number small enough to code a category exactly, got 1.5.",
             ),
             (
                 MleError::OutcomeCategoryCountOutOfRange {
@@ -548,7 +548,7 @@ mod tests {
                     max_categories: 30,
                 },
                 ErrorCode::OutcomeCategoryCountOutOfRange,
-                "Column 'y' (given as y) in data has 2 distinct values, but this model needs from 3 to 30 categories.",
+                "Column 'y' (given as y) in data has 2 categories (distinct values), but this model needs from 3 to 30.",
             ),
             (
                 MleError::OutcomeCategoriesNotConsecutive {
@@ -558,21 +558,21 @@ mod tests {
                     highest: 1,
                 },
                 ErrorCode::OutcomeCategoriesNotConsecutive,
-                "The categories in column 'y' (given as y) in data must be consecutive integers from -2 to 1, but -1 does not occur.",
+                "The categories in column 'y' (given as y) in data must be consecutive integers from -2 to 1, but -1, the smallest missing code, does not occur.",
             ),
             (
                 MleError::CutpointNameCollision {
                     column: "1|2".to_string(),
                 },
                 ErrorCode::CutpointNameCollision,
-                "Column '1|2' (given as x) in data has the same name as a cutpoint, which the result names after the 2 categories it separates.",
+                "Column '1|2' (given as x) in data has the same name as a cutpoint; cutpoints are named after the 2 categories they separate, for example 1|2.",
             ),
             (
                 MleError::RegressorConstantWithCutpoints {
                     columns: vec!["c".to_string(), "d".to_string()],
                 },
                 ErrorCode::RegressorConstantWithCutpoints,
-                "These columns of x in data have the same value in every row up to rounding, so they are collinear with the cutpoints, which take the place of an intercept: 'c', 'd'.",
+                "These columns of x in data have the same value in every row up to rounding: 'c', 'd'. Their coefficients cannot be told apart from a shift of the cutpoints, which take the place of an intercept.",
             ),
         ];
         for (err, code, message) in cases {

@@ -119,7 +119,7 @@ mod tests {
     /// `CensoringFitCheck`のprivateフィールドをPython向けpyclassに詰め替えるだけの変換）は、
     /// フィールドの取り違え・`Option`ラップ漏れ等を検出するため独立に検証する。`fit`本体は
     /// GILが必要な`SelectedData`引数のため`cargo test`から直接呼べない
-    /// （`engine_pybind/src/nonlinear/CLAUDE.md`の既知の制約）が、`TobitEstimator::fit`自体は
+    /// （`docs/spec/nonlinear-common.md`10章「テストの制約」）が、`TobitEstimator::fit`自体は
     /// engine層の関数でGIL不要なので、`build_tobit_input`が返す`TobitInput`にそのまま適用する。
     #[test]
     fn censoring_fit_check_to_result_correctly_maps_categories_and_fields() {

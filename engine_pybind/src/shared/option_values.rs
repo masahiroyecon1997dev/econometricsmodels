@@ -234,7 +234,7 @@ mod tests {
     const CHOICES: &[(&str, u8)] = &[("alpha", 1), ("beta", 2)];
 
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装はGIL取得を要求し、GIL未初期化の
-    /// この環境では二重パニックを起こす（`nonlinear/CLAUDE.md`「テストの制約」参照）。
+    /// この環境では二重パニックを起こす（`docs/spec/nonlinear-common.md`10章「テストの制約」参照）。
     #[test]
     fn parse_choice_is_case_insensitive_and_returns_the_matching_value() {
         assert!(matches!(parse_choice("opt", "alpha", CHOICES), Ok(1)));

@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn validate_role_non_empty_returns_error_using_custom_role_name() {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
-        // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
+        // GILを要求するためできない（`docs/spec/nonlinear-common.md`10章「テストの制約」参照）。ここでは
         // `role_name`が異なっても挙動そのもの
         // （空リスト検出）が変わらないことのみ確認する。
         assert!(validate_role_non_empty("x_endog", &[]).is_err());
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn validate_no_duplicate_within_role_returns_error_using_custom_role_name() {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
-        // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
+        // GILを要求するためできない（`docs/spec/nonlinear-common.md`10章「テストの制約」参照）。ここでは
         // `role_name`が異なっても挙動そのもの
         // （重複検出）が変わらないことのみ確認する。
         let instruments = ["z1".to_string(), "z1".to_string()];
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn validate_no_const_collision_returns_error_using_custom_role_name() {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
-        // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
+        // GILを要求するためできない（`docs/spec/nonlinear-common.md`10章「テストの制約」参照）。ここでは
         // `role_name`が異なっても挙動そのもの
         // （衝突検出）が変わらないことのみ確認する。
         let instruments = ["const".to_string()];

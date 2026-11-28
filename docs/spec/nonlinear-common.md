@@ -485,3 +485,43 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
   パラメータ誤差が約`√(ε|cost|/n)`（`≈1e-8`）残り`RTOL=1e-8`の精度検証テストに余裕がないため、
   停止基準としての置き換えは行っていない
 - 手法固有の未実装・既知の限界（分離検出の較正等）は各手法のspec4章を参照
+
+## 10. engine_pybind（Logit・Probit・Tobit）
+
+- **入力の組み立て**: `build_{logit,probit,tobit}_input`は3手法共通の`extract_mle_columns`（`engine_pybind/src/nonlinear/common.rs`）が
+  DataFrameを見ない検査（`cov_type`の値→`solver`の値→組合せ）→役割→（Tobitの`"sigma"`の衝突。`extra_x_check`に関数で渡す）→
+  `y`/`x`の列→`cluster`列を行い、その後`*Input::from_columns`（次元だけ。Tobitの打ち切り境界は`fit()`が検査する）を呼ぶ。順序を
+  変えるときは`extract_mle_columns`の1か所だけを直す（`tests/cross_method/test_validation_order.py`が固定する）。`SelectedData`・
+  `Bound`・`Py`は渡さない（GIL解放の構造を変えないため）。返り値は`BuiltMleInput<I>`（`input`・`cov_type`・`cov_type_name`・
+  `solver`）。`cov_type`は`parse_cov_kind`→`check_cov_options`→`resolve_cov_type`の3段、`solver`は`parse_solver_type`。正規形の
+  文字列は`CovKind::name()`/`solver_name()`から作り、小文字化し直さない。
+- **`*Options`のフィールドの重複は意図的**: `solver`・`max_iter`・`tol`・`raise_on_non_convergence`（と`cov_type`等）は3つのpyclassで
+  独立に宣言する。PyO3のコンストラクタはフラットなkwargsが前提で、共有structにすると`LogitOptions(mle=MleOptions(...))`のような
+  入れ子がPythonの公開APIに漏れるか、表面積を減らさないまま間接参照が増えるだけになる（`IVOptions`が`OLSOptions`と同種の
+  フィールドを独立に持つのと同じ）。`macro_rules!`でクラス全体を生成する案は、grep・定義ジャンプ・エラー位置の可読性が
+  下がり、docの手法間の差を吸収する必要もあるので見送った。ずれへの備え: `tol`の既定値の解決は`resolve_mle_tol_default`に
+  集約、共通フィールドの署名・既定値・setter・docは`tests/cross_method/test_mle_options_consistency.py`が検査（`include_intercept`
+  のdocは「ヘッセ行列」と「設計行列」の1語だけ意図的に違う）、`__repr__`は`PyRepr`でPythonのリテラル形式にし
+  `test_options_repr.py`が`eval(repr(...))`の往復を検査する。engine側の同じフィールドは公開APIの制約が無いので
+  `MleFitOptions`に集約してある。
+- **結果**: `*Result`のフィールド構築も3クラスで独立に書く（trait・マクロはOLS等の結果との構造の一貫性が下がる）。共通属性の
+  公開し忘れは`tests/cross_method/test_mle_result_consistency.py`がラッパーと`_raw`の両方で検出する。`*Result`は非公開の`fitted`
+  （`*Fitted`。`fit`の末尾で`into_fitted()`）を持ち、`predict`・`pred_table`・`marginal_effects`・`censoring_fit_check`は`fitted`への
+  委譲だけにする。`*Fitted`は`Clone`を持たないので`*Result`も`Clone`を持たない（`OLSResult`との違い）。`marginal_effects`は
+  3手法共有の`MarginalEffectsResult`で返し、フィールド名は結果の`param_names`・`std_errors`等と揃える（`effect`だけ新規）。
+  `pred_table`・`cov_params`の行列は`shared/mat_conversion.rs`の`mat_to_rows`（`mat_to_vec`は列ベクトル専用）。
+- **新規データの予測**: `predict(new_data)`・`augment(new_data)`は`predict_out_of_sample`が`x`列だけを取り込んで抽出し、
+  `self.fitted.predict_new_data(...)`を呼ぶ。OLSのようにengineのフリー関数を直接呼ばないのは、`link`の選択（ロジスティック・
+  正規分布CDF・Tobitの`target`ごとの予測値）という手法固有の分岐を`engine_pybind`に持ち込まないため（`engine_pybind`は
+  statrsに依存しない）。`augment`のために`source_data`を常に保持する（`Option`にしない。`WLSResult`と同じ）。追加する列名は
+  Logit/Probitが`"predicted_probability"`、Tobitが`"predicted_{target}"`（`target`ごとに積み上げられるようにする）。
+- **pickle**: 状態に`y`・`x`を入れず（観測数に比例する）、列名と係数・共分散（Tobitは境界と`σ`）だけを入れ、`source_data`から
+  `rebuild_columns`で取り出し直して`from_parts`で組み立てる（`impl_pickle_state!`の`rebuilt_from(source_data) { fitted }`）。
+  詳細は`pickle-support.md`。
+- **テストの制約**: `PyErr::to_string()`（`Display`）と`Debug`はGILを要求し、Python未初期化の`#[cfg(test)]`で呼ぶとpanicする
+  （`Result<_, PyErr>`への`unwrap()`/`expect()`は失敗時に`Debug`を呼んで二重パニックになり、テストバイナリ全体がSIGABRTで
+  落ちて他のテストの結果も失われる。`let-else`や`is_err()`で調べる）。文言・優先順位を
+  確かめたいときは、`PyErr`に包む前の純粋関数（`validation.rs`の`find_role_overlap`等）か`ErrorReport::full_text()`をテストする。
+  `fit`は`SelectedData`を、`fit_frame`も結果に載せる`source`（`Py<PyAny>`）を受け取るので、GILなしの`#[cfg(test)]`からは呼べない
+  （`build_*_input`がプレーンな`polars::DataFrame`を受け取るのはこの制約を避けるため）。`fit`の検証は`maturin develop`後の
+  Pythonからの数値照合とpytestで行う。

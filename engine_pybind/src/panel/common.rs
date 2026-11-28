@@ -461,7 +461,7 @@ mod tests {
     const SRC: ColumnSource<'static> = ColumnSource::new("x", "data");
 
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装はGIL取得を要求し、GIL未初期化の
-    /// この環境では二重パニックを起こす（`nonlinear/CLAUDE.md`「テストの制約」参照）。
+    /// この環境では二重パニックを起こす（`docs/spec/nonlinear-common.md`10章「テストの制約」参照）。
     #[test]
     fn parse_panel_cov_kind_is_case_insensitive_and_has_canonical_names() {
         for (input, expected) in [

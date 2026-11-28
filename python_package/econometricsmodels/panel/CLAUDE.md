@@ -25,7 +25,7 @@
 
 ## テスト
 
-`engine_pybind`側（FE・RE）は`PyDataFrame`引数を取る関数を`cargo test`で直接検証できない制約があるため（`nonlinear/CLAUDE.md`「テストの制約」参照）、`maturin develop` + Pythonスモークテストのみで検証されている。`tests/panel/`配下のpytest（`fixest`/`linearmodels`との数値照合ベンチマーク）が、このPython側ラッパーを含めた最初の本格的なテストになる。
+`engine_pybind`側（FE・RE）は`PyDataFrame`引数を取る関数を`cargo test`で直接検証できない制約があるため（`docs/spec/nonlinear-common.md`10章「テストの制約」参照）、`maturin develop` + Pythonスモークテストのみで検証されている。`tests/panel/`配下のpytest（`fixest`/`linearmodels`との数値照合ベンチマーク）が、このPython側ラッパーを含めた最初の本格的なテストになる。
 
 ## FEIV（`panel/fe_iv.py`）
 

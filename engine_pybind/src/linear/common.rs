@@ -233,8 +233,8 @@ mod tests {
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装（`unwrap()`失敗時の
     /// panicメッセージ生成に使われる）はGIL取得を要求し、GIL未初期化のこのテスト
     /// 環境では二重パニック（テストバイナリ全体がSIGABRTでクラッシュし、他のテスト
-    /// 結果も失われる）を起こす（`validation.rs`と同じ制約、`nonlinear/CLAUDE.md`
-    /// 「テストの制約」参照。`let-else`のpanicメッセージ自体はErr値のDebug/Displayに
+    /// 結果も失われる）を起こす（`validation.rs`と同じ制約、`docs/spec/nonlinear-common.md`
+    /// 10章「テストの制約」参照。`let-else`のpanicメッセージ自体はErr値のDebug/Displayに
     /// 触れないため安全）。
     #[test]
     fn parse_cov_kind_is_case_insensitive_and_has_canonical_names() {

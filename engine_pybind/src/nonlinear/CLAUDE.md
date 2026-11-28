@@ -1,63 +1,25 @@
 # engine_pybind/src/nonlinear/ 実装ノート（Logit/Probit/Tobit）
 
-このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/spec/nonlinear-common.md`・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`・`docs/spec/tobit-spec.md`が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景は`docs/spec/nonlinear-common.md`（10章がバインディング）・`docs/spec/logit-spec.md`・`docs/spec/probit-spec.md`・`docs/spec/tobit-spec.md`・`docs/spec/pickle-support.md`が正本（このファイルはその要約ではなく差分の索引）。バージョン固定とpolars・pyo3のAPI差異の罠は`engine_pybind/src/linear/CLAUDE.md`と共通。
 
-## Probitの実装状況（実装済み）
+**エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。実測値・調査の経緯・不採用案の詳細はspecに置き、ここには書かない。
 
-`probit.rs`は`logit.rs`とほぼ完全に同型のパターン（`ProbitOptions`/`ProbitResult`/`build_probit_input`/`fit`）。`ProbitResult`も`LogitResult`と同じく非公開`fitted`フィールドを持ち、`predict()`/`pred_table()`/`marginal_effects()`をpymethodsとして実装済み（下記「`LogitResult`の設計: `fitted`フィールド」節と同じ設計）。`mle_error_to_pyerr`はLogit/Probit共有。
+## 入力の組み立て
 
-## バージョン固定・polars特有の差異
+- **役割・列名の検証は`engine_pybind/src/shared/validation.rs`を使い、手法ごとに独自実装しない。Logit/Probit/Tobit固有のものは`cov_type`・`solver`・`at`の文字列のパース（`nonlinear/common.rs`）だけ**: 詳細: `engine_pybind/src/linear/CLAUDE.md`。
+- **検査の順序（値→組合せ→役割→（Tobitの`"sigma"`の衝突）→`y`/`x`の列→`cluster`列）は3手法共通の`extract_mle_columns`の1か所で決める。手法固有の`x`列名の検査は`extra_x_check`に関数で渡す。`SelectedData`・`Bound`・`Py`を渡さない**: 順序は`tests/cross_method/test_validation_order.py`が固定する。GILを持ち込むと`fit`のGIL解放の構造が崩れる。正規形の文字列は`CovKind::name()`/`solver_name()`から作り、小文字化し直さない。詳細: `docs/spec/nonlinear-common.md`10章。
 
-`engine_pybind/src/linear/CLAUDE.md`と共通（pyo3/polars/pyo3-polarsのバージョン固定、polars・pyo3のAPI差異の罠）。系統をまたいで重複させないためここには書かない。
+## `*Options`と`*Result`
 
-## バリデーションの責務分担
+- **`LogitOptions`/`ProbitOptions`/`TobitOptions`の共通フィールドを共有のstruct・traitに切り出さず、`macro_rules!`でクラスを生成しない**: PyO3のフラットなkwargsが前提で、共有structは入れ子の構造がPython公開APIに漏れる。マクロはgrep・定義ジャンプ・エラー位置の可読性を下げる。詳細: `docs/spec/nonlinear-common.md`10章。
+- **共通フィールドを変えるときは3クラス同時に直す（Logit/Probitを変えたらTobitも）。`tol`の既定値の解決は`resolve_mle_tol_default`に集約したまま使う**: 回帰ガード: `tests/cross_method/test_mle_options_consistency.py`（署名・既定値・setter・doc。`include_intercept`のdocの1語の差だけを許す）、`tests/cross_method/test_options_repr.py`（`PyRepr`の`eval(repr(...))`の往復）。
+- **`*Result`の共通属性を足すときは3クラス全てに足し、`tests/cross_method/test_mle_result_consistency.py`の集合も更新する。フィールド構築をtrait・マクロで共通化しない**: OLS等の結果との構造の一貫性が下がる。公開し忘れはこのテストがラッパーと`_raw`の両方で検出する。
+- **`*Result`は`*Fitted`を非公開フィールド`fitted`で持ち、`predict`・`pred_table`・`marginal_effects`・`censoring_fit_check`は`fitted`への委譲だけにする（計算を`engine_pybind`に書かない）。`*Result`に`Clone`を付けない**: `*Fitted`は`Clone`を持たない。詳細: `docs/spec/nonlinear-common.md`10章。
+- **`predict(new_data)`・`augment(new_data)`は`predict_out_of_sample`から`self.fitted.predict_new_data(...)`を呼び、engineのフリー関数を直接呼ばない**: `link`の選択（ロジスティック・正規分布CDF・Tobitの`target`ごとの予測値）を`engine_pybind`に持ち込まない（`engine_pybind`はstatrsに依存しない）。詳細: 同上。
+- **`augment`の列名は、Logit/Probitが固定の`"predicted_probability"`、Tobitが`"predicted_{target}"`。Tobitを固定名にしない**: `target`ごとに`predict()`の意味が変わり、固定名だと複数の`target`を積み上げる2回目の`augment()`が列名の衝突で失敗する。`source_data`は`Option`にせず常に保持する。詳細: 同上、`docs/spec/tobit-spec.md`3.6節。
+- **pickleの状態に`y`・`x`を入れない。`source_data`から`rebuild_columns`で取り出し直し、`from_parts`で組み立てる（`rebuilt_from(source_data) { fitted }`）**: 観測数に比例して大きい。列が無い・数値でない・欠損値・0行は`PICKLE_FORMAT_MISMATCH`。詳細: `docs/spec/pickle-support.md`。
 
-`x`が空・yやweight等ロール間の重複・x内重複・`include_intercept=true`時の`"const"`列衝突は`engine_pybind/src/shared/validation.rs`に集約済み（`engine_pybind/src/linear/CLAUDE.md`参照。新しい手法でも独自実装せずこれを使う）。抽出した列同士の行数不一致チェックは理論上到達不能と判明し削除済み（同ファイル参照）。Logit/Probit/Tobit固有の追加バリデーションは`cov_type`/`solver`（`nonlinear/common.rs`に3手法分を集約している）・`at`（`marginal_effects`用、同ファイルの`parse_marginal_effects_at`）の文字列パースのみ（いずれも`ValidationError`）。
+## テストの制約
 
-`cov_type`は`parse_cov_kind`（値）→ `check_cov_options`（`cluster`の未使用）→ `resolve_cov_type`（`cluster`列の抽出）の3段に分け、`solver`は`parse_solver_type`（値、DataFrameを見ない）で受ける。`build_*_input`は、DataFrameを見ない検査（`cov_type`の値 → `solver`の値 → 組合せ）→ ロール構造 → `y`/`x`の列 → `cluster`列の順に呼ぶ。`*Result.cov_type`/`solver`に載せる正規形は`CovKind::name()`/`solver_name()`から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。
-
-この順序のうち値 → 組合せ → ロール構造 →（Tobitの`"sigma"`衝突）→ `y`/`x`の列 → `cluster`列は、3手法共通の`extract_mle_columns`（`nonlinear/common.rs`）が担う。`build_*_input`はこれを呼んだ後に`*Input::from_columns`（engine側の検査。次元だけ。Tobitの打ち切り境界は`fit()`が検査する）を呼ぶ。手法固有の`x`列名の検査（Tobitの`validate_no_sigma_collision`）は`extra_x_check`に関数として渡し、`validate_common_roles`の直後に呼ばれる。`SelectedData`・`Bound`・`Py`は渡さない（`fit`のGIL解放の構造を変えないため）。順序を変えるときは`extract_mle_columns`の1箇所だけを直す。
-
-`build_logit_input`/`build_probit_input`/`build_tobit_input`は、検証済みの入力と推定の設定を`nonlinear/common.rs`の`BuiltMleInput<I>`（`input`・`cov_type`・`cov_type_name`（`*Result.cov_type`に格納する正規形の名前）・`solver`）で返す。`I`は手法ごとのエンジンの入力型。
-
-## `LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的
-
-`solver`/`max_iter`/`tol`/`raise_on_non_convergence`（＋`cov_type`/`include_intercept`/`confidence_level`/`cluster`）は3つのpyclassに独立してフィールド宣言・コンストラクタ・`__repr__`が重複している。これは意図的な設計判断であり、共通base struct/traitへの切り出しは行わない: PyO3の`#[pyclass]`/`#[pymethods]`コンストラクタはフラットなkwargs surfaceが前提のため、共有structを導入すると`LogitOptions(mle=MleOptions(...), cov_type=...)`のようなcomposition構造がPython公開APIに漏れ出すか、Pythonの表面積を減らさないまま間接参照が増えるだけになる。`engine_pybind/src/iv/common/options.rs`の`IVOptions`が`OLSOptions`と同種のフィールド群（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`）を既に独立再定義しており、この重複は既存precedentと一貫している（`engine_pybind/src/linear/CLAUDE.md`の`WLSOptions`の節も参照）。`macro_rules!`等でRust側の記述量（フィールド宣言/コンストラクタ/`__repr__`のボイラープレート）だけを機械的に削減できるかは、Python公開APIには影響しない別軸の検討として扱う。
-
-重複によるずれ（1クラスだけ直し忘れる）への備えとして、次を置いている。
-
-- `tol`の既定値解決は`nonlinear/common.rs`の`resolve_mle_tol_default`に集約した（フラットなコンストラクタは3クラスとも維持し、計算だけ共有）。
-- 共通フィールドの署名・既定値・setter・docの一致は`tests/cross_method/test_mle_options_consistency.py`が検証する。Logit/Probitのフィールドを変えるときはTobitも、共通フィールドのdocを変えるときは3クラス同時に直す。`include_intercept`のdocだけは「ヘッセ行列」と「設計行列」の1語が意図的に異なり、テストもその差だけを許す。
-- Result側（`LogitResult`/`ProbitResult`/`TobitResult`）のフィールド構築も3クラスで独立に書いている（trait化・継承・マクロは、OLS等のResultとの構造の一貫性が下がるため採用しない）。共通属性の公開し忘れは`tests/cross_method/test_mle_result_consistency.py`が、ラッパーと`_raw`の両方で検出する。共通属性を足すときは3クラス全てに足し、このテストの集合も更新する。`predict()`/`augment()`の共通手順は`shared/`の`extract_model_x_columns`/`append_predicted_column`に切り出してある。
-- `__repr__`の値はPythonのリテラル形式（`True`・`None`・`"g"`）で出す。`shared/option_repr.rs`の`PyRepr`を使い、`tests/cross_method/test_options_repr.py`が全`*Options`で`eval(repr(...))`の往復を検証する。
-- `macro_rules!`によるクラス全体の生成は、可読性（grep・定義ジャンプ・エラー位置）の低下と、docの手法間差分の吸収が必要になる点から見送った。
-
-一方、`engine`層（`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`）の同じ6フィールド分のシグネチャ重複は、Python非公開の内部実装のためこの制約を受けない。`engine::nonlinear::common::MleFitOptions`という共有構造体に集約済み。`engine_pybind`側の`fit`関数は、pyclassの個別フィールドから`MleFitOptions`を組み立てて渡す（`logit.rs`/`probit.rs`/`tobit/fit.rs`の`fit`関数末尾を参照）。
-
-## エラー変換
-
-`engine::nonlinear::common::MleError` → `PyErr`は`mle_error_to_pyerr`（`nonlinear/common.rs`）。`to_pyerr(&err)`を呼ぶだけの1行で、`code`・`params`と`ValidationError`/`ComputationError`の別は`engine`側の`ErrorInfo::report()`（`Common`バリアントは`CommonError`の`report()`に委譲。`linear`系統の`LeastSquaresError`と同じ`CommonError`を共有、`.claude/rules/rust-style.md`参照）とカタログが決める。
-
-## `LogitResult`/`ProbitResult`/`TobitResult`の設計: `fitted`フィールド
-
-`predict()`/`pred_table()`/`marginal_effects()`（Tobitは`pred_table()`の代わりに`censoring_fit_check()`）をpymethodsとして提供するため、`LogitResult`/`ProbitResult`/`TobitResult`はそれぞれ`engine::nonlinear::{logit::LogitFitted, probit::ProbitFitted, tobit::TobitFitted}`を非公開フィールド`fitted`として保持する。`OLSResult`の`fitted_values`/`has_intercept`と同じ「必要な内部状態を非公開フィールドで持つ」位置づけだが、複数メソッド分の計算に必要なため、個別のスカラー/ベクトルではなく状態構造体をまるごと保持する設計にした。
-
-`*Fitted`は推定量（`*Estimator`）の一部で、予測・限界効果等に必要な最小の状態だけを持つ（入力データ、係数、分散共分散行列。Tobitはさらに`σ`と打ち切り境界）。標準誤差・適合度統計量などの残りは`*Result`の`#[pyo3(get)]`フィールドに値がコピーされているので、結果は推定量全体を持たない。`fit`の末尾で`estimator.into_fitted()`を呼んで受け取る。`predict`/`pred_table`/`marginal_effects`/`censoring_fit_check`の実装は`*Fitted`にあり、`*Estimator`は委譲するだけ。`*Fitted`はpickleの復元でも使う：状態には`y`・`x`を入れず（観測数に比例して大きい）、`x`・`y`の列名と係数・分散共分散行列（Tobitは境界と`σ`も）だけを入れる。復元は先に`source_data`を復元し、その列から`rebuild_columns`（`common.rs`。`fit`と同じ`extract_f64_column(s)`）で`y`・`x`を取り出し直して、`*Input::from_columns`と`from_parts`（次元の整合を検査。Tobitは打ち切り境界とデータの整合も`from_parts`が検査する）で組み立てる。この依存関係は`impl_pickle_state!`の`rebuilt_from(source_data) { fitted }`（`PickleFieldFromSource`）で表す。列が無い・数値でない・欠損値・0行は`PICKLE_FORMAT_MISMATCH`（最適性は検証できない。`docs/spec/pickle-support.md`参照）。
-
-- `*Fitted`は`Clone`を実装していないため、`LogitResult`/`ProbitResult`/`TobitResult`も`#[derive(Clone)]`を外している（`OLSResult`との差異。リポジトリ全体を検索し`.clone()`されている箇所が無いことを確認済み）。
-- 各メソッドはいずれも`self.fitted`への単純な委譲のみ（計算ロジックを`engine_pybind`に書かない原則を維持）。
-- **`predict(new_data=None)`のout-of-sample対応（Logit/Probit/Tobit共通）も同じ委譲方針**: `new_data`指定時は`nonlinear/common.rs`の`predict_out_of_sample`（`predict()`/`augment()`両方のSome分岐から呼ぶ）が、`select_model_x_columns`で`x`列だけ取り込み、`extract_model_x_columns`で`x`列を抽出して、呼び出し側のクロージャに渡す。クロージャは`self.fitted.predict_new_data(...)`（`LogitFitted`/`ProbitFitted`/`TobitFitted`のメソッド、内部で`nonlinear::common::predict_new_data`に`logistic`/正規分布CDF/`predicted_value`を`link`として渡すだけ）を呼ぶだけにする。`extract_model_x_columns`は`column_extraction/`の共通ユーティリティで、`param_names`から`has_intercept`時の先頭`"const"`を除いた`x`列名を絞り込んで抽出する（Tobitも`fitted.input().param_names()`が`k`長（`σ`を含まない。結果の`param_names`に足す`"sigma"`は別の値）なので同じ関数で足りる。内部で`x_column_names`と`extract_f64_columns`を呼ぶ）。に委譲する。`OLSResult::predict`が`engine::linear::ols::predict_new_data`というフリー関数を直接呼べるのに対し、Logit/Probit/Tobitがフリー関数を直接呼ばず`*Fitted`のメソッド経由にしているのは、`link`の選択（Logitはロジスティック関数、Probitは正規分布CDF、Tobitは`target`・`sigma`・打ち切り境界を閉じ込めた`predicted_value`）という手法固有の分岐を`engine_pybind`に持ち込まないため（`engine_pybind`にはstatrs依存も無い）。新規データの設計行列組み立て（`has_intercept`時の定数項自動付加）はengine内部でOLS/WLSと共有する`engine::shared::design_matrix::design_matrix_element`を使う（engine_pybindからは名前で参照しない）。Tobitのみ`target: MarginalEffectsTarget`を`predict_new_data`に追加で渡し、`MleError`を`mle_error_to_pyerr`で変換するクロージャを渡す（`tobit/result.rs`参照）。
-- **`augment(new_data=None)`（OLS/WLSと同じくLogit/Probit/Tobitにも実装済み）**: `LogitResult`/`ProbitResult`/`TobitResult`はいずれも`fit()`に渡された元の`polars.DataFrame`を非公開`source_data: Py<PyAny>`として保持する（`IVResult.first_stage()`のような単一DataFrameを持たない構築経路が無いため、`OLSResult`と異なり`Option`にせず常に保持、`WLSResult::source_data`と同じ設計）。`new_data=None`時はそれへ`predict()`と同じ計算結果の列を付加、指定時は`new_data`自体に付加する。列名衝突は`shared/augment.rs`の`append_predicted_column`で`ValidationError`（OLS/WLSと同じ）。**列名はLogit/Probitが固定`"predicted_probability"`、Tobitは`target`依存の`"predicted_{target}"`**: Tobitは`target`によって`predict()`の意味が変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が列名衝突で失敗する。`target`ごとに異なる列名にすることでこれを回避している。
-- `marginal_effects`の結果はpyclass`MarginalEffectsResult`（`nonlinear/common.rs`、`LogitResult`/`ProbitResult`と同じ個別`#[pyo3(get)]`方式）で返す。フィールド名は`LogitResult`/`ProbitResult`の既存フィールド（`param_names`/`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`）と揃え、`effect`のみ新規（engine側`MarginalEffects::effect()`の値）。元々`logit.rs`にLogit専用で定義していたが、`engine::nonlinear::common::MarginalEffects`（engine側の返り値型）が最初からLogit/Probit共有だったのに合わせ、Probit追加時に`nonlinear/common.rs`へ移動して共有した（`parse_marginal_effects_at`も同様に移動）。
-
-## `pred_table`の`Mat<f64>`→Python変換
-
-`shared/mat_conversion.rs`の`mat_to_rows`（行指向`Vec<Vec<f64>>`に変換）を使う。同ファイルの`mat_to_vec`は列ベクトル（n×1）専用のため、任意形状に対応する別関数を用意した。Logit/Probitの`pred_table`（どちらも2×2形状）と、全手法の`cov_params`（k×k）で共有している。
-
-## テストの制約: `PyErr`はGILが無いと`Display`できない
-
-`PyErr::to_string()`（`Display`実装）はPython interpreterのGIL取得を要求し、`#[cfg(test)]`（Python未初期化）で呼ぶとpanicする。エラーメッセージの文言・優先順位そのものを検証したい場合は、`ValidationError::new_err(...)`でラップする前の純粋関数（`validation.rs`の`find_role_overlap`等）を直接テストする設計にする。
-
-## テストの制約: `SelectedData`引数の関数はcargo testから直接呼べない
-
-`fit`（`build_logit_input`/`build_probit_input`の後段、`LogitEstimator::fit`/`ProbitEstimator::fit`を呼ぶ関数）は`SelectedData`を引数に取るため、GILなしの`#[cfg(test)]`では呼べない（`build_logit_input`/`build_probit_input`が`SelectedData`ではなくプレーンな`polars::DataFrame`を受け取る設計にしているのはこの制約を避けるため）。推定の純Rust部分は`fit_frame`に切り出して`py.detach`の中で走らせるが（`.claude/rules/rust-style.md`のGIL解放の規約）、`fit_frame`も結果に載せる`source`（`Py<PyAny>`）を受け取るため、GILなしの`#[cfg(test)]`からは同様に呼べない。`fit`自体の検証は`uv run maturin develop`後のPythonからの数値照合、または`tests/`のpytestで行う（OLSの前例と同じ、`engine_pybind/src/linear/CLAUDE.md`参照）。
+- **`#[cfg(test)]`で`PyErr::to_string()`を呼ばず、`Result<_, PyErr>`に`unwrap()`/`expect()`を使わない。文言・優先順位は`PyErr`に包む前の純粋関数（`find_role_overlap`等）か`ErrorReport::full_text()`でテストする**: `Display`・`Debug`はGILを要求し、Python未初期化だとpanicする（`unwrap`は二重パニックでテストバイナリ全体が落ちる）。
+- **`fit`（`SelectedData`を取る）と`fit_frame`（`source`の`Py<PyAny>`を取る）は`cargo test`から呼べないので、`fit`の検証は`maturin develop`後のPythonからの数値照合とpytestで行う。`build_*_input`はプレーンな`polars::DataFrame`を受け取る形を保つ**: この制約を避けるための形。詳細: `docs/spec/nonlinear-common.md`10章。

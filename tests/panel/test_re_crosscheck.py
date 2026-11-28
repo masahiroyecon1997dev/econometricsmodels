@@ -1,10 +1,10 @@
 """RE の独立実装（R: plm）とのクロスチェックテスト。
 
-主リファレンス（linearmodels）との厳密比較（classical/hc1）は
+主リファレンス（linearmodels）との厳密比較（classical/hc1、バランスパネル）は
 `test_re_reference.py`で行う。classical/hc1もこのファイルのplmで独立に検証する
-（全統計量。F統計量はこのファイルが全cov_typeの独立リファレンス。ただし
-`unbalanced`は傾きだけのWald Fを手書きした参照値で、独立性が下がる。下記
-「不均衡パネル（unbalanced）の参照値」参照）。
+（全統計量。F統計量はこのファイルが全cov_typeの独立リファレンス）。不均衡パネル
+（`unbalanced`）は`linearmodels`とσ_u²の式が違うため、このファイルのplmが
+主リファレンスになる（下記「不均衡パネル（unbalanced）」参照）。
 ここでは`tests/fixtures/benchmarks/re_crosscheck.json`（`benchmark/panel/
 fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmodelsとは
 独立した実装（R: plm）との一致を確認する。
@@ -25,27 +25,16 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest(method = "aux",
   effect = "individual")`（回帰ベース）が唯一の参照実装（panel-common.md
-  5.3節）。`unbalanced`だけは、`linearmodels`の分散成分から補助回帰を組み立てた
-  plmを参照にする（下記）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
+  5.3節）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
   （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
-## 不均衡パネル（unbalanced）の参照値
+## 不均衡パネル（unbalanced）
 
-plmのSwamy-Arora分散成分は、`linearmodels`準拠の本実装と不均衡パネルで僅かに
-異なる（plm自身のREとの差: 係数が最大0.18%、標準誤差・信頼区間等がcov_typeに
-応じて1%前後、dkのバンド幅0では信頼区間が12%）。差は共分散推定量や小標本補正
-ではなく分散成分の推定にあるため、`unbalanced`の標準誤差・推論統計量（全
-cov_type、dkの明示バンド幅を含む）は、plm自身のREではなく`linearmodels`の分散
-成分をplmに与えて準偏差変換したデータへの`vcov`・`vcovHC`・`vcovSCC`と比べる
-（`run_plm_re_given_variance_benchmark.R`）。他のシナリオと同じく機械精度で
-一致し、補正式の取り違え（clusterの`G/(G-1)`欠落は標準誤差に約1.3%）も検出
-できる。
-
-この参照でplmが検証するのは係数・共分散行列・小標本補正まで。θの式、傾きだけの
-Wald F統計量（`pwaldtest`は変換後の定数列も検定に含めるため手書き）、t検定への
-変換は手書きで、分散成分そのもの（Swamy-Arora）は`linearmodels`（`re.json`）が
-検証する。θの式とF統計量の式は、plm自身の分散成分を与えた参照値がplm自身のRE
-と一致することで、フィクスチャを作るたびに確かめている。
+本実装の1-wayのSwamy-Arora分散成分はplmの`swar`（不均衡では`dfcor = 3`のトレース形）と
+同じ式なので、`unbalanced`も他のシナリオと同じくplm自身のRE・`phtest`と機械精度で
+比べる。分散成分（`sigma2_eps`・`sigma2_u`）も全シナリオでplmの`ercomp`と比べる
+（`test_variance_components_match_plm`）。`linearmodels`の`RandomEffects`は不均衡パネルで
+between回帰を重み付けせず調和平均を使うため、σ_u²が違う（`re.json`はバランスパネルだけ）。
 
 ## dkの明示バンド幅・時点数の境界・実データ
 
@@ -54,21 +43,15 @@ Wald F統計量（`pwaldtest`は変換後の定数列も検定に含めるため
 - **時点数の境界**: ハウスマン検定の対象数`k=2`に対し`T=k+1=3`の成功パス
   （`baseline.dk_three_periods`）。`T<=k`は`test_re_validation.py`の
   `ValidationError`。
-- **wagepan**: `T=8`、検定対象3個（`T-1=7`）でdkも標準誤差・ハウスマン検定の
+- **wagepan**（と、行を落とした不均衡版`wagepan_unbalanced`。観測数2・4・7・8）: `T=8`、
+  検定対象3個（`T-1=7`）でdkも標準誤差・ハウスマン検定の
   両方をplmと比べる（時点列は`year`）。
 
 ## ハウスマン統計量の方式について
 
 補助回帰版は統計量が構造的に非負になるため符号処理は不要。`plm`は補助回帰の
-定数項に準偏差変換前の`1`を使い、本実装もこれに合わせている。バランスパネルでは
-機械精度で一致する。不均衡パネル（`UNBALANCED_SCENARIO`）では、`phtest`の補助回帰が
-plmのSwamy-Arora分散成分から作るθに依存し、plm自身の値とは統計量が1〜2%ずれる
-（dkのバンド幅2と3の差約2.1%を隠す）。そのためハウスマン検定も、`linearmodels`の
-分散成分から補助回帰を組み立ててplmの`vcov`系を当てた値と機械精度で比べる
-（`run_plm_re_given_variance_hausman_benchmark.R`）。plmが検証するのは補助回帰の
-係数と共分散行列まで。補助回帰の組み立て（準偏差変換した`y*`・`X*`、within変換した
-`X̃`、素の定数項、検定対象の選択）は手書きで、plm自身の分散成分を与えた値が
-`phtest`と一致することで、フィクスチャを作るたびに確かめている。
+定数項に準偏差変換前の`1`を使い、本実装もこれに合わせている。バランス・不均衡とも
+機械精度で一致する。
 
 役割分担:
     - 構造・API: `test_re_api.py`
@@ -124,8 +107,9 @@ from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     HAUSMAN_DK_BANDWIDTH_KEY,
     HAUSMAN_KEY,
     SCENARIO_COV_TYPES,
-    UNBALANCED_SCENARIO,
     WAGEPAN_COV_TYPES,
+    WAGEPAN_UNBALANCED,
+    wagepan_unbalanced,
 )
 
 FIXTURE_PATH = (
@@ -235,14 +219,6 @@ def _check_hausman(
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 
 
-def _reference_label(scenario: str) -> str:
-    """参照値の出どころ。`unbalanced`はplm自身のREではなく、`linearmodels`の
-    分散成分を与えたplm（モジュールdoc「不均衡パネル（unbalanced）の参照値」参照）。"""
-    if scenario == UNBALANCED_SCENARIO:
-        return "plm with linearmodels variance components"
-    return "plm"
-
-
 def _re_options(
     cov_type: str,
     *,
@@ -272,8 +248,32 @@ def test_matches_plm(crosscheck, scenario, cov_type):
     _check_result(
         res,
         crosscheck["synthetic"][scenario][cov_type],
-        f"{scenario}/{cov_type} vs {_reference_label(scenario)}",
+        f"{scenario}/{cov_type} vs plm",
     )
+
+
+@pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
+def test_variance_components_match_plm(crosscheck, scenario):
+    """分散成分（`sigma2_eps`・`sigma2_u`）がplmの`ercomp(method = "swar")`と一致する。
+    不均衡パネル（`unbalanced`）では`dfcor = 3`のトレース形（`T_i`重みのbetween回帰）で、
+    `linearmodels`の値とは異なる。分散成分は`cov_type`によらないのでclassicalで比べる。"""
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    res = RE(
+        df,
+        y="y",
+        x=x_columns(df),
+        effects=["entity"],
+        options=_re_options("classical"),
+    ).fit()
+    ref = crosscheck["synthetic"][scenario]["classical"]
+    for name in ("sigma2_eps", "sigma2_u"):
+        assert_close(
+            getattr(res, name),
+            ref[name],
+            f"{scenario}/{name} vs plm",
+            rtol=RTOL,
+            atol=ATOL,
+        )
 
 
 def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
@@ -357,7 +357,7 @@ def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
         crosscheck["synthetic"][scenario][DK_EXPLICIT_BANDWIDTH_KEY][
             str(bandwidth)
         ],
-        f"{scenario}/dk/bandwidth={bandwidth} vs {_reference_label(scenario)}",
+        f"{scenario}/dk/bandwidth={bandwidth} vs plm",
     )
 
 
@@ -403,9 +403,19 @@ def test_dk_three_periods_hausman_matches_plm(crosscheck):
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────
 
 
-@pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
-def test_wagepan_matches_plm(crosscheck, cov_type):
+# `wagepan`（バランス）と、行を落とした不均衡版`wagepan_unbalanced`（観測数2・4・7・8）。
+WAGEPAN_DATASETS = ["wagepan", WAGEPAN_UNBALANCED]
+
+
+def _wagepan_frame(dataset: str) -> pl.DataFrame:
     df = load_wooldridge_dataset("wagepan")
+    return wagepan_unbalanced(df) if dataset == WAGEPAN_UNBALANCED else df
+
+
+@pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
+@pytest.mark.parametrize("dataset", WAGEPAN_DATASETS)
+def test_wagepan_matches_plm(crosscheck, dataset, cov_type):
+    df = _wagepan_frame(dataset)
     options = _re_options(cov_type, dk_time=WAGEPAN_TIME)
     res = RE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, effects=[WAGEPAN_ENTITY], options=options
@@ -413,12 +423,34 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
 
     _check_result(
         res,
-        crosscheck["wooldridge"]["wagepan"][cov_type],
-        f"wagepan/{cov_type}",
+        crosscheck["wooldridge"][dataset][cov_type],
+        f"{dataset}/{cov_type}",
     )
 
 
-# ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)。unbalancedは分散成分を与えた補助回帰） ──
+@pytest.mark.parametrize("dataset", WAGEPAN_DATASETS)
+def test_wagepan_variance_components_match_plm(crosscheck, dataset):
+    """実データの分散成分がplmの`ercomp`と一致する（不均衡版はトレース形）。"""
+    df = _wagepan_frame(dataset)
+    res = RE(
+        df,
+        y=WAGEPAN_Y,
+        x=WAGEPAN_X,
+        effects=[WAGEPAN_ENTITY],
+        options=_re_options("classical"),
+    ).fit()
+    ref = crosscheck["wooldridge"][dataset]["classical"]
+    for name in ("sigma2_eps", "sigma2_u"):
+        assert_close(
+            getattr(res, name),
+            ref[name],
+            f"{dataset}/{name} vs plm",
+            rtol=RTOL,
+            atol=ATOL,
+        )
+
+
+# ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)） ──
 
 
 @pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
@@ -446,14 +478,15 @@ def test_hausman_matches_plm(crosscheck, scenario, cov_type):
     _check_hausman(
         model.fit(),
         ref,
-        f"{scenario}/{cov_type} vs {_reference_label(scenario)}",
+        f"{scenario}/{cov_type} vs plm",
         scenario=scenario,
     )
 
 
 @pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
-def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
-    df = load_wooldridge_dataset("wagepan")
+@pytest.mark.parametrize("dataset", WAGEPAN_DATASETS)
+def test_wagepan_hausman_matches_plm(crosscheck, dataset, cov_type):
+    df = _wagepan_frame(dataset)
     options = (
         REOptions(cov_type="dk", dk_time="year")
         if cov_type == "dk"
@@ -465,8 +498,8 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
 
     _check_hausman(
         res,
-        crosscheck["wooldridge"]["wagepan"][HAUSMAN_KEY][cov_type],
-        f"wagepan/{cov_type}",
+        crosscheck["wooldridge"][dataset][HAUSMAN_KEY][cov_type],
+        f"{dataset}/{cov_type}",
     )
 
 
@@ -492,7 +525,7 @@ def test_hausman_dk_explicit_bandwidth_matches_plm(
         crosscheck["synthetic"][scenario][HAUSMAN_DK_BANDWIDTH_KEY][
             str(bandwidth)
         ],
-        f"{scenario}/dk/bandwidth={bandwidth} vs {_reference_label(scenario)}",
+        f"{scenario}/dk/bandwidth={bandwidth} vs plm",
         scenario=scenario,
     )
 

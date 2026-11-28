@@ -22,13 +22,11 @@ REは時間不変の説明変数（within変換後に分散がゼロの列）を
 
 - `zero_variance_regressor`（バランスパネル、`x1`・`x2`・時間不変の`x_invariant`）:
   機械精度で比較する。
-- `time_invariant_unbalanced`（不均衡パネル、同じ列構成）: plmとlinearmodels準拠の
-  本実装でSwamy-Arora分散成分（σ_u²）の推定が異なる既存の差（
-  `generate_re_crosscheck_fixtures.py`モジュールdoc「unbalancedの参照値」）が
-  同じ形で出るため、統計量・cov_type別に緩めた許容誤差で比較する。
+- `time_invariant_unbalanced`（不均衡パネル、同じ列構成）: 本実装の1-wayのSwamy-Aroraは
+  plmの`swar`（不均衡では`dfcor = 3`のトレース形）と同じ式なので、機械精度で比較する。
 - `time_invariant_multi_unbalanced`（時間変化の`x1`〜`x3`と時間不変の`z1`・`z2`、
-  `T_i`が2〜10に偏る不均衡パネル）: 複数の時間不変列と、σ_u²の差が増幅される極端な
-  不均衡。plmとは同じく緩い許容誤差で比較する。
+  `T_i`が2〜10に偏る不均衡パネル）: 複数の時間不変列と極端な不均衡（`linearmodels`の
+  σ_u²の式なら差が大きく出る入力）。plmと機械精度で比較する。
 - 時点間でのみ変わる列（年トレンド等、1-wayでは個体平均が一定になるためbetween回帰から
   落ち、ハウスマン検定の補助回帰でも`X*`との差が定数になり検定から外れる、
   `re-spec.md`3.1節・3.6節）:
@@ -37,8 +35,7 @@ REは時間不変の説明変数（within変換後に分散がゼロの列）を
   - `absolute_year_regressor`（バランス、T=5）: `x1`・`x2`と絶対年`year`（1990〜、他の列と
     スケールが3桁異なる）。
   - `time_only_nearly_balanced`（2行だけ落とした準バランス）: 時点トレンド`trend`の個体平均が、落とした
-    2エンティティでだけ一定でなくなる境界。不均衡のため、plmと本実装のσ_u²の定義の差が出る
-    （他の不均衡シナリオと同じ扱い）。
+    2エンティティでだけ一定でなくなる境界。
   - `small_hand_time_only`（手作りの6エンティティ×4時点の小パネル、`x1`・`xt`）。
 - `wagepan`（Wooldridgeの実データ、バランスパネル）: `educ`・`black`・`hisp`
   （個人ごとに一定）を加えた`lwage ~ married + union + expersq + educ + black + hisp`。
@@ -208,8 +205,8 @@ def build_fixtures() -> dict:
             "ハウスマン検定はplm::phtest(method='aux')が時間不変変数で検定する"
             "係数を取り違えるため、その補助回帰を再現して係数を名前で選んだ"
             "独立な手計算（run_plm_hausman_tilde_benchmark.R）の値。"
-            "time_invariant_unbalancedはplmとlinearmodels準拠の本実装のσ_u²推定の"
-            "差が不均衡パネルで出る（generate_re_crosscheck_fixtures.py参照）。"
+            "不均衡パネルも本実装（1-wayのSwamy-Aroraはplmのswarのトレース形）と"
+            "機械精度で比較する。"
             "dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的に"
             "maxlagに渡している。wagepanはmarried/union/expersqに時間不変の"
             "educ/black/hispを加えた実データ（dkは主な統計量の対象外、"

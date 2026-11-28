@@ -25,39 +25,18 @@
   対応を記載）。比較は常に1-wayで、`REOptions.dk_time`の有無によらない。
   dkのバンド幅は`floor(4*(T/100)^(2/9))`を`maxlag`に明示的に渡す。
   `dk_bandwidth`明示指定は`"hausman_dk_bandwidth"`キー配下（`{バンド幅: 値}`、
-  標準誤差・推論統計量側は`"dk_explicit_bandwidth"`。`unbalanced`だけは
-  `linearmodels`の分散成分を与えたplmの値）、ハウスマン検定も`unbalanced`だけ
-  `linearmodels`の分散成分から補助回帰を組み立てたplmの値（下記）。dkの時点数の境界
+  標準誤差・推論統計量側は`"dk_explicit_bandwidth"`）。dkの時点数の境界
   （`T = k+1`）の成功パスは`baseline.dk_three_periods`（標準誤差）・
   `baseline.dk_three_periods_hausman`。
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`
   （本実装は`fit()`がエラーになる）。
 
-## unbalancedの参照値（分散成分を与えたplm）
+## unbalanced（不均衡パネル）
 
-不均衡パネルではplmのSwamy-Arora分散成分が`linearmodels`準拠の本実装と異なり、
-plm自身のREでは係数が最大0.18%、標準誤差・信頼区間等がcov_typeに応じて1%前後
-ずれる（dkのバンド幅0では信頼区間の端が0に近い係数で相対誤差が10%超に増幅
-される）。共分散推定量や小標本補正とは無関係なずれなので、`unbalanced`の標準誤差・
-推論統計量（全cov_typeと`dk_explicit_bandwidth`）は、`linearmodels`の分散成分
-（本実装と機械精度で一致、`re.json`）をRに渡して準偏差変換し、plmの`vcov`・
-`vcovHC`・`vcovSCC`を当てた値を参照値にする
-（`run_plm_re_given_variance_benchmark.R`）。plmが検証するのは係数・共分散行列・
-小標本補正までで、θの式・傾きだけのWald F・t検定への変換（自由度はcov_type別）は
-手書き。この方式の根拠は、plm自身の分散成分を与えるとplm自身のREと係数・標準誤差・
-F統計量が一致することで、生成のたびにcov_type・バンド幅ごとに確かめる
-（`_check_given_variance_equivalence`）。
-
-ハウスマン検定（`hausman`・`hausman_dk_bandwidth`）も`unbalanced`だけ同じ考え方に
-する。`phtest(method = "aux")`の補助回帰はplm自身のSwamy-Arora分散成分から作る
-θに依存し、統計量が本実装と1〜2%ずれる（dkのバンド幅2と3の差約2.1%を隠す）ため、
-`linearmodels`の分散成分から補助回帰`y* ~ 1 + X* + X̃`を組み立て、plmの`vcov`系を
-当てた値を参照値にする（`run_plm_re_given_variance_hausman_benchmark.R`）。
-plmが検証するのは補助回帰の係数と共分散行列まで。補助回帰の組み立ては手書きで、
-plm自身の分散成分を与えた値が`phtest`と統計量・p値・自由度で一致することを
-生成のたびに確かめる（`_check_given_variance_hausman_equivalence`）。
-なお、この方式の参照値は分散成分を出力しないため、`unbalanced`のエントリには
-`sigma2_eps`・`sigma2_u`が無い（他のシナリオはplm自身の値を持つ）。
+本実装の1-wayのSwamy-Arora分散成分はplmの`swar`（不均衡では`dfcor = 3`のトレース形）と
+同じ式なので、`unbalanced`も他のシナリオと同じくplm自身のRE・`phtest`の値をそのまま
+参照値にする（分散成分`sigma2_eps`・`sigma2_u`も持つ）。`linearmodels`は不均衡パネルで
+σ_u²の式が異なるため、`re.json`はバランスパネルだけを持つ。
 
 ## entity以外の列でクラスターするケース
 
@@ -77,13 +56,13 @@ plm自身の分散成分を与えた値が`phtest`と統計量・p値・自由�
 `plm::pwaldtest(test = "F", vcov = <cov_typeと同じvcov>)`の統計量（Wald二次形式）を
 各エントリに持つ（本実装のREのF統計量はFEと同じく`cov_type`に連動する、
 `re-spec.md`3.5節）。p値は統計量とt検定と同じ分母自由度から`pf()`で再計算した値。
-classical/hc1は`re.json`側の`linearmodels`の`f_statistic_robust`で検証する
-（`res.f_statistic`はSST/SSR方式でcov_type非依存・不均衡パネルで不一致のため使わない）。
+classical/hc1はバランスパネルでは`re.json`側の`linearmodels`の`f_statistic_robust`でも
+検証する（`res.f_statistic`はSST/SSR方式でcov_type非依存・不均衡パネルで不一致のため使わない）。
 
 ## 許容誤差について
 
-バランスパネルはplm自身のREが、`unbalanced`は上記の分散成分を与えたplmが参照値の
-ため、標準誤差・推論統計量・F統計量・ハウスマン検定は全シナリオ機械精度で比較する
+全シナリオでplm自身のREが参照値のため、標準誤差・推論統計量・F統計量・ハウスマン検定は
+全シナリオ機械精度で比較する
 （`tests/support/_tolerances_panel.py`の`re_crosscheck`参照。ハウスマン検定の
 `high_condition_number`だけは専用の許容誤差）。
 
@@ -99,11 +78,8 @@ REのaic/bic/log_likelihoodの独立検証は現時点で行わない
 `abs()`を適用していたが、非正定値の問題を隠すため、補助回帰版
 （`method = "aux"`）に置き換えた。統計量は構造的に非負になる。`plm`は補助回帰の
 定数項に準偏差変換前の`1`を使うため、不均衡パネルでは変換済み定数列を使う版と
-値が異なる（本実装は`plm`に合わせる）。またSwamy-Arora分散成分がlinearmodels
-準拠の本実装と`plm`とで不均衡パネルでは異なるため、`phtest`自身の統計量は
-不均衡パネルで1〜2%ずれる。バランスパネルでは`phtest`と機械精度で一致し、
-`unbalanced`は上記「unbalancedの参照値」の補助回帰（分散成分を与えたplm）と
-機械精度で一致する。
+値が異なる（本実装は`plm`に合わせる）。バランス・不均衡とも`phtest`と機械精度で
+一致する。
 
 `cluster_col`にentity以外を指定した場合は、plmがクラスターにできるのが
 group/timeのみでリファレンスが存在しないため、このフィクスチャでは扱わない。
@@ -114,11 +90,9 @@ group/timeのみでリファレンスが存在しないため、このフィク�
 
 from __future__ import annotations
 
-import importlib.metadata
 import subprocess
 import tempfile
 from datetime import UTC, datetime
-from functools import cache
 from pathlib import Path
 
 import polars as pl
@@ -148,11 +122,8 @@ from benchmark.panel.fixtures.generate_fe_fixtures import (
     NUMERIC_SCENARIOS,
     SCENARIO_X_COLS,
 )
-from benchmark.panel.references.linearmodels_ref import run_re
 from benchmark.panel.references.r import (
     default_dk_bandwidth,
-    run_re_given_variance_plm_r,
-    run_re_hausman_given_variance_plm_r,
     run_re_hausman_plm_r,
     run_re_plm_r,
 )
@@ -186,21 +157,12 @@ HAUSMAN_KEY = "hausman"
 # 3ラグ超の項を通すため中間の12も加える。
 DK_EXPLICIT_BANDWIDTH_KEY = "dk_explicit_bandwidth"
 HAUSMAN_DK_BANDWIDTH_KEY = "hausman_dk_bandwidth"
-# plmとSwamy-Arora分散成分が異なる（本実装はlinearmodels準拠）不均衡パネル。
-UNBALANCED_SCENARIO = "unbalanced"
 DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     "baseline": [0, 2, 3],
     "autocorrelated": [0, 2, 3],
-    UNBALANCED_SCENARIO: [0, 2, 3],
+    "unbalanced": [0, 2, 3],
     "cross_sectionally_correlated": [0, 2, 3, 12],
 }
-# unbalancedの標準誤差・推論統計量は、plmとSwamy-Arora分散成分が異なる分だけ
-# plm自身のREと約1%ずれる（dkのバンド幅0では信頼区間の端が0に近くなり相対誤差が
-# 10%超に増幅される。共分散推定量や小標本補正とは無関係なずれ）。そのため
-# unbalancedは`linearmodels`のRE（本実装と機械精度で一致、`re.json`）の分散成分を
-# plmに与えて準偏差変換し、cov_typeに応じた`vcov`・`vcovHC`・`vcovSCC`を当てた値を
-# 参照値にする（`run_plm_re_given_variance_benchmark.R`モジュールコメント参照、
-# `_run_effects_reference`）。バランスパネルはplm自身のREで機械精度に一致する。
 
 # 補助回帰の傾き係数`2k`個に対し、クラスター数G（cluster）・時点数T（dk）が少なく
 # ロバスト共分散`Ŝ`が`rank(Ŝ) <= G-1`（またはT）で構造的に特異になるケース。
@@ -237,12 +199,6 @@ def _resolve_dk_maxlag(
     return maxlag
 
 
-def _reference_label(prefix: str, cov_type: str, maxlag: int | None) -> str:
-    """自己検証のエラーメッセージ用ラベル（dkはバンド幅付き）。"""
-    suffix = f"/bandwidth={maxlag}" if cov_type == "dk" else ""
-    return f"{prefix}/{cov_type}{suffix}"
-
-
 def _run_hausman(
     csv_path: Path,
     formula: str,
@@ -265,6 +221,25 @@ def _run_hausman(
 
 
 WAGEPAN_FORMULA = f"{WAGEPAN_Y} ~ {' + '.join(WAGEPAN_X)}"
+WAGEPAN_UNBALANCED = "wagepan_unbalanced"
+
+
+def wagepan_unbalanced(df: pl.DataFrame) -> pl.DataFrame:
+    """wagepanから決まった規則で行を落とした不均衡パネル（不均衡の実データの検証用）。
+
+    個体ID`nr`を4で割った余りで、0なら1980〜1981年（2観測）、1なら1980〜1983年（4観測）、
+    2なら1987年を除く7観測、3なら全8観測を残す。観測数が2〜8にばらつき、全個体が2観測以上
+    （singletonにならない）。
+    """
+    group = pl.col(WAGEPAN_ENTITY) % 4
+    year = pl.col(WAGEPAN_TIME)
+    keep = (
+        ((group == 0) & (year <= 1981))
+        | ((group == 1) & (year <= 1983))
+        | ((group == 2) & (year != 1987))
+        | (group == 3)
+    )
+    return df.filter(keep)
 
 
 def _run_effects(
@@ -276,166 +251,24 @@ def _run_effects(
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
 
 
-# 分散成分を与える参照値の自己検証（`_check_given_variance_equivalence`）の相対
-# 許容誤差。同じ分散成分を与えれば同じGLS推定量・同じ共分散推定量になるため
-# 機械精度（実測4e-13以下）。
-_GIVEN_VARIANCE_RTOL = 1e-10
-
-
-def _assert_given_variance_close(
-    pairs: list[tuple[float, float, str]], label: str, reference: str
-) -> None:
-    """`(参照値, plm自身の値, 統計量名)`の各組が相対`_GIVEN_VARIANCE_RTOL`以内で
-    一致することを確かめる。`reference`はエラーメッセージ用のplm自身の値の呼称。"""
-    for ours, ref, name in pairs:
-        if abs(ours - ref) > _GIVEN_VARIANCE_RTOL * abs(ref):
-            raise AssertionError(
-                f"{label}/{name}: given-variance reference {ours!r} differs "
-                f"from {reference} {ref!r}"
-            )
-
-
-@cache
-def _plm_variance(scenario: str) -> dict:
-    """plm自身のREの分散成分（`sigma2_eps`・`sigma2_u`）。`cov_type`・バンド幅に
-    よらないため1回だけ求め、ハウスマン検定の参照値の自己検証に使う。"""
-    return _run_effects(scenario, "classical")
-
-
-def _check_given_variance_equivalence(
-    given: dict, plm_re: dict, label: str
-) -> None:
-    """plm自身の分散成分を与えた参照値`given`が、plm自身のRE（`plm_re`）の
-    同じcov_typeの共分散推定量と、全統計量（係数・標準誤差・t統計量・p値・
-    信頼区間・F統計量・F検定のp値）で相対`_GIVEN_VARIANCE_RTOL`以内に一致する
-    ことを確かめる。
-
-    分散成分を与える方式（`run_plm_re_given_variance_benchmark.R`）の根拠で
-    ある等価性を、フィクスチャを作るたびに検証する。θの式、傾きだけの手書きの
-    Wald F、t検定への変換（cov_type別の自由度）が、plm自身のREを出す側
-    （`run_plm_benchmark.R`）と同じ結果になることの確認になる。
-    """
-    pairs = [
-        (given["f_statistic"], plm_re["f_statistic"], "f_statistic"),
-        (given["f_p_value"], plm_re["f_p_value"], "f_p_value"),
-    ]
-    for stat in ("params", "std_errors", "test_stats", "p_values"):
-        pairs += [
-            (given[stat][k], v, f"{stat}/{k}") for k, v in plm_re[stat].items()
-        ]
-    for k, (lower, upper) in plm_re["conf_int"].items():
-        pairs += [
-            (given["conf_int"][k][0], lower, f"conf_int/{k}/lower"),
-            (given["conf_int"][k][1], upper, f"conf_int/{k}/upper"),
-        ]
-    _assert_given_variance_close(pairs, label, "plm's own RE")
-
-
-@cache
-def _linearmodels_variance(scenario: str) -> dict:
-    """`linearmodels`のREの分散成分（`sigma2_eps`・`sigma2_u`）。本実装と機械精度で
-    一致する（`re.json`）。分散成分は`cov_type`・バンド幅によらないため1回だけ求める。"""
-    return run_re(
-        scenario, _scenario_x_cols(scenario), "classical", time_col="time"
-    )
-
-
 def _run_effects_reference(
     scenario: str, cov_type: str, *, maxlag: int | None = None
 ) -> dict:
-    """標準誤差・推論統計量の参照値。balancedはplm自身のRE、unbalancedは
-    `linearmodels`の分散成分を与えたplm（`DK_EXPLICIT_BANDWIDTHS`直後のコメント参照）。
-    plm自身の分散成分を与えた値がplm自身のREと一致することを、生成のたびに確かめる。"""
-    csv_path, formula = _scenario_inputs(scenario)
+    """標準誤差・推論統計量の参照値（plm自身のRE）。dkのバンド幅が未指定なら本実装の
+    既定式で補う。"""
+    csv_path, _ = _scenario_inputs(scenario)
     maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
-    plm_re = _run_effects(scenario, cov_type, maxlag=maxlag)
-    if scenario != UNBALANCED_SCENARIO:
-        return plm_re
-    label = _reference_label(scenario, cov_type, maxlag)
-    _check_given_variance_equivalence(
-        run_re_given_variance_plm_r(
-            csv_path,
-            formula,
-            cov_type,
-            sigma2_eps=plm_re["sigma2_eps"],
-            sigma2_u=plm_re["sigma2_u"],
-            maxlag=maxlag,
-        ),
-        plm_re,
-        label,
-    )
-    variance = _linearmodels_variance(scenario)
-    return run_re_given_variance_plm_r(
-        csv_path,
-        formula,
-        cov_type,
-        sigma2_eps=variance["sigma2_eps"],
-        sigma2_u=variance["sigma2_u"],
-        maxlag=maxlag,
-    )
-
-
-def _check_given_variance_hausman_equivalence(
-    given: dict, phtest: dict, label: str
-) -> None:
-    """plm自身の分散成分を与えたハウスマン検定の参照値`given`が、
-    `phtest(method = "aux")`の値（`phtest`）と、統計量・p値で相対
-    `_GIVEN_VARIANCE_RTOL`以内、自由度で完全に一致することを確かめる。
-
-    補助回帰の組み立て（準偏差変換した`y*`・`X*`、within変換した`X̃`、素の定数項、
-    検定対象の選択）が`phtest`と同じ結果になることの確認になる
-    （`run_plm_re_given_variance_hausman_benchmark.R`）。
-    """
-    if given["hausman_df"] != phtest["hausman_df"]:
-        raise AssertionError(
-            f"{label}/hausman_df: {given['hausman_df']!r} differs from "
-            f"phtest {phtest['hausman_df']!r}"
-        )
-    _assert_given_variance_close(
-        [
-            (given[n], phtest[n], n)
-            for n in ("hausman_statistic", "hausman_p_value")
-        ],
-        label,
-        "phtest",
-    )
+    return _run_effects(scenario, cov_type, maxlag=maxlag)
 
 
 def _run_hausman_reference(
     scenario: str, cov_type: str, *, maxlag: int | None = None
 ) -> dict:
-    """ハウスマン検定の参照値。balancedはplm自身の`phtest`、unbalancedは
-    `linearmodels`の分散成分を与えて補助回帰を組み立てたplm
-    （`run_plm_re_given_variance_hausman_benchmark.R`）。plm自身の分散成分を与えた
-    値が`phtest`と一致することを、生成のたびに確かめる。"""
+    """ハウスマン検定の参照値（plm自身の`phtest`）。dkのバンド幅が未指定なら本実装の
+    既定式で補う。"""
     csv_path, formula = _scenario_inputs(scenario)
     maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
-    phtest = _run_hausman(csv_path, formula, cov_type, maxlag=maxlag)
-    if scenario != UNBALANCED_SCENARIO:
-        return phtest
-    label = _reference_label(f"{scenario}/hausman", cov_type, maxlag)
-    plm_variance = _plm_variance(scenario)
-    _check_given_variance_hausman_equivalence(
-        run_re_hausman_given_variance_plm_r(
-            csv_path,
-            formula,
-            cov_type,
-            sigma2_eps=plm_variance["sigma2_eps"],
-            sigma2_u=plm_variance["sigma2_u"],
-            maxlag=maxlag,
-        ),
-        phtest,
-        label,
-    )
-    variance = _linearmodels_variance(scenario)
-    return run_re_hausman_given_variance_plm_r(
-        csv_path,
-        formula,
-        cov_type,
-        sigma2_eps=variance["sigma2_eps"],
-        sigma2_u=variance["sigma2_u"],
-        maxlag=maxlag,
-    )
+    return _run_hausman(csv_path, formula, cov_type, maxlag=maxlag)
 
 
 def _run_cluster_case(
@@ -481,6 +314,20 @@ def _run_wagepan(csv_path: Path, cov_type: str) -> dict:
         time_col=WAGEPAN_TIME,
         maxlag=maxlag,
     )
+
+
+def _run_wagepan_hausman(csv_path: Path) -> dict:
+    return {
+        cov_type: _run_hausman(
+            csv_path,
+            WAGEPAN_FORMULA,
+            cov_type,
+            entity_col=WAGEPAN_ENTITY,
+            time_col=WAGEPAN_TIME,
+            maxlag=_resolve_dk_maxlag(csv_path, cov_type, None, WAGEPAN_TIME),
+        )
+        for cov_type in HAUSMAN_COV_TYPES
+    }
 
 
 def build_fixtures() -> dict:
@@ -539,19 +386,18 @@ def build_fixtures() -> dict:
             cov_type: _run_wagepan(csv_path, cov_type)
             for cov_type in WAGEPAN_COV_TYPES
         }
-        fixtures["wagepan"][HAUSMAN_KEY] = {
-            cov_type: _run_hausman(
-                csv_path,
-                WAGEPAN_FORMULA,
-                cov_type,
-                entity_col=WAGEPAN_ENTITY,
-                time_col=WAGEPAN_TIME,
-                maxlag=_resolve_dk_maxlag(
-                    csv_path, cov_type, None, WAGEPAN_TIME
-                ),
-            )
-            for cov_type in HAUSMAN_COV_TYPES
+        fixtures["wagepan"][HAUSMAN_KEY] = _run_wagepan_hausman(csv_path)
+
+        # 不均衡の実データ（`wagepan_unbalanced`）。1-wayのSwamy-Aroraはplmのトレース形。
+        unbalanced_path = tmpdir / "wagepan_unbalanced.csv"
+        wagepan_unbalanced(df).write_csv(unbalanced_path)
+        fixtures[WAGEPAN_UNBALANCED] = {
+            cov_type: _run_wagepan(unbalanced_path, cov_type)
+            for cov_type in WAGEPAN_COV_TYPES
         }
+        fixtures[WAGEPAN_UNBALANCED][HAUSMAN_KEY] = _run_wagepan_hausman(
+            unbalanced_path
+        )
 
     r_version = subprocess.run(
         ["Rscript", "-e", "cat(as.character(getRversion()))"],
@@ -559,7 +405,6 @@ def build_fixtures() -> dict:
         text=True,
         check=True,
     ).stdout
-    linearmodels_version = importlib.metadata.version("linearmodels")
     plm_version = subprocess.run(
         ["Rscript", "-e", 'cat(as.character(packageVersion("plm")))'],
         capture_output=True,
@@ -573,7 +418,6 @@ def build_fixtures() -> dict:
         "reference": "plm (R)",
         "r_version": r_version,
         "plm_version": plm_version,
-        "linearmodels_version": linearmodels_version,
         "note": (
             "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たない"
             "ためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。"
@@ -588,22 +432,14 @@ def build_fixtures() -> dict:
             "dk_three_periods_hausmanは"
             "dkの時点数の境界の成功パス。dkの明示バンド幅は各シナリオの"
             "dk_explicit_bandwidth（標準誤差）・"
-            "hausman_dk_bandwidth（ハウスマン検定）。unbalancedの標準誤差・"
-            "推論統計量（全cov_typeとdk_explicit_bandwidth）は、linearmodelsの"
-            "分散成分を与えて準偏差変換したデータにplmのvcov・vcovHC・vcovSCCを"
-            "当てた値（傾きだけのWald Fは手書き）、unbalancedのハウスマン検定"
-            "（全cov_typeとhausman_dk_bandwidth）は、同じ分散成分から補助回帰を"
-            "組み立ててplmのvcov系を当てた値。どちらもplm自身の分散成分を与えると"
-            "plm自身のRE・phtestと一致することを生成時に確認済み（モジュールdoc参照）。"
+            "hausman_dk_bandwidth（ハウスマン検定）。unbalancedも"
+            "plm自身のRE・phtestの値（本実装の1-wayのSwamy-Aroraはplmのswarの"
+            "トレース形と同じ式）。"
             "baseline.cluster_imbalanced（サイズ[2,3,5,10,30,50]のタイル）・"
             "baseline.cluster_g3（k=1、G=3=2k+1の境界成功パス）は、cluster列が"
             "entity以外のケースで、plmの準偏差変換済みデータにlm+"
             "sandwich::vcovCL(HC1, cadjust)を当てた値（クラスター列は"
             "都度動的付与、バランスパネルのみ）。"
-            "plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに"
-            "異なる実装のため、plm自身のREは不均衡パネルで点推定が最大0.18%、"
-            "標準誤差・信頼区間等がcov_typeに応じて1%前後乖離し、ハウスマン検定の"
-            "統計量も1〜2%ずれる（実測確認済み、実装バグではない）。"
             "テストコード側では標準誤差・推論統計量・ハウスマン検定を全シナリオ"
             "機械精度で比較する（tests/support/_tolerances_panel.pyの"
             "re_crosscheck参照）。t検定"
@@ -619,17 +455,16 @@ def build_fixtures() -> dict:
             "するため）。"
             'ハウスマン検定はplm::phtest(method = "aux", effect = '
             '"individual", vcov = ...)（回帰ベース、常に1-way、RE本体の'
-            'cov_typeに連動）の値（unbalancedを除く）で、"hausman"キー配下にcov_type別に持つ'
+            'cov_typeに連動）の値で、"hausman"キー配下にcov_type別に持つ'
             '（dk_bandwidth明示指定は"hausman_dk_bandwidth"キー配下）。'
             '"hausman"の値がnullのエントリは、ロバスト共分散が構造的に特異で'
             "本実装のfit()がエラーになるケース（plmに参照値なし）。"
-            "phtest自身の値は不均衡パネルでSwamy-Arora分散成分の差により"
-            "linearmodels準拠の本実装と1〜2%ずれるため、unbalancedは上記の"
-            "参照値にしている（本スクリプトのモジュールdoc参照）。"
             "wagepanはre.jsonと同じmarried/union/expersqを使用。"
+            "wagepan_unbalancedはwagepanから個体IDの4での余りで行を落とした不均衡パネル"
+            "（観測数2・4・7・8、wagepan_unbalanced()）で、plm自身のRE・phtestの値。"
         ),
     }
-    return group_by_dataset_source(fixtures, ["wagepan"])
+    return group_by_dataset_source(fixtures, ["wagepan", WAGEPAN_UNBALANCED])
 
 
 if __name__ == "__main__":

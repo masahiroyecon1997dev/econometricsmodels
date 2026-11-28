@@ -1,5 +1,45 @@
 {
   "synthetic": {
+    "unbalanced": {
+      "params": {
+        "const": 0.11927635358173316,
+        "x1": 1.781865286439861,
+        "x2": -0.1263311942958713
+      },
+      "std_errors": {
+        "const": 0.19820583639611572,
+        "x1": 0.10118409460982834,
+        "x2": 0.11505990773514789
+      },
+      "test_stats": {
+        "const": 0.6017802288291781,
+        "x1": 17.610132237787326,
+        "x2": -1.0979601564314512
+      },
+      "p_values": {
+        "const": 0.5508029936734842,
+        "x1": 3.6800654320561395e-20,
+        "x2": 0.27895453747620813
+      },
+      "conf_int": {
+        "const": [
+          -0.28163279199498187,
+          0.5201854991584483
+        ],
+        "x1": [
+          1.5772011370204206,
+          1.9865294358593013
+        ],
+        "x2": [
+          -0.35906182493202243,
+          0.10639943634027979
+        ]
+      },
+      "df_resid_inference": 39.0,
+      "f_statistic": 163.34667462107646,
+      "f_p_value": 1.1091164012944727e-19,
+      "f_df_denom": 39.0
+    },
     "baseline": {
       "params": {
         "const": 0.05369691562980389,
@@ -567,10 +607,10 @@
   },
   "_meta": {
     "method": "re",
-    "generated_at": "2026-10-03T13:40:23.234006+00:00",
+    "generated_at": "2026-11-28T02:26:14.221838+00:00",
     "reference": "statsmodels OLS on plm quasi-demeaned data",
     "statsmodels_version": "0.15.0",
     "plm_version": "2.6.7",
-    "note": "plmが準偏差変換した応答・設計行列にsm.OLS(...).fit(cov_type='cluster', use_t=True)を当てた値。クラスターSE・t統計量・p値・信頼区間と推論の自由度df_resid_inference(=G-1)をstatsmodelsがネイティブに計算する。バランスパネルのみ（不均衡パネルはSwamy-Arora分散成分がplmと異なる）。DKのT-1はstatsmodelsに同じ規約が無く対象外。boundaryはentity以外のクラスター列（不均衡サイズ・行順シャッフル・G=3）。"
+    "note": "plmが準偏差変換した応答・設計行列にsm.OLS(...).fit(cov_type='cluster', use_t=True)を当てた値。クラスターSE・t統計量・p値・信頼区間と推論の自由度df_resid_inference(=G-1)をstatsmodelsがネイティブに計算する。不均衡パネル（unbalanced）も含む（本実装の1-wayのSwamy-Aroraはplmのswarと同じ式）。DKのT-1はstatsmodelsに同じ規約が無く対象外。boundaryはentity以外のクラスター列（不均衡サイズ・行順シャッフル・G=3）。"
   }
 }

@@ -132,10 +132,12 @@ fn two_way_fit_matches_plm_for_every_covariance() {
 }
 
 #[test]
-fn re_estimator_fit_matches_linearmodels_reference() {
-    // `swamy_arora_variance_components_matches_linearmodels_reference`と同じ
-    // データ（entity a: T=3, b: T=2, c: T=2）。`linearmodels.RandomEffects`
-    // （Python、`exog=[const, x1]`）で実地検証済みの`params`・`resids`と比較する。
+fn re_estimator_fit_matches_plm_reference_on_unbalanced_panel() {
+    // `swamy_arora_variance_components_matches_plm_on_unbalanced_panel`と同じ
+    // データ（entity a: T=3, b: T=2, c: T=2）。`plm::plm(y ~ x1, model = "random")`
+    // （`random.method = "swar"`、不均衡なので`dfcor = 3`のトレース形）の係数・残差
+    // （`resid(m)`、準偏差変換後の回帰の残差）と比較する。`linearmodels.RandomEffects`は
+    // 不均衡パネルでσ_u²の式が違う（`re-spec.md`3.1節）ため、ここでは参照にしない。
     let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
     let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
     let y = [3.0, 4.0, 7.0, 8.0, 9.0, 6.0, 10.0];
@@ -148,59 +150,57 @@ fn re_estimator_fit_matches_linearmodels_reference() {
         re.estimator().input().param_names(),
         &["const".to_string(), "x1".to_string()]
     );
-    assert!((*re.estimator().params().get(0, 0) - 2.224_977_596_254_189_6).abs() < 1e-9);
-    assert!((*re.estimator().params().get(1, 0) - 1.400_245_546_585_47).abs() < 1e-9);
+    assert!((*re.estimator().params().get(0, 0) - 2.223_314_140_197_062).abs() < 1e-9);
+    assert!((*re.estimator().params().get(1, 0) - 1.400_738_076_181_155).abs() < 1e-9);
 
     let expected_resids = [
-        0.007_456_619_017_130_906,
-        -0.392_788_927_568_339_16,
-        -0.193_280_020_739_278_4,
-        0.983_357_826_800_407_3,
-        0.583_112_280_214_937_3,
-        -1.843_693_205_551_097,
-        0.756_061_247_863_432_8,
+        0.008_597_936_748_064_805,
+        -0.392_140_139_433_091_7,
+        -0.193_616_291_795_401,
+        0.982_284_062_826_489_2,
+        0.581_545_986_645_334_1,
+        -1.842_740_467_568_014_1,
+        0.756_521_456_250_830_8,
     ];
     for (i, expected) in expected_resids.iter().enumerate() {
         let actual = *re.estimator().residuals().get(i, 0);
         assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
     }
 
-    // `linearmodels.RandomEffects.fit(cov_type="unadjusted").df_resid`/`df_model`と
-    // 数値一致（`re-spec.md`3.3節）。n=7、k=2（const+x1）。
+    // `df_resid = n - k`・`df_model = k`（`re-spec.md`3.3節。`plm`の`df.residual`と同じ）。
+    // n=7、k=2（const+x1）。
     assert_eq!(re.df_resid(), 5);
     assert_eq!(re.df_model(), 2);
 
     // `estimator()`のdocコメントは「`std_errors`/`test_stats`/`p_values`/`conf_lower`/
     // `conf_upper`/`aic`/`bic`は既に正しいRE推定量になっている」と述べるため、
-    // `linearmodels.RandomEffects.
-    // fit(cov_type="unadjusted")`の`std_errors`/`tstats`/`pvalues`/`conf_int()`・
-    // `loglik`から手計算した`aic`/`bic`と実地数値照合する（`HomoskedasticCovariance`
-    // が`debiased=True`時`nobs_eff = nobs - nvar`を使うことの検証、`re.rs`のモジュールdoc
-    // 「`ReEstimator::fit`のパイプライン」参照）。
-    let expected_std_errors = [2.048_733_66, 0.404_536_75];
-    let expected_test_stats = [1.086_025_79, 3.461_355_59];
-    let expected_p_values = [0.327_029_7, 0.018_016_02];
-    let expected_conf_lower = [-3.041_459_93, 0.360_350_72];
-    let expected_conf_upper = [7.491_415_12, 2.440_140_37];
+    // `plm`の`vcov(m)`の標準誤差と、そこから本実装の規約（t分布、自由度`n - k = 5`）で
+    // 計算したt値・p値・信頼区間、準偏差変換後の残差から計算した`aic`/`bic`と照合する
+    // （`re.rs`のモジュールdoc「`ReEstimator::fit`のパイプライン」参照）。
+    let expected_std_errors = [2.049_735_627_797_357_3, 0.404_387_523_099_868_7];
+    let expected_test_stats = [1.084_683_366_013_514_7, 3.463_850_876_119_203_7];
+    let expected_p_values = [0.327_569_982_746_242_5, 0.017_967_728_737_767_356];
+    let expected_conf_lower = [-3.045_699_032_475_420_5, 0.361_226_854_742_672_24];
+    let expected_conf_upper = [7.492_327_312_869_545, 2.440_249_297_619_638];
     for j in 0..2 {
         assert!(
-            (*re.estimator().std_errors().get(j, 0) - expected_std_errors[j]).abs() < 1e-6,
+            (*re.estimator().std_errors().get(j, 0) - expected_std_errors[j]).abs() < 1e-9,
             "std_errors[{j}]"
         );
         assert!(
-            (*re.estimator().test_stats().get(j, 0) - expected_test_stats[j]).abs() < 1e-6,
+            (*re.estimator().test_stats().get(j, 0) - expected_test_stats[j]).abs() < 1e-9,
             "test_stats[{j}]"
         );
         assert!(
-            (*re.estimator().p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-6,
+            (*re.estimator().p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-9,
             "p_values[{j}]"
         );
         assert!(
-            (*re.estimator().conf_lower().get(j, 0) - expected_conf_lower[j]).abs() < 1e-6,
+            (*re.estimator().conf_lower().get(j, 0) - expected_conf_lower[j]).abs() < 1e-9,
             "conf_lower[{j}]"
         );
         assert!(
-            (*re.estimator().conf_upper().get(j, 0) - expected_conf_upper[j]).abs() < 1e-6,
+            (*re.estimator().conf_upper().get(j, 0) - expected_conf_upper[j]).abs() < 1e-9,
             "conf_upper[{j}]"
         );
     }
@@ -213,56 +213,51 @@ fn re_estimator_fit_matches_linearmodels_reference() {
     // 確認する。
     for j in 0..2 {
         assert!(
-            (*re.std_errors().get(j, 0) - expected_std_errors[j]).abs() < 1e-6,
+            (*re.std_errors().get(j, 0) - expected_std_errors[j]).abs() < 1e-9,
             "re.std_errors[{j}]"
         );
         assert!(
-            (*re.test_stats().get(j, 0) - expected_test_stats[j]).abs() < 1e-6,
+            (*re.test_stats().get(j, 0) - expected_test_stats[j]).abs() < 1e-9,
             "re.test_stats[{j}]"
         );
         assert!(
-            (*re.p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-6,
+            (*re.p_values().get(j, 0) - expected_p_values[j]).abs() < 1e-9,
             "re.p_values[{j}]"
         );
         assert!(
-            (*re.conf_lower().get(j, 0) - expected_conf_lower[j]).abs() < 1e-6,
+            (*re.conf_lower().get(j, 0) - expected_conf_lower[j]).abs() < 1e-9,
             "re.conf_lower[{j}]"
         );
         assert!(
-            (*re.conf_upper().get(j, 0) - expected_conf_upper[j]).abs() < 1e-6,
+            (*re.conf_upper().get(j, 0) - expected_conf_upper[j]).abs() < 1e-9,
             "re.conf_upper[{j}]"
         );
     }
     assert_eq!(re.cov_type(), &ReCovType::Classical);
 
-    // `loglik = -9.069066112783611`（linearmodels実測）から手計算した参照値。
-    assert!((re.estimator().aic() - 22.138_132_225_567_222).abs() < 1e-9);
-    assert!((re.estimator().bic() - 22.029_952_523_677_85).abs() < 1e-9);
+    // `plm`の残差の`loglik = -9.064512282972062`から手計算した参照値。
+    assert!((re.estimator().aic() - 22.129_024_565_944_125).abs() < 1e-9);
+    assert!((re.estimator().bic() - 22.020_844_864_054_75).abs() < 1e-9);
 
     // F統計量（2.1節）はWald二次形式のため、傾き係数が1個（q=1）のこのデータでは
     // 「1自由度のF検定は両側t検定と代数的に等価」（`f_statistic = test_stat²`、
     // `f_p_value = p_value`）が成り立つ。`estimator().f_statistic().unwrap()`（定数項も検定に
-    // 含めてしまい誤り）とは異なる正しい値であることを確認する。`plm`との数値照合は
-    // Python側のテスト（バランスパネルで機械精度一致、不均衡パネルは分散成分の
-    // 推定差で許容誤差付き）で行う。
+    // 含めてしまい誤り）とは異なる正しい値であることを確認する。
     assert!((re.f_statistic().unwrap() - re.test_stats().get(1, 0).powi(2)).abs() < 1e-9);
     assert!((re.f_p_value().unwrap() - *re.p_values().get(1, 0)).abs() < 1e-9);
 
-    // `linearmodels.RandomEffects.fit(cov_type="unadjusted")`の`rsquared_within`/
-    // `rsquared_between`/`rsquared_overall`と数値一致（2.3節）。
-    // `rsquared_between`が負値になる（教科書的な入れ子モデル比較の保証が無いR²の
-    // 定義のため、`linearmodels`のSST/SSR方式のF統計量と同型の性質）ことも含めて実地検証済み。
-    assert!((re.r_squared_within() - 0.793_812_134_496_668).abs() < 1e-9);
-    assert!((re.r_squared_between() - (-0.391_981_417_047_268_2)).abs() < 1e-9);
-    assert!((re.r_squared_overall() - 0.279_701_906_945_653_1).abs() < 1e-9);
+    // パネル固有R²（`re-spec.md`3.6節）は外部の参照が無く、`plm`の係数からRで定義どおりに
+    // 計算した値と比べる（betweenは`T_i`重み・観測で重み付けした全体平均）。
+    // `r_squared_between`が負値になる（入れ子モデル比較の保証が無いR²の定義のため）ことも含む。
+    assert!((re.r_squared_within() - 0.793_863_618_456_671_9).abs() < 1e-9);
+    assert!((re.r_squared_between() - (-0.117_203_320_997_885_11)).abs() < 1e-9);
+    assert!((re.r_squared_overall() - 0.279_462_900_829_853_8).abs() < 1e-9);
 }
 
 #[test]
-fn re_estimator_fit_hc1_matches_linearmodels_reference() {
-    // `linearmodels.RandomEffects.fit(cov_type="robust").std_errors`と数値一致
-    // （`linearmodels`の"robust"は素のHC0ではなく小標本補正
-    // `n/df_resid`込みのHC1相当——`extra_df=0`のためこの補正がOLS自身のHC1と
-    // 同じ`n/(n-k)`になることを`HeteroskedasticCovariance`のソースで確認済み）。
+fn re_estimator_fit_hc1_matches_plm_reference() {
+    // `plm::vcovHC(m, method = "white1", type = "HC1")`と数値一致（補正は`n/(n-k)`。
+    // バランスパネルでは`linearmodels`の`cov_type="robust"`とも一致する）。
     let re = ReEstimator::fit(
         cov_type_reference_input(),
         ReEffects::OneWay,
@@ -271,28 +266,16 @@ fn re_estimator_fit_hc1_matches_linearmodels_reference() {
     )
     .unwrap();
 
-    assert!((*re.std_errors().get(0, 0) - 1.712_718_460_250_846_5).abs() < 1e-9);
-    assert!((*re.std_errors().get(1, 0) - 0.209_842_170_109_712_15).abs() < 1e-9);
+    assert!((*re.std_errors().get(0, 0) - 1.714_688_597_358_583_3).abs() < 1e-9);
+    assert!((*re.std_errors().get(1, 0) - 0.209_734_285_381_997_1).abs() < 1e-9);
 }
 
 #[test]
 fn re_estimator_fit_hc2_hc3_match_plm_reference() {
     // `linearmodels`にはHC2/HC3の実装が無い（`RandomEffects`/`PanelOLS`どちらも
     // `_cov_estimators`が単一の"heteroskedastic"＝HC1相当のみ）ため、Rの
-    // `plm::vcovHC(fit, method="white1", type="HC2"/"HC3")`をクロスチェックに使う
-    // （`fit()`のdocコメント「`cov_type`対応」参照）。`plm`は
-    // 変量効果の分散成分推定法が`linearmodels`と僅かに異なる（点推定自体が僅かに
-    // 違う、5.2節のRクロスチェックの一般的な位置づけ）ため、`plm`実測値
-    // （`Rscript`で実地確認済み: HC2 std_errors=[1.627395, 0.212174]、
-    // HC3=[1.830351, 0.2548547]）とは1e-3〜1e-2の桁で近いことのみ確認する。
-    // **1e-9アサーションは「正しさの独立検証」ではなく回帰ガード**:
-    // `linearmodels`が返す`params`/`resids`（本ファイルの
-    // `re_estimator_fit_matches_linearmodels_reference`と同じ値）から、本実装
-    // （`panel_hc_cov_params`）と**同じレバレッジベースHC2/HC3公式**をPythonで
-    // 手計算した値であり、独立実装での検証にはならない
-    // （`.claude/rules/testing-policy.md`「本実装と同じ計算式の手計算は独立検証
-    // としての効力が薄い」通り）。真の独立検証は直後の`plm`比較（1e-2、`plm`は
-    // REにHC2/HC3のネイティブ実装を持つ数少ない参照実装）のみ。
+    // `plm::vcovHC(m, method = "white1", type = "HC2"/"HC3")`と比べる。レバレッジは
+    // 準偏差変換後の設計行列の素の`h_ii`（`fit()`のdocコメント「`cov_type`対応」参照）。
     let hc2 = ReEstimator::fit(
         cov_type_reference_input(),
         ReEffects::OneWay,
@@ -300,11 +283,8 @@ fn re_estimator_fit_hc2_hc3_match_plm_reference() {
         0.95,
     )
     .unwrap();
-    assert!((*hc2.std_errors().get(0, 0) - 1.625_640_631_050_364).abs() < 1e-9);
-    assert!((*hc2.std_errors().get(1, 0) - 0.212_277_913_827_970_76).abs() < 1e-9);
-    // `plm`実測値との近さ（クロスチェック、緩い許容誤差）。
-    assert!((*hc2.std_errors().get(0, 0) - 1.627_395).abs() < 1e-2);
-    assert!((*hc2.std_errors().get(1, 0) - 0.212_174).abs() < 1e-2);
+    assert!((*hc2.std_errors().get(0, 0) - 1.627_394_573_108_865_7).abs() < 1e-9);
+    assert!((*hc2.std_errors().get(1, 0) - 0.212_174_022_116_461_4).abs() < 1e-9);
 
     let hc3 = ReEstimator::fit(
         cov_type_reference_input(),
@@ -313,22 +293,15 @@ fn re_estimator_fit_hc2_hc3_match_plm_reference() {
         0.95,
     )
     .unwrap();
-    assert!((*hc3.std_errors().get(0, 0) - 1.828_506_411_875_559_6).abs() < 1e-9);
-    assert!((*hc3.std_errors().get(1, 0) - 0.254_973_430_724_023_45).abs() < 1e-9);
-    assert!((*hc3.std_errors().get(0, 0) - 1.830_351).abs() < 1e-2);
-    assert!((*hc3.std_errors().get(1, 0) - 0.254_854_7).abs() < 1e-2);
+    assert!((*hc3.std_errors().get(0, 0) - 1.830_351_255_951_733_9).abs() < 1e-9);
+    assert!((*hc3.std_errors().get(1, 0) - 0.254_854_683_896_986_1).abs() < 1e-9);
 }
 
 #[test]
 fn re_estimator_fit_cluster_defaults_to_entity_and_matches_fixest_style_correction() {
-    // **linearmodels方式からfixest（R）・Stata型に変更**: REは
-    // `extra_df`が常に`0`（固定効果ダミーが設計行列に無くFEのようなネスト判定が
+    // REは`extra_df`が常に`0`（固定効果ダミーが設計行列に無くFEのようなネスト判定が
     // 不要）なため、`K=df_model`をそのまま使う`(G/(G-1))×((n-1)/(n-K))`補正
-    // （`plm::vcovHC(type="sss")`・OLS自身の`cluster_cov_params`と同式であることを
-    // 確認済み）になる。旧`linearmodels`方式の値（変更前の期待値）から
-    // `sqrt((G/(G-1))×(n-1)/n) = sqrt((3/2)×(6/7)) = sqrt(9/7)`倍した値
-    // （`G=n_entities=3`、`n=7`。`K`が新旧で同じ`df_model`のまま変わらないため、
-    // 変化するのは`G/(G-1)`補正の追加分のみ、という関係を使って手計算・検算した）。
+    // （fixest・Stata型）になる。`plm::vcovHC(m, method = "arellano", type = "sss")`と数値一致。
     let re = ReEstimator::fit(
         cov_type_reference_input(),
         ReEffects::OneWay,
@@ -337,8 +310,8 @@ fn re_estimator_fit_cluster_defaults_to_entity_and_matches_fixest_style_correcti
     )
     .unwrap();
 
-    assert!((*re.std_errors().get(0, 0) - 2.137_431_252_437_596_5).abs() < 1e-9);
-    assert!((*re.std_errors().get(1, 0) - 0.181_975_972_361_746_9).abs() < 1e-9);
+    assert!((*re.std_errors().get(0, 0) - 2.138_005_211_311_433_4).abs() < 1e-9);
+    assert!((*re.std_errors().get(1, 0) - 0.182_210_748_005_084).abs() < 1e-9);
     // `df_inference()`/`stat_dist()`（カバレッジ監査で判明した未検証の単純
     // getter、新設）。`n=7`・`df_model=2`（`n_entities=3`個の
     // クラスターがある既定設定）で`df_resid=5`だが`df_inference=G-1=2`
@@ -351,17 +324,9 @@ fn re_estimator_fit_cluster_defaults_to_entity_and_matches_fixest_style_correcti
 
 #[test]
 fn re_estimator_fit_hac_matches_fixest_style_correction() {
-    // **linearmodels方式からfixest（R）型に変更**: FEのDKと同じく
-    // `K=df_model`・`G`相当は`t_periods`を使う`(t_periods/(t_periods-1))×
-    // ((n-1)/(n-K))`補正になる。旧`linearmodels`方式の値（変更前の期待値）から
-    // `sqrt((t_periods/(t_periods-1))×(n-1)/n) = sqrt((3/2)×(6/7)) = sqrt(9/7)`
-    // 倍した値（`t_periods=3`、`n=7`。`K`が新旧で同じ`df_model`のまま変わらない
-    // ため、`bandwidth=0`・`1`（このデータのラグ項ループは1回以下）は`panel_
-    // driscoll_kraay_cov_params`の生のサンドイッチ行列自体は変更前と同じで、
-    // 変化するのは最終スケールのみという関係を使って手計算・検算した——
-    // `fe_estimator_fit_one_way_hac_with_bandwidth_two_scales_unchanged_kernel_
-    // by_new_correction`で確認した`bandwidth>=2`のfixestとの不一致はこの
-    // テストの範囲外、`bandwidth<=1`はfixestの生カーネルと一致確認済み）。
+    // FEのDKと同じく`K=df_model`・`G`相当は`t_periods`を使う
+    // `(t_periods/(t_periods-1))×((n-1)/(n-K))`補正（fixest型）。
+    // `plm::vcovSCC(m, maxlag = 0/1, type = "sss")`と数値一致（`t_periods=3`、`n=7`）。
     let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
     let time = strings(&["1", "2", "3", "1", "2", "1", "2"]);
     let x1 = vec![1.0, 2.0, 4.0, 2.0, 3.0, 5.0, 6.0];
@@ -386,8 +351,8 @@ fn re_estimator_fit_hac_matches_fixest_style_correction() {
         0.95,
     )
     .unwrap();
-    assert!((*bw0.std_errors().get(0, 0) - 0.077_007_356_453_778_4).abs() < 1e-9);
-    assert!((*bw0.std_errors().get(1, 0) - 0.306_138_209_227_064_75).abs() < 1e-9);
+    assert!((*bw0.std_errors().get(0, 0) - 0.077_350_818_526_441_61).abs() < 1e-9);
+    assert!((*bw0.std_errors().get(1, 0) - 0.305_989_536_115_697_4).abs() < 1e-9);
 
     let input2 = ReInput::from_columns(
         &y,
@@ -408,6 +373,6 @@ fn re_estimator_fit_hac_matches_fixest_style_correction() {
         0.95,
     )
     .unwrap();
-    assert!((*bw1.std_errors().get(0, 0) - 0.073_386_231_305_208_44).abs() < 1e-9);
-    assert!((*bw1.std_errors().get(1, 0) - 0.191_848_292_228_156_4).abs() < 1e-9);
+    assert!((*bw1.std_errors().get(0, 0) - 0.074_136_414_310_167_04).abs() < 1e-9);
+    assert!((*bw1.std_errors().get(1, 0) - 0.191_690_091_600_826_5).abs() < 1e-9);
 }

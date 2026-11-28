@@ -49,13 +49,14 @@ from benchmark.panel.references.linearmodels_ref import run_re
 # `docs/spec/re-spec.md`4章）。
 COV_TYPES = ["classical", "hc1"]
 
-# `NUMERIC_SCENARIOS`（unbalanced + baseline/small_panel/heteroskedastic/
-# autocorrelated/cross_sectionally_correlated）はFE（generate_fe_fixtures.py）
-# のものをそのまま再利用する。REは常にentity方向のみ（1-way相当、`re-spec.md`5章）
-# なのでFEのような1-way/2-wayの区別が無く、unbalancedもそのままsuccess pathとして
-# 扱える。singleton_entity/singleton_time/unbalanced_two_way/
+# FE（generate_fe_fixtures.py）の`NUMERIC_SCENARIOS`のうち、バランスパネルのものだけを
+# 使う。不均衡パネル（unbalanced）では、本実装の1-wayのSwamy-Arora（plmの`swar`の
+# トレース形、`re-spec.md`3.1節）と`linearmodels`のσ_u²（重みなしのbetween回帰と
+# 調和平均`t_bar`）が別の推定量になるため、unbalancedはplm（`re_crosscheck.json`）が
+# 主リファレンスになる。singleton_entity/singleton_time/unbalanced_two_way/
 # unbalanced_sparse/unbalanced_disconnected/zero_variance_regressorは含めない
 # （FEのシナリオ。REの2-wayは不均衡を拒否する）。
+BALANCED_SCENARIOS = [s for s in NUMERIC_SCENARIOS if s != "unbalanced"]
 
 # 実データ（Wooldridge wagepan）。FEと同じ変数選定
 # （benchmark/common/constants.pyのWAGEPAN_X参照）。
@@ -77,7 +78,7 @@ def _run_re(scenario: str, cov_type: str) -> dict:
 def build_fixtures() -> dict:
     fixtures: dict = {}
 
-    for scenario in NUMERIC_SCENARIOS:
+    for scenario in BALANCED_SCENARIOS:
         fixtures[scenario] = {
             cov_type: _run_re(scenario, cov_type) for cov_type in COV_TYPES
         }
@@ -102,7 +103,10 @@ def build_fixtures() -> dict:
         "linearmodels_version": linearmodels.__version__,
         "note": (
             "合成データはFE（tests/fixtures/benchmarks/data/fe_*.csv）と"
-            "同じ固定済みCSVを再利用する（RE専用のデータセット生成・凍結コード"
+            "同じ固定済みCSVのうちバランスパネルのものを再利用する（unbalancedは、"
+            "本実装の1-wayのSwamy-Aroraがplmのswarのトレース形でlinearmodelsの"
+            "σ_u²と異なるため、re_crosscheck.jsonのplmで検証する。"
+            "RE専用のデータセット生成・凍結コード"
             "は追加しない、ユーザー確認済み・2026-09-20。benchmark/linear系統で"
             'OLS/WLSがprefix"synthetic"を共有する前例と同型）。'
             "singleton_entity/singleton_time/unbalanced_two_way/"

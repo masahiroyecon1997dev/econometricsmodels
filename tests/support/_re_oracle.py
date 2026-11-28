@@ -137,7 +137,8 @@ def r_squared(
 
     within: 効果（1-way: entity、2-way: entity＋time）を引いた`y`に、within変動のある
     列の係数だけを当てはめたR²（変動のある列が無ければ`0.0`、TSSは中心化しない）。
-    between: エンティティ平均に`β0 + x̄'β`を当てはめた中心化R²。
+    between: エンティティ平均に`β0 + x̄'β`を当てはめたR²で、各エンティティを観測数`T_i`で
+    重み付けし、TSSは全観測の平均のまわりで取る。
     overall: 元の`y`・`x`に`β0 + x'β`を当てはめた中心化R²。
     """
     p = _Panel(df, x_cols, entity_col, time_col, y_col)
@@ -152,10 +153,12 @@ def r_squared(
         if len(varying)
         else 0.0
     )
-    y_mean = p.entity_mean(p.y)
-    fitted_b = beta[0] + p.entity_mean(p.x) @ beta[1:]
+    # between: 個体平均を観測に展開した値への当てはめ（= `T_i`重み）。TSSの中心は
+    # 全観測の平均で、`Σ(y − ȳ)² = within + Σ T_i (ȳ_i − ȳ)²`の個体間の部分になる。
+    y_mean = p.entity_mean(p.y)[p.ecodes]
+    fitted_b = beta[0] + p.entity_mean(p.x)[p.ecodes] @ beta[1:]
     between = 1.0 - np.sum((y_mean - fitted_b) ** 2) / np.sum(
-        (y_mean - y_mean.mean()) ** 2
+        (y_mean - p.y.mean()) ** 2
     )
     fitted = beta[0] + p.x @ beta[1:]
     overall = 1.0 - np.sum((p.y - fitted) ** 2) / np.sum(
@@ -197,14 +200,45 @@ def _between_ssr_and_df(
     単位間で一定の列と、前の列の線形結合になる列（相関ランダム効果の個体平均の列が元の列と
     同じ平均になる場合等。後ろの列を落とす）は除き、自由度（`単位数 - K_b - 1`）にも
     数えない。"""
-    varying = means[:, _varies(means, scale)]
-    flags = independent_columns(
-        np.column_stack([np.ones(len(target)), varying])
-    )
-    kept = varying[:, flags[1:]]
+    kept = means[:, _between_kept(means, scale)]
     design = np.column_stack([np.ones(len(target)), kept])
     resid = target - design @ np.linalg.lstsq(design, target, rcond=None)[0]
     return float(resid @ resid), len(target) - design.shape[1]
+
+
+def _between_kept(means: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    """between回帰に残す列の添字（単位間で一定の列と、前の列の線形結合になる列を除く）。"""
+    varying = np.flatnonzero(_varies(means, scale))
+    flags = independent_columns(
+        np.column_stack([np.ones(means.shape[0]), means[:, varying]])
+    )
+    return varying[flags[1:]]
+
+
+def swamy_arora_one_way_sigma2_u(p: _Panel, sigma2_eps: float) -> float:
+    """`plm::ercomp`の`swar`（1-way、`dfcor = 3`）のσ_u²を、`plm`のソースどおりに
+    観測ごとの行列で書き下した値（負なら0に切り上げ）。
+
+    `Z_B`は`[1, x̄_i]`を観測に展開した行列（`Between`）、`Z_S`は個体和を展開した行列
+    （`Sum`）、`Z`は生の`[1, x_it]`。`Q_id`は`ȳ_i`（観測に展開）を`Z_B`にプールドOLSで
+    当てはめた残差平方和（= `T_i`重みのbetween回帰）で、
+    `σ_u² = (Q_id − σ_ε²(N − p)) / (O − tr((Z_B'Z_B)⁻¹ Z_S'Z))`。全個体の観測数が等しいと
+    バランスの式`SSR_b/(N − p) − σ_ε²/T`に一致する。between回帰から落とす列は
+    `_between_ssr_and_df`と同じ。
+    """
+    kept = _between_kept(p.entity_mean(p.x), p.scale)
+    x = p.x[:, kept]
+    ones = np.ones((p.n, 1))
+    z = np.column_stack([ones, x])
+    z_b = np.column_stack([ones, p.entity_mean(x)[p.ecodes]])
+    z_s = z_b * p.t_count[p.ecodes][:, None]
+    y_b = p.entity_mean(p.y)[p.ecodes]
+    resid = y_b - z_b @ np.linalg.lstsq(z_b, y_b, rcond=None)[0]
+    q_id = float(resid @ resid)
+    trace = float(np.trace(np.linalg.solve(z_b.T @ z_b, z_s.T @ z)))
+    n_params = z.shape[1]
+    numerator = q_id - sigma2_eps * (p.n_entities - n_params)
+    return max(0.0, numerator / (p.n - trace))
 
 
 def first_stage_variance_components(
@@ -299,7 +333,7 @@ def hand_computed(
     """`re-spec.md`3章の手順を、本実装を呼ばずに書き下した参照値（モジュールdoc参照）。
 
     1-wayの`sigma2`は`(σ_ε², σ_u²)`、2-wayは`(σ_ε², σ_u², σ_λ²)`。省略時は本実装の
-    定義（1-way: σ_u²は調和平均`t_bar`を使う`linearmodels`準拠の式、2-way: バランス
+    定義（1-way: `plm`の`swar`のトレース形`swamy_arora_one_way_sigma2_u`、2-way: バランス
     パネルのSwamy-Arora）。`cluster`は観測ごとのクラスターのコード（省略時はentity）。
     DKの時点は`dk_time_col`（省略時は`time_col`）、バンド幅は`dk_bandwidth`（省略時は
     本実装の既定式`floor(4·(T/100)^(2/9))`）。2-wayは、バランスパネルが前提。
@@ -354,8 +388,7 @@ def hand_computed(
         ssr_l, df_l = _between_ssr_and_df(p.time_mean(p.x), y_per, p.scale)
         sigma2_lambda = max(0.0, ssr_l / df_l - sigma2_eps / n_ent)
     else:
-        t_bar = n_ent / np.sum(1.0 / p.t_count)
-        sigma2_u = max(0.0, ssr_u / df_u - sigma2_eps / t_bar)
+        sigma2_u = swamy_arora_one_way_sigma2_u(p, sigma2_eps)
         sigma2_lambda = None
     if sigma2 is None and variance_method != "swamy_arora":
         sigma2_eps, sigma2_u, sigma2_lambda = first_stage_variance_components(

@@ -39,8 +39,9 @@ use crate::shared::orthonormal::OrthonormalDesign;
 /// `plm::ercomp`の`method`（`swar`・`walhus`・`amemiya`）に対応する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VarianceMethod {
-    /// Swamy-Arora。1段目はwithin回帰とbetween回帰。1-wayの不均衡パネルは
-    /// `linearmodels`と同じ式（`plm`のトレース項の式とは異なる、`re-spec.md`3.1節）。
+    /// Swamy-Arora。1段目はwithin回帰とbetween回帰（1-wayは観測数`T_i`で重み付け）。
+    /// 1-wayは`plm`の`swar`のトレース形（`dfcor = 3`）で、バランスパネルでは`plm`・`linearmodels`の
+    /// 簡約形に一致する（`re-spec.md`3.1節）。
     #[default]
     SwamyArora,
     /// Wallace-Hussain。1段目は切片と全説明変数へのプールドOLSの残差。参照実装は`plm`

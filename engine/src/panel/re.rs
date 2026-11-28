@@ -19,12 +19,12 @@
 //!
 //! - **分散成分**（`swamy_arora_variance_components`、`re-spec.md`3.1節）: σ_ε²は内部FE推定
 //!   （`FeEstimator`、1-wayはentity、2-wayはentity+time）のwithin回帰残差を再利用し、σ_u²は
-//!   between回帰（`between_ssr_and_df`。エンティティ平均へのQRによる最小二乗で、残差平方和と
-//!   自由度だけを使い、`OlsEstimator`は経由しない）から求める。
-//!   分母（自由度）は`re-spec.md`3.1節の式を手で組み立てず、委譲先が実際に使った`df_resid`相当の値
-//!   （`FeEstimator::df_resid()`・`OlsInput::nobs()-k()`）をそのまま再利用する。`re-spec.md`3.1節の式は
-//!   `linearmodels`ソースの`nvar`（切片を含む列数）表記の転記で、このプロジェクトの`k`規約
-//!   （傾き係数のみ）では委譲先の値を使えば自動的に一致する。
+//!   between回帰（`between_regression`。エンティティ平均へのQRによる最小二乗で、残差平方和・
+//!   列数・レバレッジだけを使い、`OlsEstimator`は経由しない）から求める。1-wayは観測数`T_i`で
+//!   重み付けし、`plm`の`swar`のトレース形（`dfcor = 3`）で解く（バランスパネルでは
+//!   `linearmodels`・`plm`の簡約形に一致するので、式を切り替えない）。
+//!   自由度は式を手で組み立てず、委譲先が実際に使った値（`FeEstimator::df_resid()`・between回帰が
+//!   残した列の数）をそのまま再利用する。
 //! - **分散成分の推定法**（`VarianceMethod`、`re-spec.md`3.1.2節）: 既定はSwamy-Arora。
 //!   `fit_with_variance_method`でWallace-Hussain・Amemiya（`plm`の`walhus`・`amemiya`）を選べる。
 //!   実装は`re/variance_method.rs`。内部FE（`internal_fe`）と準偏差変換以降は推定法によらず共通。
@@ -71,8 +71,10 @@
 //! `re_r_squared_within`/`re_r_squared_between`/`re_r_squared_overall`としてRE独自に実装する
 //! （`re-spec.md`3.6節。フィット済みの値そのものの計算式が変わるので`has_intercept`分岐では済まない）。
 //!
-//! - **TSSは中心化**: REは`has_constant=True`のため`Σ(y - ȳ)²`（FEは非中心化の`Σy²`）。`weights`は
-//!   FE/REとも未サポートで、`T_i`ベースの重み付けは常に無効（`fe_r_squared_between`関数doc参照）。
+//! - **TSSは中心化**: REは`has_constant=True`のため`Σ(y - ȳ)²`（FEは非中心化の`Σy²`）。
+//! - **`between`は観測数`T_i`で重み付けする**: `Σ T_i (ȳ_i - ŷ_i)²`と`Σ T_i (ȳ_i - ȳ)²`（`ȳ`は全観測の
+//!   平均）。全平方和の分解の個体間の部分で、バランスパネルでは重みなし（`linearmodels`）と一致する。
+//!   FEの`fe_r_squared_between`は重みなしで、不均衡パネルでは定義が異なる。
 //! - **`between`/`overall`の当てはめ値は切片`β0`を含める**: `fitted = β0 + Σ_j x_j・β_j`
 //!   （FEは固定効果を含めない「弱いR²」を意図的に採用する）。
 //! - **`within`はFEと同じ定義**（θ=1のwithin変換。RE自身の準偏差変換とは無関係）。定数列もθ=1で
@@ -273,16 +275,11 @@ impl ReEstimator {
     /// 完全に共有できることが分かり、`common.rs`へ移設した）を`extra_df=0`・
     /// `shared::covariance::leverages`で呼ぶだけで実装できる。
     ///
-    /// - **Classical/HC1**: `linearmodels`（`cov_type="unadjusted"`/`"robust"`）と
-    ///   数値完全一致を実地検証済み。
+    /// - **Classical/HC1**: `plm`（`vcov`・`vcovHC(method = "white1", type = "HC1")`）と、
+    ///   バランスパネルでは`linearmodels`（`cov_type="unadjusted"`/`"robust"`）とも数値一致。
     /// - **HC2/HC3**: `linearmodels`に参照実装が無い（`RandomEffects`・`PanelOLS`
-    ///   どちらも`_cov_estimators`に単一の"heteroskedastic"＝HC1相当しか無く、FEの
-    ///   HC2/HC3も実際には`fixest`を参照値にしていた）。REは
-    ///   `plm::vcovHC(fit, method="white1", type="HC2"/"HC3")`をクロスチェックに使う。`plm`は変量効果の分散成分推定法が
-    ///   `linearmodels`と微妙に異なる（点推定自体が僅かに異なる、5.2節のRクロス
-    ///   チェックの一般的な位置づけと同じ）ため、数値一致は`linearmodels`ほどの
-    ///   精度（1e-9）ではなくクロスチェック水準（`re_estimator_fit_matches_...`の
-    ///   テスト参照）。
+    ///   どちらも`_cov_estimators`に単一の"heteroskedastic"＝HC1相当しか無い）。
+    ///   `plm::vcovHC(fit, method="white1", type="HC2"/"HC3")`と数値一致。
     /// - **Cluster**: fixest（R）・Stata（`xtreg,re vce(cluster)`）型の
     ///   小標本補正`(G/(G-1))×((n-1)/(n-K))`を使う（`linearmodels`とは一致しない）。
     ///   REは`extra_df`が常に`0`（固定効果ダミーが設計行列に無くFEのようなネスト

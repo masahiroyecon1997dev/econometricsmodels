@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: RE with `variance_method="swamy_arora"` (the default) on an **unbalanced one-way panel** now estimates the entity variance `sigma2_u` with the formula of R's `plm` (`random.method = "swar"`): the between regression weights each entity by its number of observations, and `sigma2_u` solves plm's trace-term moment equation. It used the `linearmodels` formula (an unweighted between regression and the harmonic mean of the panel lengths). `sigma2_eps` is unchanged; `sigma2_u` changes by a few percent up to about 10 % depending on how unbalanced the panel is, and with it `theta`, the coefficients, standard errors, test statistics, the F statistic and the Hausman test. On a balanced panel the two formulas are the same and no result changes. The default now matches `plm`, as `"wallace_hussain"` and `"amemiya"` already did, and differs from linearmodels' `RandomEffects` on unbalanced panels. A regressor together with its entity mean (correlated random effects) is still estimated on an unbalanced panel, where `plm` stops with a singular matrix.
+- **Breaking**: RE's `r_squared_between` now weights each entity by its number of observations and takes the total sum of squares around the mean of all observations, so its denominator is the between part of the total sum of squares. On a balanced panel the value is unchanged; on an unbalanced panel it differs from linearmodels' `rsquared_between` and from FE's `r_squared_between`, which do not weight.
+
 ### Performance
 
 - Correction to 0.10.0: IV (2SLS) and RE did not become slower. The notes of 0.10.0 said that their speed-up over linearmodels had fallen since 0.9.0 (about 26x to 15x for IV and 10x to 5x for RE) for an unknown reason. The cause is the GitHub Actions runner: the 0.9.0 timings were taken on Ubuntu 24.04 and the 0.10.0 timings on Ubuntu 26.04, after `ubuntu-latest` moved. When 0.9.0 and 0.10.0 were timed in the same workflow run window on the same runner image, the time of `fit()` at 1,000,000 rows (`k = 5`, classical) was about 45% lower in 0.10.0 for IV (2SLS) and about 20% lower for RE (one run each). The performance guide no longer lists it as a known issue.

@@ -67,11 +67,6 @@ _PLM_FE_R_SCRIPT = Path(__file__).resolve().parent / "run_plm_fe_benchmark.R"
 # 中身のみRE専用に更新済みで、ファイルの移動は行っていない）。
 _PLM_R_SCRIPT = Path(__file__).resolve().parents[1] / "run_plm_benchmark.R"
 
-# 分散成分を外から与えたREの標準誤差・推論統計量（不均衡パネル用、全cov_type）。
-_PLM_RE_GIVEN_VARIANCE_R_SCRIPT = (
-    Path(__file__).resolve().parent / "run_plm_re_given_variance_benchmark.R"
-)
-
 # plmのRE準偏差変換済みデータの書き出し（statsmodelsクロスチェック用）。
 _PLM_RE_EXPORT_R_SCRIPT = (
     Path(__file__).resolve().parent / "export_plm_re_transformed.R"
@@ -86,13 +81,6 @@ _PLM_HAUSMAN_R_SCRIPT = (
 # 使えない）。
 _PLM_HAUSMAN_TILDE_R_SCRIPT = (
     Path(__file__).resolve().parents[1] / "run_plm_hausman_tilde_benchmark.R"
-)
-
-
-# 分散成分を外から与えたREのハウスマン検定（不均衡パネル用、全cov_type）。
-_PLM_RE_GIVEN_VARIANCE_HAUSMAN_R_SCRIPT = (
-    Path(__file__).resolve().parent
-    / "run_plm_re_given_variance_hausman_benchmark.R"
 )
 
 
@@ -383,80 +371,6 @@ def run_re_plm_r(
     return result
 
 
-def _given_variance_extra_args(
-    cov_type: str,
-    *,
-    sigma2_eps: float,
-    sigma2_u: float,
-    maxlag: int | None,
-    entity_col: str,
-    time_col: str,
-) -> list[str]:
-    """分散成分を与える2本のRスクリプトに共通の、cov_type以降の引数。"""
-    extra = [
-        entity_col,
-        time_col,
-        repr(float(sigma2_eps)),
-        repr(float(sigma2_u)),
-    ]
-    if cov_type == "dk":
-        if maxlag is None:
-            raise ValueError("maxlag is required for cov_type='dk'")
-        extra.append(str(maxlag))
-    return extra
-
-
-def run_re_given_variance_plm_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    *,
-    sigma2_eps: float,
-    sigma2_u: float,
-    maxlag: int | None = None,
-    entity_col: str = "entity",
-    time_col: str = "time",
-) -> dict:
-    """`run_plm_re_given_variance_benchmark.R`を呼び、外から与えた分散成分
-    （`sigma2_eps`・`sigma2_u`）で準偏差変換したデータに対する`plm`の
-    `cov_type`別の標準誤差・推論統計量（傾きだけのWald F統計量を含む）を得る。
-
-    plm自身のSwamy-Arora分散成分が本実装（linearmodels準拠）と異なる不均衡
-    パネルで、共分散推定量と小標本補正だけを機械精度で比較するための参照値
-    （スクリプトのモジュールコメント参照）。バランスパネルでは使えない。
-
-    Args:
-        csv_path: データCSV（不均衡パネル）。
-        formula: `plm`の回帰式（例: "y ~ x1 + x2"）。
-        cov_type: classical/hc1/hc2/hc3/cluster（entity）/dk。
-        sigma2_eps: 特異誤差の分散σ_ε²（呼び出し側が`linearmodels`の値を渡す）。
-        sigma2_u: 個体効果の分散σ_u²。
-        maxlag: `vcovSCC`の`maxlag`（Driscoll-Kraayのバンド幅、dkのみ必須）。
-        entity_col: エンティティ識別子の列名。
-        time_col: 時点識別子の列名。
-    """
-    extra = _given_variance_extra_args(
-        cov_type,
-        sigma2_eps=sigma2_eps,
-        sigma2_u=sigma2_u,
-        maxlag=maxlag,
-        entity_col=entity_col,
-        time_col=time_col,
-    )
-    raw = run_r(
-        _PLM_RE_GIVEN_VARIANCE_R_SCRIPT,
-        csv_path,
-        formula,
-        cov_type,
-        extra_args=extra,
-    )
-    result = normalize_names(
-        raw, stat_key="test_stats", scalar_keys=_PLM_SCALAR_KEYS
-    )
-    result["cov_params"] = normalize_cov_params(raw["cov_params"])
-    return result
-
-
 def run_re_hausman_plm_r(
     csv_path: Path,
     formula: str,
@@ -484,52 +398,6 @@ def run_re_hausman_plm_r(
         extra.append(str(maxlag))
     return run_r(
         _PLM_HAUSMAN_R_SCRIPT,
-        csv_path,
-        formula,
-        cov_type,
-        extra_args=extra,
-    )
-
-
-def run_re_hausman_given_variance_plm_r(
-    csv_path: Path,
-    formula: str,
-    cov_type: str,
-    *,
-    sigma2_eps: float,
-    sigma2_u: float,
-    maxlag: int | None = None,
-    entity_col: str = "entity",
-    time_col: str = "time",
-) -> dict:
-    """`run_plm_re_given_variance_hausman_benchmark.R`を呼び、外から与えた分散成分
-    （`sigma2_eps`・`sigma2_u`）で組み立てた補助回帰に`plm`の`cov_type`別の共分散を
-    当てたハウスマン検定（`hausman_statistic`/`hausman_df`/`hausman_p_value`）を得る。
-
-    plm自身のSwamy-Arora分散成分が本実装（linearmodels準拠）と異なる不均衡
-    パネルで、補助回帰の共分散と小標本補正だけを機械精度で比較するための参照値
-    （スクリプトのモジュールコメント参照）。バランスパネルでは使えない。
-
-    Args:
-        csv_path: データCSV（不均衡パネル）。
-        formula: `plm`の回帰式（例: "y ~ x1 + x2"）。
-        cov_type: classical / hc1 / hc2 / hc3 / cluster（entity）/ dk。
-        sigma2_eps: 特異誤差の分散σ_ε²（呼び出し側が`linearmodels`の値を渡す）。
-        sigma2_u: 個体効果の分散σ_u²。
-        maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
-        entity_col: エンティティ識別子の列名。
-        time_col: 時点識別子の列名。
-    """
-    extra = _given_variance_extra_args(
-        cov_type,
-        sigma2_eps=sigma2_eps,
-        sigma2_u=sigma2_u,
-        maxlag=maxlag,
-        entity_col=entity_col,
-        time_col=time_col,
-    )
-    return run_r(
-        _PLM_RE_GIVEN_VARIANCE_HAUSMAN_R_SCRIPT,
         csv_path,
         formula,
         cov_type,

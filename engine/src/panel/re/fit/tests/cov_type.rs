@@ -379,8 +379,8 @@ fn re_estimator_fit_cluster_supports_explicit_groups_column() {
     )
     .unwrap();
 
-    assert!((*re.std_errors().get(0, 0) - 2.137_431_252_437_596_5).abs() < 1e-9);
-    assert!((*re.std_errors().get(1, 0) - 0.181_975_972_361_746_9).abs() < 1e-9);
+    assert!((*re.std_errors().get(0, 0) - 2.138_005_211_311_433_4).abs() < 1e-9);
+    assert!((*re.std_errors().get(1, 0) - 0.182_210_748_005_084).abs() < 1e-9);
 }
 
 #[test]
@@ -389,58 +389,9 @@ fn re_estimator_fit_f_statistic_is_wald_form_for_extremely_unbalanced_panel() {
     // -0.6837と負値になる。本実装のWald二次形式（`re.rs`のモジュールdoc「自由度・標準誤差・F統計量」）は
     // 傾き係数が1個のとき`f_statistic = test_stat²`（1自由度のF検定と両側t検定の
     // 代数的等価）になる。旧SST/SSR実装に戻すと負値になりこの恒等式が崩れるため、
-    // その回帰ガードとして恒等式を固定する（`plm`との数値照合は分散成分の推定差が
-    // 小標本で大きく効くためPython側の許容誤差付きテストで行う）。
-    // T_i={2, 2, 15}という極端に不均衡なパネル（`linearmodels`でのランダム探索で
-    // 発見、乱数シード固定・実地検証済み）。
-    let entity = strings(&[
-        "e0", "e0", "e1", "e1", "e2", "e2", "e2", "e2", "e2", "e2", "e2", "e2", "e2", "e2", "e2",
-        "e2", "e2", "e2", "e2",
-    ]);
-    let x1 = vec![
-        1.206_726_463,
-        0.859_309_915_6,
-        0.412_096_626_7,
-        0.969_400_630_3,
-        5.333_483_877_8,
-        -2.910_149_551_1,
-        -5.141_873_834_4,
-        -4.522_814_339,
-        -0.050_290_856_2,
-        4.133_576_993_4,
-        4.899_532_633_5,
-        0.889_588_287_9,
-        -4.997_800_337_1,
-        -2.746_322_280_7,
-        -3.757_660_566_6,
-        -0.740_528_097_1,
-        -7.434_903_680_5,
-        0.472_973_696_2,
-        2.712_179_870_5,
-    ];
-    let y = [
-        -1.628_726_680_2,
-        -1.987_971_224_5,
-        -9.720_496_074_8,
-        -5.349_549_902_4,
-        15.454_243_372_1,
-        11.482_129_011_1,
-        12.946_870_275_7,
-        17.902_202_464_2,
-        18.976_838_217_0,
-        16.352_866_361_3,
-        21.000_419_954_5,
-        15.678_612_541_9,
-        18.693_076_035_8,
-        16.672_988_029_6,
-        13.874_059_095_9,
-        18.135_545_024_4,
-        11.856_646_694_1,
-        13.925_593_855_6,
-        13.265_351_905_9,
-    ];
-    let input = ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
-        .unwrap();
+    // その回帰ガードとして恒等式を固定する。分散成分・係数・標準誤差は`plm`の値と比べる
+    // （T_i={2, 2, 15}で、between回帰の残差自由度が1の境界でもある）。
+    let input = extreme_unbalanced_input();
 
     let re = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95).unwrap();
 
@@ -451,6 +402,34 @@ fn re_estimator_fit_f_statistic_is_wald_form_for_extremely_unbalanced_panel() {
     let p_value = *re.p_values().get(1, 0);
     assert!((re.f_p_value().unwrap() - p_value).abs() < 1e-9 * p_value.max(1e-300));
     assert!(re.f_p_value().unwrap() > 0.0 && re.f_p_value().unwrap() < 1.0);
+
+    // R: `plm(y ~ x1, model = "random")`（`random.method = "swar"`、不均衡なので`dfcor = 3`）。
+    assert_rel(re.sigma2_eps(), 7.266_775_890_332_932, 1e-10, "sigma2_eps");
+    assert_rel(re.sigma2_u(), 41.641_931_186_009_46, 1e-10, "sigma2_u");
+    assert_rel(
+        *re.estimator().params().get(0, 0),
+        2.412_381_738_192_191,
+        1e-10,
+        "const",
+    );
+    assert_rel(
+        *re.estimator().params().get(1, 0),
+        0.224_648_010_963_664_24,
+        1e-10,
+        "x1",
+    );
+    assert_rel(
+        *re.std_errors().get(0, 0),
+        4.371_114_364_102_022,
+        1e-10,
+        "se const",
+    );
+    assert_rel(
+        *re.std_errors().get(1, 0),
+        0.205_378_868_336_835_4,
+        1e-10,
+        "se x1",
+    );
 }
 
 #[test]

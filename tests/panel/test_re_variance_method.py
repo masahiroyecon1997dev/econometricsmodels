@@ -2,8 +2,9 @@
 
 `variance_method`は`plm`の`random.method`（`walhus`・`amemiya`）に対応し、参照実装は`plm`だけ
 （`linearmodels.RandomEffects`はSwamy-Arora（既定）のみ。単一リファレンスの例外、
-`docs/guide/verification.md`）。Swamy-Aroraの検証は`test_re_reference.py`・
-`test_re_time_invariant.py`・`test_re_two_way_reference.py`が担い、ここでは相関ランダム効果
+`docs/guide/verification.md`）。Swamy-Aroraの検証は`test_re_reference.py`（バランス）・
+`test_re_crosscheck.py`・`test_re_gls.py`（不均衡を含む）・`test_re_time_invariant.py`・
+`test_re_two_way_reference.py`が担い、ここでは相関ランダム効果
 （Mundlak型。説明変数にその個体平均・時点平均を加える指定）のバランスのケースだけが
 `swamy_arora`もplmと比べる（`test_re_mundlak.py`が列順・自由度などの性質を確かめる）。
 
@@ -15,8 +16,9 @@
    バランスは閉形式で、両者は値が異なる（plmの切り替えに従う）。
 2. **仕様どおりの独立な手計算**（`_re_oracle.py`）: plmのソースどおりに観測ごとの行列で書いた
    分散成分（`first_stage_variance_components`）を含め、全統計量を全ケース×全`cov_type`で比べる。
-   別名の列を落とすランク判定も、本実装と別に`lstsq`の残差で書いてある。plmと比べられない
-   不均衡の相関ランダム効果の`swamy_arora`（`Case.hand_only_methods`）は手計算だけが参照。
+   別名の列を落とすランク判定も、本実装と別に`lstsq`の残差で書いてある。不均衡の相関ランダム
+   効果の`swamy_arora`（`Case.hand_only_methods`）は、plmが`dfcor = 3`のトレース形で特異になり
+   推定できないため、手計算だけが参照。
 3. **statsmodels**: plmの分散成分から求めた重みで準偏差変換した`y`・`X`（切片込み）への
    OLSが計算する対数尤度・AIC・BICと、クラスターロバストの標準誤差・t値・p値・信頼区間・
    傾き係数の同時F検定（自由度`G-1`）を、本実装と比べる（plmが持たない値・plmと規約が
@@ -449,8 +451,8 @@ def test_matches_statsmodels_on_the_plm_transformed_data(
     "case_name", ["ow_baseline", "ow_unbalanced", "tw_baseline"]
 )
 def test_default_variance_method_is_swamy_arora(case_name):
-    """既定は`swamy_arora`で、明示した場合と同じ値（不均衡の1-wayでは`plm`の式ではなく
-    `linearmodels`準拠の式）。"""
+    """既定は`swamy_arora`で、明示した場合と同じ値（不均衡の1-wayでは`plm`の`swar`の
+    トレース形）。"""
     case = next(c for c in CASES if c.name == case_name)
     default = RE(
         _frame(case),

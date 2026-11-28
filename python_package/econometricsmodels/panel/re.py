@@ -377,12 +377,13 @@ class REResults:
     def sigma2_u(self) -> float:
         """Estimated variance of the effect of the first column of
         `effects` (the entity), σ_u² (a negative
-        estimate is raised to 0). Swamy-Arora on an unbalanced panel is
-        the `linearmodels` estimator (harmonic mean of the entity
-        sizes), which differs from `plm`'s; the difference depends on
-        how unbalanced the panel is (2.6 % in one test panel), and on
-        a balanced panel the two agree. Wallace-Hussain and Amemiya
-        follow `plm` on balanced and unbalanced panels."""
+        estimate is raised to 0). The three `variance_method` estimators
+        follow `plm` on balanced panels and on unbalanced one-way panels.
+        On an unbalanced one-way panel, Swamy-Arora weights the between
+        regression by the number of observations per entity, as `plm`
+        does, whereas `linearmodels` does not weight it and uses the
+        harmonic mean of the entity sizes, so the two differ there. On a
+        balanced panel their between regressions agree."""
         return self._raw.sigma2_u
 
     @property
@@ -509,7 +510,12 @@ class REResults:
     def r_squared_between(self) -> float:
         """Between R² (based on entity-mean variables, with the
         intercept; the same definition for one-way and two-way
-        effects)."""
+        effects). Each entity is weighted by its number of
+        observations, and the total sum of squares is taken around the
+        mean of all observations. On an unbalanced panel this weighting
+        differs from `linearmodels` and from
+        `FEResults.r_squared_between`, which weight every entity
+        equally."""
         return self._raw.r_squared_between
 
     @property

@@ -258,13 +258,15 @@ model tests — for each supported covariance type.
 | FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
 | FEIV<sup>3</sup> | R `fixest` (`feols` with instruments) | linearmodels `IV2SLS` with dummy variables, R `plm`, R `ivDiag` | 1e-8 / 1e-8 |
 | FEIV (`estimator="gmm"`)<sup>4</sup> | linearmodels `IVGMM` on within-transformed data | R `momentfit` on within-transformed data, FE-2SLS references (`fixest`, `plm`) | 1e-8 / 1e-8 |
-| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 |
+| RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` and `GLS` | 1e-8 / 1e-8 |
 
 <sup>1</sup> For FE and RE, linearmodels covers only classical and HC1
 standard errors. Its cluster and Driscoll-Kraay standard errors use
 different small-sample corrections, so R (`fixest`, `plm`) is the primary
-reference for those. Which implementation checks which statistic is
-detailed on the verification page.
+reference for those. On unbalanced panels, linearmodels estimates the RE
+variance components differently, so `plm` is the primary reference for RE
+there. Which implementation checks which statistic is detailed on the
+verification page.
 
 <sup>2</sup> There is no Python Tobit implementation, so both references are
 R packages. They are different implementations (`survreg` and `maxLik`

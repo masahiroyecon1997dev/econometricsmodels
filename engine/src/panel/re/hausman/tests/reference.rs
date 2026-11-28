@@ -151,9 +151,9 @@ fn re_estimator_fit_hausman_matches_plm_aux_on_balanced_panel() {
 }
 
 #[test]
-fn re_estimator_fit_hausman_is_close_to_plm_aux_on_unbalanced_panel() {
-    // 不均衡パネルでは`plm`と分散成分（σ_u²）の推定式が僅かに異なる（`linearmodels`準拠の
-
+fn re_estimator_fit_hausman_matches_plm_aux_on_unbalanced_panel() {
+    // 不均衡パネルでもSwamy-Arora分散成分が`plm`のトレース形（`dfcor = 3`）と一致するため、
+    // 補助回帰の値も1e-9で一致する。
     // R: `plm::phtest(y ~ x1 + x2, data, method = "aux")`
     //   chisq = 0.60715047844214221, p = 0.73817434737945442, df = 2
     let re = ReEstimator::fit(
@@ -165,8 +165,8 @@ fn re_estimator_fit_hausman_is_close_to_plm_aux_on_unbalanced_panel() {
     .unwrap();
 
     assert_eq!(re.hausman_df(), Some(2));
-    assert!((re.hausman_statistic().unwrap() - 0.607_150_478_442_142_2).abs() < 5e-2);
-    assert!((re.hausman_p_value().unwrap() - 0.738_174_347_379_454_4).abs() < 5e-2);
+    assert!((re.hausman_statistic().unwrap() - 0.607_150_478_442_142_2).abs() < 1e-9);
+    assert!((re.hausman_p_value().unwrap() - 0.738_174_347_379_454_4).abs() < 1e-9);
 }
 
 #[test]

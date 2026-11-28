@@ -79,8 +79,9 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   `theta`（`dict[str, float]`、キーはエンティティIDの文字列表現を辞書順に並べたもの（整数IDでも`"10"`が`"2"`より前）→θ_i。`θ_i`は観測数`T_i`で決まるため不均衡パネル
   でだけ個体間で異なる）、2-wayは`theta_entity`（θ₁）・`theta_time`（θ₂）・`theta_total`（θ₃、θ₁θ₂ではない）
   の`float`で、使わない側は`None`（`hausman_*`と同じ「該当しなければ`None`」の型安定な形）。
-  値は`plm::ercomp`（バランスパネルの`σ²`・`theta`）、1-wayは`linearmodels`の`variance_decomposition`・
-  `theta`と一致する。不均衡パネルの`σ_u²`は`plm`と定義が異なる（3.1節）。分散成分と`theta*`は
+  値は`plm::ercomp`の`σ²`・`theta`（1-wayは不均衡パネルも）と一致し、バランスパネルの1-wayは
+  `linearmodels`の`variance_decomposition`・`theta`とも一致する（不均衡パネルの`linearmodels`は
+  σ_u²の式が違う、3.1節）。分散成分と`theta*`は
   列名キーにせず意図的にこの形のままにしている（理由は`panel-common.md`2.1節）。
 - **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（FEと同じ意味、`fe-spec.md`
   「結果構造体」参照）。`dk`以外は`None`。ハウスマン検定の補助回帰が内部で解決するバンド幅は
@@ -105,9 +106,10 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
 ### 3.1 分散成分の推定（Swamy-Arora法）
 
-Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R `plm`の
-デフォルト（`random.method="swar"`）も同名だが、不均衡パネルでは別の推定量になる
-（下記「plmとの既知の実装差」）。
+R `plm`のデフォルト（`random.method="swar"`、`ercomp`）に従う。不均衡パネルでは`plm`は自由度の
+補正種別`dfcor`を3に固定してトレース項のモーメント方程式を解き、本実装も同じ式を使う。バランス
+パネルではこの式が`linearmodels.RandomEffects`の式（と`plm`の`dfcor = 2`の簡約形）に代数的に一致する。
+定義式は`docs/methods/re.md`。
 
 - **σ_ε²（idiosyncratic variance）**: 内部1-way FE推定（`FeEstimator::fit(OneWay,
   Classical)`）のwithin回帰残差平方和／`FeEstimator::df_resid()`。内部FE推定に渡す説明変数は
@@ -129,29 +131,31 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
     傾きはFEと一致する）。最終回帰は被説明変数が準偏差変換後の値で元のモデルの総平方和が当てはまらない
     ため、完全フィットの判定は足さない（`test_re_variance_components.py`の
     `test_noise_just_above_the_perfect_fit_threshold_estimates_the_within_slope`で固定）。
-- **σ_u²（individual variance）**: between回帰（エンティティ平均`[1, x̄ᵢ.]`への最小二乗）のSSR、
-  調和平均`t_bar = N / Σ(1/T_i)`を使う標準式`max(0, ssr/df_resid - σ_ε²/t_bar)`。
-  `df_resid = N - K_b - 1`。平均が個体間で一定の列（バランスパネルで時点間でのみ変わる
+- **σ_u²（individual variance）**: エンティティ平均`[1, x̄ᵢ.]`への、観測数`T_i`で重み付けした
+  between回帰（個体平均を観測レベルに展開したプールドOLSと同じ。`plm`の`Between`モデル）の
+  重み付き残差平方和`Q_id = Σ T_i ê_i²`から、`plm`の`dfcor = 3`の2行目のモーメント方程式
+  `(N − p)σ_ε² + (O − tr(B⁻¹S))σ_u² = Q_id`を解く（`B = Σ T_i z̄_i z̄_i'`、`S = Σ T_i² z̄_i z̄_i'`、
+  `p = K_b + 1`、`O`は総観測数）。負なら0に切り上げる。
+  - **実装**: `√T_i`倍した行のQR（`OrthonormalDesign`）で重み付き最小二乗を解き、
+    `tr(B⁻¹S) = Σ T_i h_i`（`h_i`は重み付き設計行列のレバレッジ、`row_leverages`）で求める。
+    `B⁻¹`も`S`も作らない。分母は`N > p`なら正（`h_i ≤ 1`・`Σ h_i = p`）。
+  - **バランス・不均衡で式を切り替えない**: `T_i`が全て等しいと`O − tr(B⁻¹S) = T(N − p)`・
+    `Q_id = T·SSR_b`で、`SSR_b/(N − p) − σ_ε²/T`（`linearmodels`・`plm`の`dfcor = 2`）に一致する。
+    Wallace-Hussain・Amemiyaと違い閉形式とトレース形の不連続が無いので、`plm`のバランス判定
+    （`is.pbalanced`は時点集合まで見る）と本実装の判定の食い違いも問題にならない。
+  - `linearmodels`は不均衡パネルで、重みなしのbetween回帰と調和平均`t_bar = N / Σ(1/T_i)`による
+    `ssr/(N − p) − σ_ε²/t_bar`を使い、別の推定量になる（40個体のパネルでσ_u²が`plm`1.565対1.363。
+    `small_sample=True`でも`plm`とは一致しない）。不均衡パネルの参照は`plm`だけになる（4章）。
+  - `plm`は不均衡パネルの相関ランダム効果（`x`と`x̄_i`を両方入れるMundlak型）で、`B`が特異に
+    なり`system is computationally singular`で失敗する。本実装は次の規則で別名の列をbetween回帰から
+    落として推定する（`Q_id`・ランク・`Σ T_i h_i`はどちらの列を落としても同じ）。
+  - between回帰の列: 平均が個体間で一定の列（バランスパネルで時点間でのみ変わる
   列等）は切片と共線になるため、between回帰から落とし`K_b`にも数えない（`plm`と同じ。最終回帰には
   全列が残る。2-wayの規則と同じ、3.1.1節）。さらに、切片・前の列の線形結合になる列も落とす
   （次の「between回帰から落とす列」）。
-- **`k`規約についての実装上の注記**: `linearmodels`ソースの式は`nvar`（切片を含む列数）
-  表記だが、このプロジェクトの`k`規約（傾き係数のみ、切片を含まない）では、内部1-way FE
-  推定が返す`df_resid()`（σ_ε²用）とbetween回帰が返す`nobs()-k()`（σ_u²用）をそのまま
-  使えば`+1`/`-1`の手計算なしに自動的に一致する（乱数・手動データ複数ケースで
-  `linearmodels.RandomEffects`との数値完全一致を実地検証済み）。
-- **plmとの既知の実装差（不均衡パネル）**: バランスパネルでは`plm`と分散成分が一致する
-  （機械精度）。不均衡パネルでは、`plm`は`dfcor=3`固定（他の値を指定すると
-  `dfcor should equal 3 for unbalanced panels`のエラーになり、オプションでは変更できない）で、
-  `T_i`のトレース項（`Σ T_i²`等）を含むモーメント方程式の連立を解いてσ_ε²・σ_u²を同時に
-  求める。本実装（linearmodels準拠）はbetween回帰のSSRと調和平均`t_bar`の単純な式でσ_u²を
-  求める。σ_ε²は両者で一致するが、σ_u²は不均衡で数％〜10％程度異なり、θ・係数・標準誤差・
-  ハウスマン統計量に伝播する（実測: 8個体・21観測でσ_u² 0.819対1.129）。plm側の
-  オプションで本実装の式を再現することはできない。本実装は`linearmodels`との
-  機械精度一致（Classical/HC1/Cluster/HAC）を優先し、plmの式は採用しない。plm互換の
-  推定法の提供は、具体的な要望が出た時点で改めて検討する。
-- linearmodelsが提供する`small_sample`補正（不均衡パネル向けのtraceベースの追加調整、
-  デフォルト`False`）はv1では実装しない（linearmodelsのデフォルト挙動に合わせる）。
+- **自由度は委譲先の値を使う**: σ_ε²の分母は内部FEの`df_resid()`（`n - k_tv - N`）、σ_u²の`N − p`は
+  between回帰が実際に残した列の数から決める。`n`・`N`・`k`から式を組み立て直さない（時間不変の列・
+  落とした列の数え方を委譲先と一致させるため）。
 
 ### 3.1.1 2-wayの分散成分（Swamy-Arora、バランスパネル）
 
@@ -224,8 +228,7 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 （`ComputationError`。`plm`は0に切り上げてθが`NaN`になる）、トレース形の連立が特異
 （`ComputationError`）。内部のFE推定の失敗（singleton・自由度不足）は`swamy_arora`と同じ。
 
-**`swamy_arora`の不均衡1-way**は3.1節の式（`linearmodels`準拠）のままで、`plm`の`swar`のトレース形には
-切り替えない（`plm`互換の推定法を別の値として足すかは要望が出てから検討する）。
+**`swamy_arora`**は3.1節の式（`plm`の`swar`）で、バランス・不均衡で式を切り替えない（3.1節）。
 
 ### 3.2 θ（準偏差変換の重み）
 
@@ -289,9 +292,7 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
 
 - **HC2/HC3の参照実装が無い**: `linearmodels`は`RandomEffects`・`PanelOLS`どちらも
   "heteroskedastic"（HC1相当）しか持たない。REは`plm::vcovHC(fit, method="white1",
-  type="HC2"/"HC3")`をクロスチェックに使う。`plm`は変量効果の分散成分推定法が
-  `linearmodels`と僅かに異なる（不均衡パネルでは点推定自体が僅かに違う）ため、不均衡
-  パネルは`linearmodels`の分散成分を与えたplmと比べる（下記「許容誤差」参照）。
+  type="HC2"/"HC3")`と比べる（バランス・不均衡とも`plm`自身のREと機械精度で一致する）。
 - `ReCovType::Cluster`の`q`（傾き係数の数、切片を除く）は`df_model - 1`。`ReCovType::Dk`は
   `time`（必須の`TimeKeys`、`REOptions.dk_time`由来）を持つ。2-wayの時間次元（`ReInput.time`、`effects[1]`由来）とは独立で借用しない。
 - **【linearmodels方式からfixest（R）・Stata型に変更】**: `Cluster`は当初
@@ -330,12 +331,9 @@ Wald二次形式は`V`が正定値である限り負値にならず、FEのF統�
 
 - 検証は`plm::pwaldtest(test = "F", vcov = ...)`の統計量（hc2/hc3/cluster/dk、
   `tests/panel/test_re_crosscheck.py`）と`linearmodels`の`f_statistic_robust`
-  （classical/hc1、`tests/panel/test_re_reference.py`）との数値比較。バランスパネルは機械精度で
-  一致する。`linearmodels`の`f_statistic_robust`は不均衡パネルでも機械精度で一致する
-  （点推定が一致するため）。plm自身のREは不均衡パネルで、Swamy-Arora分散成分の推定差
-  （`θ`の差）により`cov_type`別に最大約0.1〜0.7%の差が出る。そのため不均衡パネルは、
-  `linearmodels`の分散成分を与えて準偏差変換したデータへのplmの`vcov`系と機械精度で
-  比べる（`tests/support/_tolerances_panel.py`の`re_crosscheck.rtol`）。
+  （classical/hc1、バランスパネル、`tests/panel/test_re_reference.py`）との数値比較。`plm`とは
+  バランス・不均衡とも全`cov_type`で機械精度で一致する（`tests/support/_tolerances_panel.py`の
+  `re_crosscheck.rtol`）。
   `linearmodels`の`res.f_statistic`（SST/SSR方式、`cov_type`非依存）はバランスパネルの
   classicalでのみ一致するため比較に使わない。
 - 傾き係数が1個のケースは「1自由度のF検定は両側t検定と代数的に等価」
@@ -344,12 +342,19 @@ Wald二次形式は`V`が正定値である限り負値にならず、FEのF統�
 ### 3.6 パネル固有R²
 
 FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE独自に実装している
-（無理な共通化はしない方針）。差異は2点:
+（無理な共通化はしない方針）。差異は3点:
 
 - **TSSの中心化有無**: REは`has_constant=True`のため中心化TSS（`Σ(y-ȳ)²`）を使うが、FEは
   `has_constant=False`扱いのため非中心化TSSを使う。
 - **当てはめ値への切片`β0`の有無**: FEは固定効果自体を含めない「弱いR²」を意図的に採用する
   が、REは真の切片係数`β0`を含めて当てはめる（`fitted = β0 + Σ_j x_j・β_j`）。
+- **`r_squared_between`の重み**: REは各個体を観測数`T_i`で重み付けし、TSSは全観測の平均`ȳ`の
+  まわりで取る（`1 − Σ T_i (ȳ_i − ŷ_i)² / Σ T_i (ȳ_i − ȳ)²`）。分母は全平方和の分解
+  `Σ(y − ȳ)² = Σ(y − ȳ_i)² + Σ T_i (ȳ_i − ȳ)²`の個体間の部分で、分散成分のbetween回帰（3.1節、
+  重み`T_i`）とも揃う。`T_i`が等しいバランスパネルでは重みなしの値と一致する。FEは`linearmodels`と
+  一致する重みなしのままで、不均衡パネルではFEとREの定義が異なる（FEを揃えるかは別途検討中）。
+  `linearmodels`の`_prepare_between`は重み`T_i/mean(T)`を計算するが、サンプルウェイト未指定なら1に
+  上書きするため、不均衡パネルの`linearmodels`の`rsquared_between`は重みなしの値になる。
 
 `r_squared_within`はFEと同じ定義（θ=1固定の通常のwithin変換、REの`θ_i`とは無関係）。
 `linearmodels`の早期リターン（`has_constant`かつ傾き係数0個なら3種とも`0.0`）に倣い、
@@ -358,8 +363,11 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
 列が無ければ`0.0`）、`r_squared_between`は個体平均への当てはめ、`r_squared_overall`は生の`y`・`x`への
 当てはめ（どちらも切片込みの中心化TSS）。`plm`の`r.squared`は変換後の回帰のR²を返すだけで対応する参照が
 無く、検証は`plm`の係数から定義どおりに計算した独立な値との照合になる。`r_squared_between`が負値になりうる（`linearmodels`のSST/SSR方式のF統計量と
-同型の性質。F統計量自体は3.5節のWald形式で負値にならない）ことも実地確認済み。検証は`linearmodels`（`cov_type="unadjusted"`）の
-`rsquared_within`/`rsquared_between`/`rsquared_overall`と直接数値比較。
+同型の性質。F統計量自体は3.5節のWald形式で負値にならない）ことも実地確認済み。検証はバランスパネルで
+`linearmodels`（`cov_type="unadjusted"`）の`rsquared_within`/`rsquared_between`/`rsquared_overall`と
+直接数値比較し、不均衡パネルの`r_squared_between`は外部の参照が無いため、手計算
+（`tests/support/_re_oracle.py`の`r_squared`。個体平均を観測に展開した値への当てはめとして書く）と、
+engineの単体テスト（`plm`の係数から定義どおりに計算した値、全平方和の分解との整合）で確かめる。
 
 ### 3.7 ハウスマン検定
 
@@ -466,8 +474,19 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
 
 ## 4. テスト
 
-- Python主リファレンス: `linearmodels.RandomEffects`（点推定・`cov_type="unadjusted"`等）。
-  Rクロスチェック: `plm`（`model="random"`、`benchmark/panel/run_plm_benchmark.R`）。
+- Python主リファレンス: `linearmodels.RandomEffects`（点推定・`cov_type="unadjusted"`等、
+  **バランスパネルのみ**）。Rクロスチェック: `plm`（`model="random"`、`benchmark/panel/run_plm_benchmark.R`）。
+- **【例外】不均衡パネルの1-wayは`plm`が主リファレンス**（分散成分・θ・係数・全`cov_type`の標準誤差・
+  F統計量・ハウスマン検定）。`linearmodels`は不均衡パネルでσ_u²の式が違い（3.1節）、参照にならない。
+  独立のクロスチェックとして、`plm`の分散成分（`ercomp`の`sigma2`）から密な`Ω = σ_ε² I + σ_u² ZZ'`を
+  組んだ`statsmodels.GLS`で、係数・classicalと個体クラスターの標準誤差・係数の分散共分散行列・
+  傾きのF検定を比べる（`re_gls.json`・`re_gls_cov.json`、`tests/panel/test_re_gls.py`）。不均衡の
+  実データは、wagepanから個体IDの4での余りで行を落とした`wagepan_unbalanced`（観測数2・4・7・8）を
+  `plm`と全`cov_type`・ハウスマン検定・分散成分で比べる（`re_crosscheck.json`）。statsmodelsの`GLS`は`Ω⁻¹`のCholesky分解で白色化し、本実装の準偏差変換
+  （`Ω^{-1/2}`に比例）とは個体ごとの直交変換だけ異なる。classicalと個体クラスターの共分散はこの変換で
+  変わらないが、HC1〜HC3は観測ごとのスコアが変わるため比べられない。σ_u²そのものの参照は`plm`だけで、
+  手計算（`tests/support/_re_oracle.py`の`swamy_arora_one_way_sigma2_u`、`plm`のソースどおりに
+  観測ごとの行列で書いたもの）は補助の検算。
 - **【例外】** `cov_type="cluster"`/`"dk"`の標準誤差・推論統計量は
   `linearmodels`ではなく`plm`を正とする（`linearmodels`独自の`n/(n-k)`補正から
   Stata・R型の補正（3.4節参照）に変更したため）。参照値は`plm::vcovHC(method = "arellano",
@@ -477,9 +496,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   dkは`T-1`）で計算し直す（この自由度の選択自体は本実装と同じ規約の手計算で、独立検証が
   及ぶのは補正係数込みの標準誤差まで）。clusterの`G-1`のみ、plmの準偏差変換済みデータに
   statsmodelsのクラスターロバストOLS（`use_t=True`）を当てた値でも検証する
-  （`re_statsmodels_cluster.json`、バランスパネルのみ）。dkの`T-1`はstatsmodelsに
-  同じ規約がなく第2リファレンスがない。`classical`/`hc1`は引き続き`linearmodels`と数値一致で
-  検証する。
+  （`re_statsmodels_cluster.json`、バランス・不均衡パネル）。dkの`T-1`はstatsmodelsに
+  同じ規約がなく第2リファレンスがない。`classical`/`hc1`は引き続き（バランスパネルで）`linearmodels`と
+  数値一致で検証する。
   `cluster`に`effects`の先頭以外の列を指定する場合は、`plm::vcovHC`がgroup/timeしかクラスターに
   できないため、`plm`の準偏差変換済み設計行列・応答に`lm` + `sandwich::vcovCL(type = "HC1",
   cadjust = TRUE)`を当てた値を参照値にする（entityクラスターでは`vcovHC(arellano, sss)`と
@@ -488,23 +507,20 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
 - 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-8`（`tests/support/_tolerances_panel.py`の
   `re_reference`。実測は`1e-9`〜`1e-14`程度）で数値完全一致。Cluster/DK・
   HC2/HC3の`plm`クロスチェックは、標準誤差・推論統計量・F統計量を全シナリオ`1e-8`で
-  比べる（`tests/support/_tolerances_panel.py`の`re_crosscheck.rtol`）。不均衡パネルは分散成分推定
-  （Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なる（plm自身のREとは係数が
-  最大0.18%、標準誤差が1%前後ずれる）ため、`linearmodels`の分散成分を与えて準偏差変換した
-  データへのplmの`vcov`系を参照値にする。clusterの`G/(G-1)`欠落（seに約1.3%）のような
-  補正式の取り違えも検出できる。
+  比べる（`tests/support/_tolerances_panel.py`の`re_crosscheck.rtol`）。不均衡パネルも`plm`自身のREと
+  機械精度で一致し、clusterの`G/(G-1)`欠落（seに約1.3%）のような補正式の取り違えも検出できる。
 - **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual", vcov = ...)`のみを参照値と
   する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
   無いことを確認済み。通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外）。
-  バランスパネルでは機械精度で一致する。不均衡パネルではplm自身のSwamy-Arora分散成分
-  （σ_u²）が`linearmodels`準拠の本実装と異なり`phtest`の統計量が1〜2%ずれるため、
-  `linearmodels`の分散成分から補助回帰を組み立ててplmの`vcov`系を当てた値と機械精度で
-  比べる（`run_plm_re_given_variance_hausman_benchmark.R`、3.7節）。`cov_type`別
+  バランス・不均衡パネルとも機械精度で一致する。`cov_type`別
   （`benchmark/panel/run_plm_hausman_benchmark.R`）に全6種を照合し、ロバスト共分散が構造的に
   特異なシナリオ（`many_regressors`のcluster/dk）は`fit()`が`ValidationError`/`ComputationError`で
   失敗することを確認する。
-- **`variance_method`（Wallace-Hussain・Amemiya）**: 参照実装は`plm`（`random.method = "walhus"`・
-  `"amemiya"`）のみで、`linearmodels`には無い（単一リファレンスの例外）。`tests/panel/test_re_variance_method.py`が、
+- **`variance_method`（Wallace-Hussain・Amemiya。不均衡の1-wayはSwamy-Aroraも）**: 参照実装は`plm`
+  （`random.method = "walhus"`・`"amemiya"`・`"swar"`）のみで、`linearmodels`には無い（単一リファレンスの
+  例外。Swamy-Aroraの不均衡パネルは`linearmodels`の式が違う）。観測数が等しく時点がずれたパネルの
+  Swamy-Arora（`ow_equal_counts_shifted_time_swamy_arora`）は、トレース形が閉形式に一致するため
+  `plm`と一致することを固定する。`tests/panel/test_re_variance_method.py`が、
   `re_variance_method.json`（`benchmark/panel/fixtures/generate_re_variance_method_fixtures.py`、1-wayは
   バランス・不均衡（トレース項の式）・準バランス・時間不変の列・時点間のみ変わる列・実データ、2-wayは
   バランス）の分散成分・θ・係数・標準誤差・F統計量・ハウスマン検定を代表ケースで全`cov_type`照合し、
@@ -517,7 +533,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   等しく時点がずれたパネルは、plmと値が異なること（本実装は閉形式、plmはトレース形）自体を固定する。
   拒否する入力（Amemiyaとwithin変動の無い列。複数列・全列・実データ・2-wayを含む）はフィクスチャを持たず
   例外だけを確かめる。不均衡の1-wayのWallace-Hussainで`σ_ε²`が負になる入力（`ComputationError`）と、
-  個体数が傾き係数の数+1のとき`swamy_arora`だけが失敗することも固定している。
+  個体数が傾き係数の数+1のとき`swamy_arora`だけが失敗することも固定している。不均衡パネルの
+  相関ランダム効果（Mundlak型）の`swamy_arora`は、`plm`が特異で失敗するため手計算だけが参照
+  （`Case.hand_only_methods`）。
 - `aic`/`bic`は`estimator()`（内部`OlsEstimator`）からそのまま取得するため、FEのような
   Rクロスチェック限定の例外は無く`linearmodels`と直接比較できる。
 
@@ -550,20 +568,20 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     （3.2節と同じ式）。1段目の回帰は、`swar`がwithin＋between、`walhus`がpooled OLS、`amemiya`が
     within（切片は`ȳ - x̄'β̂_within`）である。
     - **バランスパネル**（`T`は全個体共通、`O`は総観測数、`N`は個体数、`K`は傾き係数の数）は簡約形で
-      解ける。`swar`は`σ_ε² = Q_w/(O-N-K)`・`σ_u² = SSR_b/(N-K-1) - σ_ε²/T`で、3.1節の式
-      （`linearmodels`）と一致する。`walhus`・`amemiya`は`σ_ε² = (残差のwithin二乗和)/(O-N)`・
+      解ける。`swar`は`σ_ε² = Q_w/(O-N-K)`・`σ_u² = SSR_b/(N-K-1) - σ_ε²/T`で、`linearmodels`の式と
+      一致する（3.1節のトレース形もこの場合に一致する）。`walhus`・`amemiya`は`σ_ε² = (残差のwithin二乗和)/(O-N)`・
       `σ_u² = ((個体平均残差の二乗和)/N - σ_ε²)/T`で、残差の出所だけが異なる。
     - **不均衡パネル**では`plm`は自由度の補正種別を3に固定し（他の値を指定するとエラー）、`(Z'Z)⁻¹`を含む
       トレース項でモーメント方程式を組む。`swar`と`amemiya`はσ_ε²が同じ値になる（どちらもwithin残差を
       `O-N-K`で割る）。`walhus`はpooled残差を使うため別の値になる。σ_u²は3法とも異なる。
-    - **不均衡の`swar`と3.1節の違いの正体**: `plm`のbetween回帰は個体平均を観測レベルに展開して回帰する
-      ため、`T_i`で重み付けしたWLSになる。3.1節（`linearmodels`準拠）は個体平均への重みなしOLSと調和平均
+    - **不均衡の`swar`と`linearmodels`の違いの正体**: `plm`のbetween回帰は個体平均を観測レベルに展開して
+      回帰するため、`T_i`で重み付けしたWLSになる。`linearmodels`は個体平均への重みなしOLSと調和平均
       `t_bar`を使う。`plm`のソースには調和平均`t̄`を使う分岐が残っているが、不均衡パネルでは補正種別が
       3に固定されるため到達しない。
-    - **方針**: 不均衡パネルの`"swar"`は3.1節の式（`linearmodels`準拠）を維持し、`plm`式への切り替えは
-      行わない。`plm`の式を別の値として足すかどうかは、Rの計算慣習への互換モードの要否と合わせて、
-      具体的な要望が出た時点で検討する。一方、`walhus`・`amemiya`は参照実装が`plm`のみなので、
-      不均衡パネルを含めて`plm`の式に従う。
+    - **方針**: 3法とも不均衡パネルを含めて`plm`の式に従う（`swar`は3.1節）。`swamy_arora`も当初は
+      `linearmodels`の式で不均衡パネルを推定していたが、不均衡の2-way REの参照が`plm`だけになり、同じ
+      オプション名が1-wayと2-wayで別の推定量を指すのを避けるため、`plm`の式に揃えた（`linearmodels`の式を
+      別の値として残すことはしない）。
     - **実装**（3.1.2節）: 「1段目の回帰」と「行列`M`の組み立て」だけを推定法ごとに分け、バランス用の閉形式と
       不均衡の1-way用のトレース形の2系統を持つ（`engine/src/panel/re/variance_method.rs`）。`plm`は2-wayの
       不均衡パネルにも3法のモーメント行列を持つが、数値検証はしておらず、対象外のまま。

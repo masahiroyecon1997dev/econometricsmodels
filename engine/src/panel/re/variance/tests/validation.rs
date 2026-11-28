@@ -21,7 +21,7 @@ fn swamy_arora_variance_components_does_not_panic_when_entity_means_are_all_zero
     // `stat=0.0/0.0=NaN`となり`StudentsT::cdf(NaN)`がパニックしていた（`shared/inference.rs`の
     // `compute_inference_stat_returns_nan_p_value_without_panicking_when_coef_and_se_are_both_zero`
     // で別途固定）。現在のbetween回帰は残差平方和しか使わないため推論統計量を計算せず、
-    // `σ_u² = max(0, 0 - σ_ε²/t_bar) = 0`で成功する。
+    // `σ_u² = max(0, −σ_ε²(N − p)/(O − Σ T_i h_i)) = 0`で成功する。
     let entity = strings(&["a", "a", "b", "b", "c", "c"]);
     let x = vec![1.0, 3.0, 2.0, 6.0, 1.0, 4.0];
     let y = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];

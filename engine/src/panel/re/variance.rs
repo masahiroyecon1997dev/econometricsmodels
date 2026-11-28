@@ -19,10 +19,10 @@ use crate::shared::linear_algebra::{COLLINEARITY_TOLERANCE, independent_columns_
 use crate::shared::orthonormal::OrthonormalDesign;
 
 /// エンティティ平均（between回帰・between R²用）。`y`/各`x`列のエンティティごとの単純平均と、
-/// 各エンティティの観測数`T_i`（`re-spec.md`3.1節の調和平均`t_bar`計算に使う）。
+/// 各エンティティの観測数`T_i`（1-wayのbetween回帰とbetween R²の重み、`re-spec.md`3.1節・3.6節）。
 ///
 /// 各`Vec`はエンティティのユニークID辞書順（コード順）で揃っている。entity IDの文字列自体は
-/// 持たない（between回帰・`t_bar`計算・between R²のいずれも数値だけで足りるため）。
+/// 持たない（between回帰・between R²のいずれも数値だけで足りるため）。
 /// `swamy_arora_variance_components`が一度だけ計算して返し、between R²が再利用する。
 #[derive(Debug)]
 pub(super) struct EntityMeans {
@@ -102,21 +102,16 @@ pub(super) struct VarianceComponents {
 ///   RE→FE→`OlsEstimator`の委譲チェーン）。FEは分散ゼロの列を拒否するため、時間不変の列は
 ///   内部FEに渡さない（`time_varying_regressor_indices`。REは時間不変の列を許容する、
 ///   `re-spec.md`5章。`plm`が定数列を除いてwithin回帰の自由度を数えるのと同じ）。
-/// - **σ_u²（individual variance）**: between回帰（`between_ssr_and_df`。エンティティ平均への
-///   `OrthonormalDesign`のQRによる最小二乗。REは切片を持つためFEと異なりbetween回帰にも切片が要る）のSSRと、
-///   その自由度（エンティティ数 - 切片込みの列数）から、
-///   調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式
-///   `max(0, ssr/df_resid - σ_ε²/t_bar)`で求める。
+/// - **σ_u²（individual variance）**: 1-wayは`plm`の`swar`のトレース形（`dfcor = 3`）。
+///   観測数`T_i`で重み付けしたbetween回帰（`between_regression`。エンティティ平均への
+///   `OrthonormalDesign`のQRによる最小二乗。REは切片を持つためFEと異なりbetween回帰にも切片が要る）の
+///   重み付き残差平方和`Q_id`・列数`p`・`Σ T_i h_i`から`one_way_sigma2_u`で求める。
+///   バランスパネルでは`ssr/(N - p) - σ_ε²/T`（`linearmodels`と同じ）に一致する。
+///   2-way（バランスのみ）は`two_way_variance_components`のdoc参照。
 ///
-/// **`k`規約についての注記**: `panel-common.md`
-/// `re-spec.md`3.1節に書かれている式（σ_ε²分母`n-k-n_entities+1`、σ_u²分母`n_entities-k`）は、
-/// `linearmodels`ソースの`nvar`（切片を含む列数）表記をそのまま転記したものである。
-/// このプロジェクトのFE/OLSの`k`規約（傾き係数のみ、切片を含まない）では、分母の
-/// 「+1」「-1」を式に手で足し引きする必要はない——FE/OLS双方の委譲先が返す実際の
-/// `df_resid`相当の値（`FeEstimator::df_resid()`・`OlsInput::nobs()-k()`）をそのまま
-/// 使えば自動的に一致する（`linearmodels`との数値完全一致を複数の乱数・手動データで
-/// 実地検証済み）。このためFE/OLSへの委譲を経ず`n`・`n_entities`・`k`から直接式を
-/// 組み立てる実装はしない（委譲先の状態を信頼できるソースとして再利用する）。
+/// **自由度は委譲先の値を使う**: σ_ε²の分母は内部FEの`df_resid()`（`n - k_tv - N`）、
+/// σ_u²の`N - p`はbetween回帰が実際に残した列の数から決める。`n`・`N`・`k`から式を
+/// 組み立て直さない（時間不変の列・落とした列の数え方を委譲先と一致させるため）。
 ///
 /// **戻り値に内部で計算した`EntityMeans`も含める**: between R²（`re_r_squared_between`）が
 /// 同じエンティティ平均を使うため、呼び出し側（`ReEstimator::fit`）が再利用する
@@ -180,18 +175,25 @@ fn two_way_variance_components(
     let entity_mean_stats = entity_means(input.y(), input.x(), entity);
     let time_means = entity_means(input.y(), input.x(), time);
     let x_scales = column_max_abs(input.x());
-    let (ssr_entity, df_entity) = between_ssr_and_df(
+    let entity_fit = between_regression(
         &entity_mean_stats,
         &x_scales,
         input.x_names(),
         BetweenMeans::Entity,
+        None,
     )?;
-    let (ssr_time, df_time) =
-        between_ssr_and_df(&time_means, &x_scales, input.x_names(), BetweenMeans::Time)?;
+    let time_fit = between_regression(
+        &time_means,
+        &x_scales,
+        input.x_names(),
+        BetweenMeans::Time,
+        None,
+    )?;
     let n_periods = time.n_groups() as f64;
     let n_entities = entity.n_groups() as f64;
-    let sigma2_u = (ssr_entity / df_entity as f64 - sigma2_eps / n_periods).max(0.0);
-    let sigma2_lambda = (ssr_time / df_time as f64 - sigma2_eps / n_entities).max(0.0);
+    let sigma2_u = (entity_fit.ssr / entity_fit.df_resid as f64 - sigma2_eps / n_periods).max(0.0);
+    let sigma2_lambda =
+        (time_fit.ssr / time_fit.df_resid as f64 - sigma2_eps / n_entities).max(0.0);
 
     Ok(VarianceComponents {
         sigma2_eps,
@@ -203,8 +205,26 @@ fn two_way_variance_components(
     })
 }
 
-/// between回帰（個体平均または時点平均の`[1, x̄]`への最小二乗）の残差平方和と
-/// 残差自由度`n_units - K_b - 1`。1-way・2-wayで共有する。
+/// between回帰（`between_regression`）の結果。
+#[derive(Debug)]
+struct BetweenFit {
+    /// 残差平方和。重み付きなら`Σ w_i ê_i²`（1-wayは`Q_id = Σ T_i ē_i²`）。
+    ssr: f64,
+    /// 残差自由度`n_units - p`（`p = K_b + 1`は切片込みの列数、落とした列は数えない）。
+    df_resid: usize,
+    /// `Σ w_i h_i`（`h_i`は重み付き設計行列のレバレッジ）。重みが`T_i`のとき
+    /// `tr(B⁻¹S)`（`B = Σ T_i z̄_i z̄_i'`、`S = Σ T_i² z̄_i z̄_i'`）に等しく、不均衡1-wayの
+    /// Swamy-Aroraのトレース形の分母`O - tr(B⁻¹S)`に使う。重みなしなら`p`。
+    weighted_leverage: f64,
+    /// 重みの和`Σ w_i`（1-wayは総観測数`O`）。重みなしなら単位数。
+    total_weight: f64,
+}
+
+/// between回帰（個体平均または時点平均の`[1, x̄]`への最小二乗）。1-way・2-wayで共有する。
+///
+/// `weights`を渡すと各単位を`w_i`で重み付けした最小二乗（行を`√w_i`倍した設計行列のQR）にする。
+/// 1-wayは`T_i`を渡し、個体平均を観測レベルに展開したプールドOLSと同じ当てはめになる
+/// （`plm`の`swar`の`Between`モデル、`re-spec.md`3.1節）。2-way（バランスパネル）は重みなし。
 ///
 /// 平均が単位間でほぼ一定の列（バランスパネルで個体平均が一定になる、時点間でのみ変わる列等）は
 /// 切片と共線になるため落とし、`K_b`にも数えない（`plm`と同じ、`two_way_variance_components`のdoc参照）。
@@ -215,18 +235,20 @@ fn two_way_variance_components(
 /// 一定の列を落とした後、残りの列の線形結合になっている列も落とす（`plm`の`lm`と同じ、
 /// `independent_columns_in_order`の規則: 列順で前の列に従属する列、許容誤差`1e-7`）。個体平均を
 /// 説明変数に加える相関ランダム効果（Mundlak）の指定では、`x`と`x̄`の個体平均が同じ列になる。
-/// どちらを落としても残差平方和とランクは変わらないため`σ_u²`は同じで、後ろの列を落とす。
+/// どちらを落としても残差平方和・ランク・レバレッジは変わらないため`σ_u²`は同じで、後ろの列を落とす。
+/// 列の選別は重みによらない（正の重みは列のランクを変えない）。
 ///
 /// # Errors
 /// 単位数が`K_b + 1`以下なら`PanelError::BetweenRegressionFailed`（`kind`が個体平均・時点平均の
 /// どちらの回帰かを持つ）。別名の列を落とした後の設計行列が特異になることは通常無い（相対`1e-7`で落とすので、
 /// `OrthonormalDesign::new_checked`のランク判定（等化した`R`に対する相対`k·ε`）より手前で落とす）が、非有限値などで失敗したときも同じバリアントで返す。
-fn between_ssr_and_df(
+fn between_regression(
     means: &EntityMeans,
     x_scales: &[f64],
     x_names: &[String],
     kind: BetweenMeans,
-) -> Result<(f64, usize), PanelError> {
+    weights: Option<&[f64]>,
+) -> Result<BetweenFit, PanelError> {
     let n_units = means.y.len();
     let max_terms = means.t.iter().fold(0.0_f64, |acc, &t| acc.max(t));
     let non_constant: Vec<usize> = (0..means.x.len())
@@ -251,10 +273,15 @@ fn between_ssr_and_df(
             }),
         });
     }
+    let root_weights: Vec<f64> = match weights {
+        Some(w) => w.iter().map(|v| v.sqrt()).collect(),
+        None => vec![1.0; n_units],
+    };
     let design_matrix = Mat::from_fn(n_units, n_params, |i, j| {
-        if j == 0 { 1.0 } else { means.x[kept[j - 1]][i] }
+        let value = if j == 0 { 1.0 } else { means.x[kept[j - 1]][i] };
+        value * root_weights[i]
     });
-    let y = Mat::from_fn(n_units, 1, |i, _| means.y[i]);
+    let y = Mat::from_fn(n_units, 1, |i, _| means.y[i] * root_weights[i]);
     // 別名の列は上で落としてあり、残りは前の列に対する
     // 相対残差が`1e-7`より大きいので、ここで特異と判定される入力は通常無い（防御的なエラー）。
     let design = OrthonormalDesign::new_checked(&design_matrix).map_err(|err| {
@@ -267,7 +294,22 @@ fn between_ssr_and_df(
         }
     })?;
     let residuals = design.residuals(&y, &design.coordinates(&y));
-    Ok((residual_sum_of_squares(&residuals), n_units - n_params))
+    let weighted_leverage = match weights {
+        Some(w) => design
+            .row_leverages()
+            .iter()
+            .zip(w)
+            .map(|(h, w)| h * w)
+            .sum(),
+        None => n_params as f64,
+    };
+    let total_weight = weights.map_or(n_units as f64, |w| w.iter().sum());
+    Ok(BetweenFit {
+        ssr: residual_sum_of_squares(&residuals),
+        df_resid: n_units - n_params,
+        weighted_leverage,
+        total_weight,
+    })
 }
 
 /// 各説明変数の元の列（単位平均ではなく観測値）の最大絶対値。between回帰の一定判定
@@ -370,20 +412,19 @@ fn one_way_variance_components(
         .sum();
     let sigma2_eps = ssr_within / fe.df_resid() as f64;
 
-    // σ_u²: between回帰（エンティティ平均、切片あり）。平均が単位間で一定の列（バランスパネルで
-    // 時点間でのみ変わる列等）は切片と共線になるため、2-wayと同じく落として`K_b`にも数えない
-    // （`between_ssr_and_df`、`plm`と同じ）。
+    // σ_u²: 観測数`T_i`で重み付けしたbetween回帰（エンティティ平均、切片あり）とトレース形
+    // （`plm`の`swar`、`dfcor = 3`）。平均が単位間で一定の列（バランスパネルで時点間でのみ
+    // 変わる列等）は切片と共線になるため、2-wayと同じく落として`K_b`にも数えない
+    // （`between_regression`、`plm`と同じ）。
     let means = entity_means(input.y(), input.x(), input.entity_codes());
-    let n_entities = means.y.len();
-    let (ssr_between, df_resid_between) = between_ssr_and_df(
+    let between = between_regression(
         &means,
         &column_max_abs(input.x()),
         input.x_names(),
         BetweenMeans::Entity,
+        Some(&means.t),
     )?;
-
-    let t_bar = n_entities as f64 / means.t.iter().map(|t_i| 1.0 / t_i).sum::<f64>();
-    let sigma2_u = (ssr_between / df_resid_between as f64 - sigma2_eps / t_bar).max(0.0);
+    let sigma2_u = one_way_sigma2_u(&between, sigma2_eps);
 
     Ok(VarianceComponents {
         sigma2_eps,
@@ -393,6 +434,24 @@ fn one_way_variance_components(
         means,
         time_varying,
     })
+}
+
+/// 1-wayのσ_u²（`plm`の`swar`のトレース形、`re-spec.md`3.1節）。
+///
+/// `M·(σ_ε², σ_u²)ᵀ = (Q_w, Q_id)ᵀ`の2行目
+/// `(N - p)·σ_ε² + (O - tr(B⁻¹S))·σ_u² = Q_id`を、1行目で求めた`σ_ε²`で解き、負なら0にする。
+/// `Q_id`は`T_i`重み付きbetween回帰の残差平方和、`tr(B⁻¹S) = Σ T_i h_i`、`O = Σ T_i`
+/// （どれも`between`が同じ重みから求めた値）。
+///
+/// 全個体の観測数が等しい（`T_i = T`）と`O - tr(B⁻¹S) = T(N - p)`・`Q_id = T·SSR_b`で、
+/// バランスパネルの簡約形`SSR_b/(N - p) - σ_ε²/T`（`linearmodels`・`plm`の`dfcor = 2`）に
+/// 代数的に一致する。そのためバランス・不均衡で式を切り替えない。分母は`N > p`なら正
+/// （`h_i ≤ 1`・`Σ h_i = p`から、`Σ T_i h_i`は大きい方から`p`個の`T_i`の和を超えない）。
+fn one_way_sigma2_u(between: &BetweenFit, sigma2_eps: f64) -> f64 {
+    let numerator = between.ssr - sigma2_eps * between.df_resid as f64;
+    let denominator = between.total_weight - between.weighted_leverage;
+    debug_assert!(denominator > 0.0, "O - Σ T_i h_i = {denominator}");
+    (numerator / denominator).max(0.0)
 }
 
 #[cfg(test)]

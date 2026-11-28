@@ -9,7 +9,8 @@ Python・R実装は`plm`（`random.method = "walhus"`・`"amemiya"`）しか無�
 `ercomp`の分散成分で、係数・標準誤差・t・p値・信頼区間・F統計量・ハウスマン検定は既存の
 plmスクリプト（1-wayは`run_plm_benchmark.R`・`run_plm_hausman_tilde_benchmark.R`、
 2-wayは`run_plm_re_two_way_benchmark.R`）に環境変数`PLM_RANDOM_METHOD`で推定法を渡して得る。
-Swamy-Aroraの値は`re_time_invariant.json`・`re_two_way.json`が持つため、ここには含めない。
+Swamy-Aroraは、不均衡の1-way（`linearmodels`は不均衡パネルでσ_u²の式が違い、plmが主参照）と
+相関ランダム効果のケースだけ含める（他の入力は`re_time_invariant.json`・`re_two_way.json`が持つ）。
 
 ## 推定法ごとの入力の制約（plmの挙動）
 
@@ -31,8 +32,11 @@ cluster・dk）、それ以外はclassicalとclusterだけを持つ（手計算�
 - 個体効果なし・時点効果なしのDGP（`re_no_entity_effect`・`re_no_time_effect`）は、推定した
   `σ_u²`・`σ_λ²`が負になり0に切り上げられる入力（θ=0、GLSがプールドOLSに退化）。
 - `ow_equal_counts_shifted_time`は全個体の観測数が同じで時点がずれたパネル。plmは時点集合も
-  同じことを要求してトレース形を使うため、本実装（閉形式）と値が異なる。plmとの一致は比べず
-  （`Case.differs_from_plm`）、差そのものをテストが固定する。
+  同じことを要求してトレース形を使うため、Wallace-Hussain・Amemiyaは本実装（閉形式）と値が
+  異なる。plmとの一致は比べず（`Case.differs_from_plm`）、差そのものをテストが固定する。
+  Swamy-Arora（`ow_equal_counts_shifted_time_swamy_arora`）はトレース形と閉形式が一致するので
+  plmと比べる。
+- 不均衡の1-wayのケースは`swamy_arora`も持ち、plmの`swar`（`dfcor = 3`のトレース形）と比べる。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_re_variance_method_fixtures
@@ -68,9 +72,9 @@ from benchmark.panel.references.r import (
 )
 
 METHODS = ["wallace_hussain", "amemiya"]
-# `variance_method`の値 -> plmの`random.method`。`swamy_arora`は、バランスパネルの相関ランダム効果
-# （Mundlak型）のケースだけが持つ（Swamy-Aroraの他の入力は`re_time_invariant.json`・
-# `re_two_way.json`の担当）。
+# `variance_method`の値 -> plmの`random.method`。`swamy_arora`は、不均衡の1-wayのケース（plmの
+# `swar`のトレース形と比べる）と、バランスパネルの相関ランダム効果（Mundlak型）のケースが持つ
+# （Swamy-Aroraのバランスパネルの他の入力は`re_time_invariant.json`・`re_two_way.json`の担当）。
 PLM_RANDOM_METHOD = {
     "swamy_arora": "swar",
     "wallace_hussain": "walhus",
@@ -110,8 +114,10 @@ class Case:
     # 個体平均の回帰・ハウスマン補助回帰で別名と判定する許容誤差（相対`1e-7`）の両側を、plmの
     # `lm`と比べるために使う。`(列名, scale)`の組。
     near_means: tuple[tuple[str, float], ...] = ()
-    # plmのフィクスチャを持たず、手計算とだけ比べる推定法（plmは不均衡のSwamy-Aroraを
-    # linearmodels準拠の本実装と別の式で推定するため、plmとは比べられない）。
+    # plmのフィクスチャを持たず、手計算とだけ比べる推定法。不均衡パネルの相関ランダム効果
+    # （Mundlak型）のSwamy-Aroraは、plmが`dfcor = 3`のトレース形の`(Z_B'Z_B)⁻¹`（`x`と`x̄`の
+    # 個体平均が同じ列になる）で`system is computationally singular`になり推定できない。
+    # 本実装は別名の列を落として推定する。
     hand_only_methods: tuple[str, ...] = ()
     # `AMEMIYA_REJECTED_CASES`で、`ValidationError`のメッセージに載る列名（", "区切り）。
     rejected_columns: str = ""
@@ -137,6 +143,8 @@ BOTH = tuple(METHODS)
 WALHUS = ("wallace_hussain",)
 # バランスパネルのMundlak型（Amemiyaは時間不変の個体平均の列を拒否する）。
 SWAR_WALHUS = ("swamy_arora", "wallace_hussain")
+# 不均衡の1-way（3法ともplmのトレース形）。
+ALL_METHODS = ("swamy_arora", *METHODS)
 
 ONE_WAY_CASES = [
     Case("ow_baseline", "fe_baseline", ("x1", "x2"), BOTH, full=True),
@@ -163,12 +171,14 @@ ONE_WAY_CASES = [
         WALHUS,
         hausman=False,
     ),
-    Case("ow_unbalanced", "fe_unbalanced", ("x1", "x2"), BOTH, full=True),
+    Case(
+        "ow_unbalanced", "fe_unbalanced", ("x1", "x2"), ALL_METHODS, full=True
+    ),
     Case(
         "ow_time_invariant_unbalanced",
         "fe_time_invariant_unbalanced",
         ("x1", "x2", "x_invariant"),
-        WALHUS,
+        SWAR_WALHUS,
         full=True,
     ),
     # T_iが2〜10に偏る極端な不均衡（トレース項の効きが大きい）。
@@ -176,21 +186,21 @@ ONE_WAY_CASES = [
         "ow_multi_unbalanced",
         "fe_time_invariant_multi_unbalanced",
         ("x1", "x2", "x3"),
-        BOTH,
+        ALL_METHODS,
         full=True,
     ),
     Case(
         "ow_multi_unbalanced_time_invariant",
         "fe_time_invariant_multi_unbalanced",
         ("x1", "x2", "x3", "z1", "z2"),
-        WALHUS,
+        SWAR_WALHUS,
         full=True,
     ),
     Case(
         "ow_nearly_balanced",
         "fe_time_only_nearly_balanced",
         ("x1", "x2", "trend"),
-        BOTH,
+        ALL_METHODS,
         full=True,
     ),
     Case(
@@ -222,7 +232,7 @@ ONE_WAY_CASES = [
         "ow_no_entity_effect_unbalanced",
         "re_no_entity_effect_unbalanced",
         ("x1", "x2"),
-        BOTH,
+        ALL_METHODS,
         full=True,
     ),
     # 個体平均を説明変数に加える相関ランダム効果（Mundlak型）。between回帰では`x1`と`x1_bar`の
@@ -301,6 +311,14 @@ ONE_WAY_CASES = [
         ("x1", "x2"),
         BOTH,
         differs_from_plm=True,
+    ),
+    # 同じパネルのSwamy-Arora。トレース形が観測数の等しいパネルで閉形式に一致するため、
+    # plm（トレース形）と一致する（Wallace-Hussain・Amemiyaのような値の差が無い）。
+    Case(
+        "ow_equal_counts_shifted_time_swamy_arora",
+        "re_equal_counts_shifted_time",
+        ("x1", "x2"),
+        ("swamy_arora",),
     ),
 ]
 
@@ -666,8 +684,8 @@ def build_fixtures() -> dict:
             "benchmark/panel/references/run_plm_re_two_way_benchmark.R",
         ],
         "note": (
-            "variance_method（Wallace-Hussain・Amemiya。バランスの相関ランダム効果のケースだけ"
-            "Swamy-Arora）の単一リファレンスplm。"
+            "variance_method（Wallace-Hussain・Amemiya。不均衡の1-wayとバランスの相関ランダム効果の"
+            "ケースはSwamy-Aroraも）の単一リファレンスplm。"
             "分散成分はercompの値、係数・標準誤差・F統計量はplmの値、t値・p値・信頼区間は"
             "run_plm_benchmark.R・run_plm_re_two_way_benchmark.Rと同じ規約（t分布）で"
             "計算し直した値、ハウスマン検定はphtest(method='aux')の補助回帰を再現して"

@@ -115,11 +115,14 @@ pub struct REOptions {
     /// Estimator of the variance components `σ_ε²`, `σ_u²` (and `σ_λ²`
     /// for two-way effects), one of "swamy_arora" (default), "wallace_hussain", "amemiya"
     /// (case-insensitive; `plm`'s `random.method` "swar", "walhus", "amemiya"). Applies to
-    /// one-way and two-way effects alike. "swamy_arora" on an unbalanced one-way panel is the
-    /// `linearmodels` estimator, which differs from `plm`'s; "wallace_hussain" and "amemiya" follow
-    /// `plm` (closed forms on a balanced panel, the trace-term forms on an unbalanced one-way
-    /// panel). "amemiya" raises `ValidationError` when a regressor has no within variation
-    /// (time-invariant; for two-way effects, varying in at most one dimension).
+    /// one-way and two-way effects alike. All three follow `plm`: "swamy_arora" uses one
+    /// formula for balanced and unbalanced one-way panels (on a balanced panel it equals the
+    /// `linearmodels` estimator); "wallace_hussain" and "amemiya" use closed forms on a balanced
+    /// panel and the trace-term forms on an unbalanced one-way panel (`plm` uses the trace-term
+    /// forms whenever the entities are not observed in the same periods, so the two differ on a
+    /// one-way panel with equal counts but different periods). "amemiya" raises
+    /// `ValidationError` when a regressor has no within variation (time-invariant; for two-way
+    /// effects, varying in at most one dimension).
     #[pyo3(get)]
     pub variance_method: String,
 }
@@ -304,8 +307,9 @@ pub struct REResult {
     #[pyo3(get)]
     pub sigma2_eps: f64,
     /// Estimated variance of the entity effect, `σ_u²` (a negative estimate is raised to
-    /// 0). Swamy-Arora on an unbalanced panel is the `linearmodels` estimator, which differs
-    /// from `plm`'s.
+    /// 0). The three `variance_method` estimators follow `plm` on balanced panels and on
+    /// unbalanced one-way panels; Swamy-Arora on an unbalanced one-way panel weights the between
+    /// regression by the number of observations per entity and differs from `linearmodels`.
     #[pyo3(get)]
     pub sigma2_u: f64,
     /// Estimated variance of the time effect, `σ_λ²`, for two-way effects (a negative
@@ -372,7 +376,8 @@ pub struct REResult {
     /// `0.0` when no regressor varies after demeaning.
     #[pyo3(get)]
     pub r_squared_within: f64,
-    /// Between R² (entity means, with the intercept).
+    /// Between R² (entity means, with the intercept, each entity weighted by its number of
+    /// observations).
     #[pyo3(get)]
     pub r_squared_between: f64,
     /// Overall R² (untransformed variables, with the intercept).

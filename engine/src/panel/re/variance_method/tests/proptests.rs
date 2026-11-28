@@ -84,6 +84,7 @@ fn one_way_case() -> impl Strategy<Value = Case> {
 
 fn method_strategy() -> impl Strategy<Value = VarianceMethod> {
     prop_oneof![
+        Just(VarianceMethod::SwamyArora),
         Just(VarianceMethod::WallaceHussain),
         Just(VarianceMethod::Amemiya)
     ]
@@ -107,7 +108,11 @@ fn sigma(input: &ReInput, method: VarianceMethod) -> Option<(f64, f64)> {
 
 /// `plm::ercomp`（`dfcor = 3`）のソースどおりに、`Z`の`Between`・`Sum`・within変換を
 /// 観測ごとの行列に展開して`M`を組んだ参照実装（`variance_components`が使う
-/// エンティティ単位の外積による実装とは独立）。不均衡の1-way専用。
+/// エンティティ単位の外積・重み付きQRのレバレッジによる実装とは独立）。不均衡の1-way専用。
+///
+/// `swar`は`models = c("within", "Between")`: `Q_w`はwithin回帰の残差平方和で`M_w,ν = O − N − K`、
+/// `Q_id`は観測に展開した個体平均`ȳ_i`を`Z_B`（`Z`の`Between`）にプールドOLSで当てはめた残差
+/// 平方和で`M_id,ν = N − K − 1`・`M_id,η = O − tr((Z_B'Z_B)⁻¹ Z_S'Z)`（`M_w,η = 0`）。
 fn observation_level_trace_form(case: &Case, method: VarianceMethod) -> (f64, f64) {
     let n = case.y.len();
     let n_ent = case.n_entities;
@@ -131,9 +136,41 @@ fn observation_level_trace_form(case: &Case, method: VarianceMethod) -> (f64, f6
     let z_sum = Mat::from_fn(n, p, |r, j| z_means[j][idx[r]] * counts[idx[r]]);
     let z_within = Mat::from_fn(n, p, |r, j| *z.get(r, j) - z_means[j][idx[r]]);
     let gram = |a: &Mat<f64>, b: &Mat<f64>| a.transpose() * b;
+    let tr = |m: &Mat<f64>| -> f64 { (0..m.nrows()).map(|i| *m.get(i, i)).sum() };
+    let (big_o, big_n) = (n as f64, n_ent as f64);
 
     // 1段目の残差。
     let y_means = entity_mean(&|r| case.y[r]);
+    if method == VarianceMethod::SwamyArora {
+        let wx = Mat::from_fn(n, k, |r, j| *z_within.get(r, j + 1));
+        let wy = Mat::from_fn(n, 1, |r, _| case.y[r] - y_means[idx[r]]);
+        let beta_w = crate::shared::covariance::xtx_inverse(&wx).unwrap() * gram(&wx, &wy);
+        let q_w: f64 = (0..n)
+            .map(|r| {
+                (*wy.get(r, 0)
+                    - (0..k)
+                        .map(|j| *wx.get(r, j) * *beta_w.get(j, 0))
+                        .sum::<f64>())
+                .powi(2)
+            })
+            .sum();
+        let sigma2_eps = q_w / (big_o - big_n - k as f64);
+        let yb = Mat::from_fn(n, 1, |r, _| y_means[idx[r]]);
+        let inv_b = crate::shared::covariance::xtx_inverse(&z_between).unwrap();
+        let beta_b = &inv_b * gram(&z_between, &yb);
+        let q_id: f64 = (0..n)
+            .map(|r| {
+                (*yb.get(r, 0)
+                    - (0..p)
+                        .map(|j| *z_between.get(r, j) * *beta_b.get(j, 0))
+                        .sum::<f64>())
+                .powi(2)
+            })
+            .sum();
+        let m_id_eta = big_o - tr(&(&inv_b * gram(&z_sum, &z)));
+        let sigma2_u = (q_id - sigma2_eps * (big_n - k as f64 - 1.0)) / m_id_eta;
+        return (sigma2_eps, sigma2_u);
+    }
     let e: Vec<f64> = match method {
         VarianceMethod::WallaceHussain => {
             let inv = crate::shared::covariance::xtx_inverse(&z).unwrap();
@@ -169,8 +206,6 @@ fn observation_level_trace_form(case: &Case, method: VarianceMethod) -> (f64, f6
     let q_w: f64 = (0..n).map(|r| (e[r] - e_means[idx[r]]).powi(2)).sum();
     let q_id: f64 = (0..n).map(|r| e_means[idx[r]].powi(2)).sum();
 
-    let tr = |m: &Mat<f64>| -> f64 { (0..m.nrows()).map(|i| *m.get(i, i)).sum() };
-    let (big_o, big_n) = (n as f64, n_ent as f64);
     let (a, b, c, d) = match method {
         VarianceMethod::WallaceHussain => {
             let inv = crate::shared::covariance::xtx_inverse(&z).unwrap();
@@ -216,7 +251,9 @@ proptest! {
     /// 有効性の確認（`pooled_trace_moments`・`within_trace_moments`へのバグ注入、確認後に
     /// 元へ戻した）: `W`と`S`の取り違え・`M_id,η`の係数のずれ・`M_id,ν`の`-1`の欠落・
     /// `Σ T_i²`の割る数のずれ・`M_w,ν`のトレース項の取り違えのすべてを本テストが検出する
-    /// （不変性のテストは、式が一貫して誤っていても通るため検出できない）。
+    /// （不変性のテストは、式が一貫して誤っていても通るため検出できない）。Swamy-Arora
+    /// （`variance.rs`の`between_regression`・`one_way_sigma2_u`）は、between回帰の重みを外す・
+    /// 分母の`Σ T_i h_i`を定数に置き換えるのどちらも本テストが検出する。
     #[test]
     fn trace_forms_match_the_observation_level_reference(
         case in one_way_case(),

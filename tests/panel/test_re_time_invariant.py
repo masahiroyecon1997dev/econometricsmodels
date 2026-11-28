@@ -8,19 +8,18 @@ FEでは識別できず拒否されるが、REでは識別できる（`re-spec.m
 
 1. **手計算（`_hand_computed`）と本実装の照合（全統計量・全`cov_type`、機械精度）**。
    `re-spec.md`3章の手順を本実装を呼ばずに書き下したもの。σ_ε²はwithin回帰の残差平方和を
-   `n - N - k_tv`で割り、σ_u²はentity平均へのbetween回帰（`linearmodels`準拠）から求め、
+   `n - N - k_tv`で割り、σ_u²は`T_i`で重み付けしたentity平均へのbetween回帰と`plm`の`swar`の
+   トレース形（`dfcor = 3`、バランスパネルでは簡約形と一致）から求め、
    θで準偏差変換した回帰を当てる。共分散はstatsmodelsの`OLS`（classical・HC1〜HC3・
    cluster）と、numpyで書いたDriscoll-Kraay（Bartlett、`re-spec.md`3.4節）。ハウスマン検定は
    `y*`を`[1, X*, X̃]`に回帰して`X̃`の係数をWald検定する。バランス・不均衡、時間不変列が
    1本・複数、`k_tv`が1・`k-1`、全列が時間不変（plmが`empty model`で失敗する入力）を含む。
-2. **plmとの照合**。plmの変量効果は、不均衡パネルではσ_u²の推定（between回帰の重み付け）が
-   本実装（`linearmodels`準拠）と異なり、時間不変変数の係数はbetween変動だけで決まるため
-   差が大きく出る（極端な不均衡では係数で10％超）。そのため、
-   - バランスパネル（合成データ・wagepan実データ）は本実装を直接plmと機械精度で比較する。
-   - 不均衡パネルは、plmが推定した`σ_ε²`・`σ_u²`を手計算のGLSに与え、plmの係数・
-     標準誤差・t・p値・信頼区間・F統計量・ハウスマン検定と機械精度で一致することを確認する
-     （手計算の実装がplmと同じ推定量を計算していることの検証）。差の原因がσ_u²の定義だけで
-     あることもここで確かめられる。σ_ε²は本実装の定義とplmで完全に一致する。
+2. **plmとの照合**。本実装の分散成分はplmと同じ式なので、バランス・不均衡パネル
+   （合成データ・wagepan実データ）とも本実装を直接plmと機械精度で比較する（時間不変変数の
+   係数はbetween変動だけで決まるため、不均衡パネルのσ_u²の式の違いが大きく出る入力でもある）。
+   加えて、plmが推定した`σ_ε²`・`σ_u²`を手計算のGLSに与え、plmの係数・標準誤差・t・p値・
+   信頼区間・F統計量・ハウスマン検定と機械精度で一致することも確認する（分散成分から先の
+   手計算がplmと同じ推定量を計算していることの検証）。
 3. **R²（between/overall）**: `linearmodels`が使えず、plmに相当する統計量が無いため、plmの係数から
    定義どおりに計算した値と比較する（`re-spec.md`5章）。
 
@@ -95,8 +94,6 @@ ONE_DIM = "one_dimensional_regressors"
 ABSOLUTE_YEAR = "absolute_year_regressor"
 NEARLY_BALANCED = "time_only_nearly_balanced"
 SMALL_HAND = "small_hand_time_only"
-# plmと機械精度で一致するバランスパネル（σ_u²の定義の差が無い）。
-BALANCED_SCENARIOS = [BALANCED, ONE_DIM, ABSOLUTE_YEAR, SMALL_HAND]
 # 絶対年（1990〜）の列を含む入力は、本実装もplmも丸め誤差を失う（`_tolerances.py`）。
 ABSOLUTE_YEAR_SCENARIOS = {ABSOLUTE_YEAR, "wagepan_trend"}
 
@@ -228,11 +225,11 @@ def test_matches_hand_computed(scenario, x_cols, cov_type):
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("scenario", BALANCED_SCENARIOS)
-def test_balanced_matches_plm(reference, scenario, cov_type):
-    """バランスパネルは分散成分の差が無く、本実装がplmと機械精度で一致する
-    （係数・標準誤差・t・p値・信頼区間・F統計量とそのp値・ハウスマン検定）。
-    時点間でのみ変わる列（`xt`・年）を含む入力も、plmと同じくbetween回帰から落とす。"""
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_matches_plm(reference, scenario, cov_type):
+    """バランス・不均衡パネルとも、本実装がplmと機械精度で一致する（係数・標準誤差・t・
+    p値・信頼区間・F統計量とそのp値・ハウスマン検定）。時点間でのみ変わる列（`xt`・年）を
+    含む入力も、plmと同じくbetween回帰から落とす。"""
     df = _frame(scenario)
     x_cols = SCENARIO_X_COLS[scenario]
     res = _fit(df, x_cols, cov_type)
@@ -249,8 +246,7 @@ def test_hand_computed_with_plm_variance_components_matches_plm(
 ):
     """plmが推定した`σ_ε²`・`σ_u²`を手計算のGLSに与えると、不均衡パネルを含め、
     plmの係数・標準誤差・t・p値・信頼区間・F統計量・ハウスマン検定と機械精度で
-    一致する。本実装とplmの不均衡パネルでの差が、分散成分（σ_u²の定義）だけで
-    あることの確認でもある。"""
+    一致する（分散成分から先の手計算がplmと同じ推定量であることの確認）。"""
     df = _frame(scenario)
     x_cols = SCENARIO_X_COLS[scenario]
     ref = reference["synthetic"][scenario]
@@ -266,25 +262,27 @@ def test_hand_computed_with_plm_variance_components_matches_plm(
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
-def test_sigma2_eps_matches_plm(reference, scenario):
-    """σ_ε²（within回帰の残差分散、自由度`n - N - k_tv`）はplmと完全に一致する
-    （σ_u²は不均衡パネルで定義が異なる）。"""
+def test_hand_computed_variance_components_match_plm(reference, scenario):
+    """手計算のσ_ε²（within回帰の残差分散、自由度`n - N - k_tv`）とσ_u²（`plm`の`swar`の
+    トレース形）がplmと一致する。"""
     df = _frame(scenario)
     hand = _hand_computed(df, SCENARIO_X_COLS[scenario])
-    assert_close(
-        hand["sigma2_eps"],
-        reference["synthetic"][scenario]["classical"]["sigma2_eps"],
-        f"{scenario}/sigma2_eps",
-        rtol=RTOL,
-        atol=ATOL,
-    )
+    ref = reference["synthetic"][scenario]["classical"]
+    for name in ("sigma2_eps", "sigma2_u"):
+        assert_close(
+            hand[name],
+            ref[name],
+            f"{scenario}/{name}",
+            rtol=RTOL,
+            atol=ATOL,
+        )
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_exposed_variance_components_match_plm(reference, scenario):
-    """公開する`sigma2_eps`はplmと一致し、`sigma2_u`・`theta`はバランスパネルで
-    plmと一致する（不均衡パネルの`σ_u²`は定義が異なる）。`theta`は
-    `1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`で、plmの`σ²`から計算した値と比べる。"""
+    """公開する`sigma2_eps`・`sigma2_u`・`theta`がバランス・不均衡パネルともplmと一致する。
+    `theta`は`1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`で、plmの`σ²`と各個体の観測数`T_i`から
+    計算した値と比べる。"""
     df = _frame(scenario)
     res = _fit(df, SCENARIO_X_COLS[scenario], "classical")
     ref = reference["synthetic"][scenario]["classical"]
@@ -295,27 +293,32 @@ def test_exposed_variance_components_match_plm(reference, scenario):
         rtol=RTOL,
         atol=ATOL,
     )
-    if scenario in BALANCED_SCENARIOS:
+    assert_close(
+        res.sigma2_u,
+        ref["sigma2_u"],
+        f"{scenario}/sigma2_u",
+        rtol=RTOL,
+        atol=ATOL,
+    )
+    counts = dict(
+        df.group_by("entity")
+        .len()
+        .select(pl.col("entity").cast(pl.String), "len")
+        .iter_rows()
+    )
+    assert set(counts) == set(res.theta)
+    for entity, theta in res.theta.items():
+        t_i = counts[entity]
+        want = 1.0 - np.sqrt(
+            ref["sigma2_eps"] / (t_i * ref["sigma2_u"] + ref["sigma2_eps"])
+        )
         assert_close(
-            res.sigma2_u,
-            ref["sigma2_u"],
-            f"{scenario}/sigma2_u",
+            theta,
+            float(want),
+            f"{scenario}/theta/{entity}",
             rtol=RTOL,
             atol=ATOL,
         )
-        t = df.group_by("entity").len()["len"].unique().to_list()
-        assert len(t) == 1
-        want = 1.0 - np.sqrt(
-            ref["sigma2_eps"] / (t[0] * ref["sigma2_u"] + ref["sigma2_eps"])
-        )
-        for entity, theta in res.theta.items():
-            assert_close(
-                theta,
-                float(want),
-                f"{scenario}/theta/{entity}",
-                rtol=RTOL,
-                atol=ATOL,
-            )
 
 
 WAGEPAN_VARIANTS = [

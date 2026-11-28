@@ -216,15 +216,26 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_p_value": 1e-6,
     },
     # REのcluster（t検定の自由度`G-1`）のstatsmodelsクロスチェック。plmの準偏差変換
-    # 済みデータにstatsmodelsのOLS（cluster、use_t=True）を当てるため、バランス
-    # パネルでは本実装と機械精度で一致する（`benchmark/panel/references/
+    # 済みデータにstatsmodelsのOLS（cluster、use_t=True）を当てるため、バランス・
+    # 不均衡パネルとも本実装と機械精度で一致する（`benchmark/panel/references/
     # statsmodels_ref.py`参照）。実測最大相対誤差: params 2.4e-13・std_errors 4.1e-13・
-    # p値 6.0e-12。p値は絶対誤差の下限なしの相対誤差のみで比較する。
+    # p値 6.0e-12（不均衡パネルはそれぞれ6e-15・3e-15・3e-13）。p値は絶対誤差の下限なしの相対誤差のみで比較する。
     # `rtol_p_value`はF p値の裾での増幅に備え`fe_crosscheck`と揃えた値。
     "re_statsmodels_cluster": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
         "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # 不均衡パネルの1-way REの、plmの分散成分を与えた密な`Ω`のstatsmodels `GLS`との
+    # クロスチェック（`tests/panel/test_re_gls.py`、`generate_re_gls_fixtures.py`）。
+    # 白色化の違い（Cholesky分解と準偏差変換）は個体ごとの直交変換だけで、係数・classical・
+    # 個体クラスターの共分散は数学的に同じ。実測最大相対誤差: params 4e-14・
+    # std_errors 1e-14・t統計量 5e-14・p値 1e-12・conf_int 1e-11（0に近い端点）・
+    # F統計量 8e-15・F p値 3e-13・σ_u² 2e-15。p値は絶対誤差の下限なしの相対誤差のみで比較する。
+    "re_gls": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
         "rtol_p_value": 1e-6,
     },
     # REのRクロスチェックはplm（全cov_type、hc2/hc3・cluster/dkとハウスマン検定は
@@ -233,14 +244,13 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     "re_crosscheck": {
         # 標準誤差・推論統計量・F統計量は全シナリオ機械精度で比較する。cluster/dkの
         # `G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い許容誤差では
-        # 補正式の取り違えを検出できない。unbalancedでは、plmのSwamy-Arora分散成分が
-        # linearmodels準拠の本実装と異なる（plm自身のREとの実測最大相対誤差:
-        # params 0.18%・std_errors 0.71%・test_stats 0.67%・p_values 0.56%・
-        # conf_int 1.05%、dkのバンド幅0ではconf_int 12.3%）ため、参照値は
-        # plm自身のREではなく、linearmodelsの分散成分を与えたplm
-        # （`run_plm_re_given_variance_benchmark.R`）にして揃える。unbalancedの
-        # 実測最大相対誤差（全cov_type）: std_errors 5e-15・p値 5e-13・conf_int 8e-13・
-        # F統計量 5e-15・F p値 1.5e-13。
+        # 補正式の取り違えを検出できない。unbalancedも、本実装の1-wayのSwamy-Aroraが
+        # plmの`swar`のトレース形と同じ式なので、plm自身のREと比べる。unbalancedの
+        # 実測最大相対誤差（全cov_type・dkのバンド幅0/2/3）: params 4e-15・
+        # std_errors 6e-15・p値 5e-13・conf_int 8e-13・F統計量 2e-14・F p値 2e-13・
+        # 分散成分（`test_variance_components_match_plm`）3e-15。不均衡の実データ
+        # `wagepan_unbalanced`（全cov_type）: params 1e-14・std_errors 2e-14・p値 2e-12・
+        # F統計量 5e-14・ハウスマン統計量 5e-14・σ_u² 2e-15。
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
         # p値（係数・F統計量）は絶対誤差の下限なし。
@@ -251,11 +261,8 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         # バランスパネルでは機械精度一致。
         "rtol_hausman": RTOL_MACHINE_PRECISION,
         "atol_hausman": ATOL_REFERENCE_FLOOR,
-        # unbalancedシナリオも機械精度で比較する。plm自身のphtestは分散成分の差で
-        # 統計量が1〜2%ずれるため、参照値は、linearmodelsの分散成分から補助回帰を
-        # 組み立てたplm（`run_plm_re_given_variance_hausman_benchmark.R`）にして
-        # 揃える。実測最大相対誤差（全cov_type・dkのバンド幅0/2/3）: 統計量 1.4e-14・
-        # p値 8.5e-14。
+        # unbalancedシナリオもplm自身の`phtest`と機械精度で比較する。実測最大相対誤差
+        # （全cov_type・dkのバンド幅0/2/3）: 統計量 9e-15・p値 4e-13。
         #
         # high_condition_numberシナリオ（x1,x2の相関0.999）のみ。検定対象の2係数が準共線で
         # 共分散部分行列がほぼ特異（det/(V00*V11)=6e-5）なため、入力の丸め誤差が条件数倍に
@@ -272,10 +279,9 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     },
     # 時間不変の説明変数を含むREの検証（`tests/panel/test_re_time_invariant.py`）。
     # 本実装と、仕様どおりに書いた独立な手計算（statsmodels・numpy）の比較、
-    # plmが推定した分散成分を与えた手計算とplmの比較、バランスパネル（合成データ・
-    # wagepan）の本実装とplmの比較は、いずれも閉形式の推定量で機械精度で一致する
-    # （実測1e-12程度）。不均衡パネルのplmと本実装はσ_u²の定義が異なり係数で最大
-    # 13%ずれるため、直接は比較しない（テストのモジュールdoc参照）。p値は相対誤差のみ。
+    # plmが推定した分散成分を与えた手計算とplmの比較、バランス（合成データ・
+    # wagepan）・不均衡パネルの本実装とplmの比較は、いずれも閉形式の推定量で機械精度で
+    # 一致する（実測1e-12程度）。p値は相対誤差のみ。
     # `rtol_absolute_year`: 絶対年（1980〜1990年代の値）の列を含む入力（合成データの
     # `absolute_year_regressor`と、時点トレンド`yr`を加えたwagepan）の、丸め誤差が拡大する統計量だけ。他の列とスケールが
     # 3桁異なり丸め誤差が拡大する（`re_two_way`と同じ理由。実測最大 ~8e-8、wagepanの

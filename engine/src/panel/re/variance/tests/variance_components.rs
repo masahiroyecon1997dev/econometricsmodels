@@ -10,16 +10,17 @@ use crate::panel::re::test_support::*;
 use crate::panel::re::transform::compute_two_way_theta;
 use crate::panel::re::variance::VarianceComponents;
 use crate::panel::re::variance::between_column_is_constant;
-use crate::panel::re::variance::between_ssr_and_df;
+use crate::panel::re::variance::between_regression;
 use crate::panel::re::variance::column_max_abs;
 use crate::panel::re::variance::entity_means;
 use crate::panel::re::variance::swamy_arora_variance_components;
 
 #[test]
-fn swamy_arora_variance_components_matches_linearmodels_reference() {
+fn swamy_arora_variance_components_matches_plm_on_unbalanced_panel() {
     // 手動データ（不均衡パネル、entity a: T=3, b: T=2, c: T=2）。
-    // `linearmodels.RandomEffects`（Python）で実地検証済みの値と比較する
-    // （`RandomEffects(y, [const, x1]).fit().variance_decomposition`）。
+    // `plm::ercomp(y ~ x1, method = "swar")`（不均衡なので`dfcor = 3`のトレース形）の
+    // `sigma2`と比較する。`linearmodels`の`variance_decomposition`はσ_u²が調和平均`t_bar`の
+    // 式で異なる（6.537912784161284）。
     // between回帰は切片+傾き1個の2パラメータのため、`n_entities > k+1`（3章参照）を
     // 満たすには最低3エンティティが必要（2エンティティだと`neffects-nvar=0`で
     // 除算不能になることを`linearmodels`自身でも実地確認済み）。
@@ -40,7 +41,7 @@ fn swamy_arora_variance_components_matches_linearmodels_reference() {
         "sigma2_eps = {sigma2_eps}"
     );
     assert!(
-        (sigma2_u - 6.537_912_784_161_284).abs() < 1e-9,
+        (sigma2_u - 6.564_139_941_690_946).abs() < 1e-9,
         "sigma2_u = {sigma2_u}"
     );
 }
@@ -79,24 +80,37 @@ fn between_regression_drops_a_column_that_repeats_an_earlier_one() {
     let without = mundlak_input(&["x1", "x2"], false);
     let stats = |input: &ReInput| {
         let means = entity_means(input.y(), input.x(), input.entity_codes());
-        between_ssr_and_df(
+        between_regression(
             &means,
             &column_max_abs(input.x()),
             input.x_names(),
             BetweenMeans::Entity,
+            Some(&means.t),
         )
         .unwrap()
     };
-    let (ssr_bar, df_bar) = stats(&with_bar);
-    let (ssr, df) = stats(&without);
-    assert_eq!(df_bar, df);
-    assert_close(ssr_bar, ssr, 1e-12, "ssr");
-    assert!(ssr > 0.0);
+    let bar = stats(&with_bar);
+    let plain = stats(&without);
+    assert_eq!(bar.df_resid, plain.df_resid);
+    assert_close(bar.ssr, plain.ssr, 1e-12, "ssr");
+    // 重み付きレバレッジの和（トレース形の分母に入る）も、落とした列によらない。
+    assert_close(
+        bar.weighted_leverage,
+        plain.weighted_leverage,
+        1e-12,
+        "leverage",
+    );
+    assert!(plain.ssr > 0.0);
     // 列順を入れ替えても（落ちる列が`x1`に変わっても）同じ。
-    let reordered = mundlak_input(&["x1bar", "x1", "x2"], false);
-    let (ssr_re, df_re) = stats(&reordered);
-    assert_eq!(df_re, df);
-    assert_close(ssr_re, ssr, 1e-12, "ssr reordered");
+    let reordered = stats(&mundlak_input(&["x1bar", "x1", "x2"], false));
+    assert_eq!(reordered.df_resid, plain.df_resid);
+    assert_close(reordered.ssr, plain.ssr, 1e-12, "ssr reordered");
+    assert_close(
+        reordered.weighted_leverage,
+        plain.weighted_leverage,
+        1e-12,
+        "leverage reordered",
+    );
 }
 
 #[test]
@@ -264,14 +278,15 @@ fn one_way_unbalanced_panel_keeps_time_only_column_in_between_regression() {
     let balanced = subset_input(&(0..24).collect::<Vec<_>>(), &["x1", "xt"], false);
     let df = |input: &ReInput| {
         let means = entity_means(input.y(), input.x(), input.entity_codes());
-        between_ssr_and_df(
+        between_regression(
             &means,
             &column_max_abs(input.x()),
             input.x_names(),
             BetweenMeans::Entity,
+            Some(&means.t),
         )
         .unwrap()
-        .1
+        .df_resid
     };
     assert_eq!(df(&balanced), 4);
     assert_eq!(df(&unbalanced), 3);

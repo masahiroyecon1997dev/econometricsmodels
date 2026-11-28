@@ -1,7 +1,7 @@
 # RE: 不均衡1-wayの`swamy_arora`と`r_squared_between`を`plm`に揃える（設計ノート・たたき台）
 
 対象: GitHub Issue #526。v0.11.0向けで、`release/v0.11.0`で直接作業する。
-状態: 調査完了・方針はユーザー確認済み（3章）。実装は未着手。
+状態: 方針はユーザー確認済み（3章）。実装はほぼ完了（5章の進捗参照）。
 
 ## 1. 調査で確定した事実
 
@@ -80,7 +80,7 @@
 ## 3. 決定事項（2026-11-28 ユーザー確認済み）
 
 1. **`r_squared_between`の重み**: 案A。重み`T_i`・重み付き全体平均`ȳ = Σ T_i ȳ_i / O`で、`SSR_b = Σ T_i(ȳ_i − β̂₀ − x̄_i'β̂)²`、`TSS_b = Σ T_i(ȳ_i − ȳ)²`。分解`Σ(y−ȳ)² = within + Σ T_i(ȳ_i−ȳ)²`と整合し、`linearmodels`の`_prepare_between`の重み`T_i/mean(T)`ともR²は同値（スケール不変）。外部参照が無いため、検証は定義どおりの独立計算のみ（例外としてdocに明記）。
-2. **FEの`r_squared_between`**: 今回はREのみ。FEは`linearmodels`と一致する重みなしのままで、REとの定義の差をdoc（`docs/methods/re.md`・`fe.md`、docstring）に明記する。FEを揃えるかは別Issueで検討する（起票は承認後）。
+2. **FEの`r_squared_between`**: 今回はREのみ。FEは`linearmodels`と一致する重みなしのままで、REとの定義の差をdoc（`docs/methods/re.md`・`fe.md`、docstring）に明記する。FEを揃えるかは別Issue（#697）で検討する。
 3. **2-wayの`r_squared_between`**: バランスのみなので数値は変わらない（同じ関数）。不均衡2-wayでの定義はIssue #527で決める。
 4. **旧式の扱い**: 置き換えのみ。`linearmodels`式は別名で残さない。
 5. **不均衡1-wayの参照**: `plm`を主参照（分散成分・係数・標準誤差・Hausman）とし、**独立のクロスチェックとして`plm`の分散成分を与えた`statsmodels.GLS`（密な`Ω`、小さい`N`）で係数・標準誤差を確かめる**（σ_u²自体の参照は`plm`のみ。手計算オラクルは補助で参照ではない）。GLSの`cov_type`は`statsmodels`が直接対応する範囲（classical・HC系・cluster）を確認して決める。
@@ -92,3 +92,10 @@
 - 不均衡の既存ユーザー向けの数値が変わる破壊的変更（`CHANGELOG`に明記）。
 - given-variance撤去は、参照の質を下げないことを確認してから行う（撤去は最後。置き換え後の`plm`直接比較が機械精度で通ってから）。
 - `statsmodels.GLS`の密な`Ω`はO×Oなので、クロスチェックのフィクスチャは小さいパネル（O ≲ 数百）に限る。
+
+## 5. 進捗（2026-11-28）
+
+- 済: Rust（`between_regression`の重み・トレース形の`one_way_sigma2_u`・重み付き`re_r_squared_between`・doc）、Rustテスト（`plm`値への差し替え、`variance/tests/trace_form.rs`、between R²の分解テスト、不均衡の切り上げ、T_i={2,2,15}の`plm`照合、proptestにSwamy-Arora、バグ注入で検出を確認）、pybind・Pythonのdocstring、オラクル、フィクスチャ（`re.json`・`re_cov.json`はバランスのみ、`re_crosscheck*.json`に不均衡を`plm`直接で＋不均衡の実データ`wagepan_unbalanced`、`re_statsmodels_cluster*.json`に不均衡、新規`re_gls.json`・`re_gls_cov.json`、`re_variance_method*.json`の不均衡1-wayにswamy_arora）、given-variance方式の撤去、許容誤差コメント、仕様書、公開ドキュメント、README・CHANGELOG、ネストCLAUDE.md、#697へのコメント（FEのdocstring）。
+- レビュー: rust・python・testingの3エージェント実施、指摘は反映済み（テスト網羅性の拡張A〜Dはユーザー確認のうえ実施）。
+- GLSで比べられるのはclassicalと個体クラスターだけ（Choleskyの白色化と準偏差変換は個体ごとの直交変換だけ違い、HC1〜HC3は変わる）。
+- 残り: 全体テスト（`--check-cov-coverage`・`--check-no-skips`・`--check-error-coverage`）、`/review-docs`、Issue #526への訂正コメント、コミット。

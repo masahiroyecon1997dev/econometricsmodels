@@ -20,8 +20,8 @@ t統計量・p値・信頼区間とF統計量のp値の自由度（clusterで`G-
 データ上でstatsmodelsにクラスターさせる。クラスター列は元データの行順で
 渡し、`export_re_transformed_r`の`source_row`で変換済みの行に対応づける。
 
-分散成分はplm推定のため、バランスパネルのみを対象にする（不均衡パネルは
-Swamy-Arora分散成分の差が出る）。many_regressorsはREの`fit()`が
+分散成分はplm推定（本実装の1-wayのSwamy-Aroraと同じ式で、不均衡パネルでも一致する）。
+many_regressorsはREの`fit()`が
 `ValidationError`にする（`generate_re_crosscheck_fixtures.py`参照）ため含めない。
 
 使用例（リポジトリルートから）:
@@ -63,10 +63,8 @@ from benchmark.panel.fixtures.generate_fe_fixtures import (
 from benchmark.panel.references.r import export_re_transformed_r
 from benchmark.panel.references.statsmodels_ref import run_re_cluster
 
-# 不均衡パネルはSwamy-Arora分散成分の差が出るため対象外。
-UNBALANCED_SCENARIOS = ["unbalanced"]
 # many_regressorsはREのclusterが構造的に特異でValidationErrorになる。
-EXCLUDED_SCENARIOS = [*UNBALANCED_SCENARIOS, "many_regressors"]
+EXCLUDED_SCENARIOS = ["many_regressors"]
 SCENARIOS = [s for s in NUMERIC_SCENARIOS if s not in EXCLUDED_SCENARIOS]
 
 
@@ -148,8 +146,8 @@ def build_fixtures() -> dict:
             "plmが準偏差変換した応答・設計行列にsm.OLS(...).fit(cov_type="
             "'cluster', use_t=True)を当てた値。クラスターSE・t統計量・p値・"
             "信頼区間と推論の自由度df_resid_inference(=G-1)をstatsmodelsが"
-            "ネイティブに計算する。バランスパネルのみ（不均衡パネルはSwamy-"
-            "Arora分散成分がplmと異なる）。DKのT-1はstatsmodelsに同じ規約が"
+            "ネイティブに計算する。不均衡パネル（unbalanced）も含む（本実装の"
+            "1-wayのSwamy-Aroraはplmのswarと同じ式）。DKのT-1はstatsmodelsに同じ規約が"
             "無く対象外。boundaryはentity以外のクラスター列（不均衡サイズ・行順シャッフル・G=3）。"
         ),
     }

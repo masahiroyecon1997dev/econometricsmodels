@@ -3183,10 +3183,10 @@
   },
   "_meta": {
     "method": "re_time_invariant",
-    "generated_at": "2026-10-12T02:26:17.230483+00:00",
+    "generated_at": "2026-11-28T02:32:19.037982+00:00",
     "reference": "plm (R)",
     "r_version": "4.5.3",
     "plm_version": "2.6.7",
-    "note": "時間不変の説明変数x_invariantを含むREの係数・標準誤差・F統計量はplm（model='random'、swar）の値。linearmodelsは時間不変の列もwithinの自由度に数えるためσ_ε²が食い違い参照にできない。ハウスマン検定はplm::phtest(method='aux')が時間不変変数で検定する係数を取り違えるため、その補助回帰を再現して係数を名前で選んだ独立な手計算（run_plm_hausman_tilde_benchmark.R）の値。time_invariant_unbalancedはplmとlinearmodels準拠の本実装のσ_u²推定の差が不均衡パネルで出る（generate_re_crosscheck_fixtures.py参照）。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。wagepanはmarried/union/expersqに時間不変のeduc/black/hispを加えた実データ（dkは主な統計量の対象外、ハウスマン検定のみdkを含む）。wagepan_trendはさらに時点トレンドyr（year列の複製）を加えた版。時点間でのみ変わる列（年トレンド等）は、バランスパネルではbetween回帰から落ち、ハウスマン検定の補助回帰でもX*とX̃の差が定数になるため検定から外れる（run_plm_hausman_tilde_benchmark.R）。"
+    "note": "時間不変の説明変数x_invariantを含むREの係数・標準誤差・F統計量はplm（model='random'、swar）の値。linearmodelsは時間不変の列もwithinの自由度に数えるためσ_ε²が食い違い参照にできない。ハウスマン検定はplm::phtest(method='aux')が時間不変変数で検定する係数を取り違えるため、その補助回帰を再現して係数を名前で選んだ独立な手計算（run_plm_hausman_tilde_benchmark.R）の値。不均衡パネルも本実装（1-wayのSwamy-Aroraはplmのswarのトレース形）と機械精度で比較する。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。wagepanはmarried/union/expersqに時間不変のeduc/black/hispを加えた実データ（dkは主な統計量の対象外、ハウスマン検定のみdkを含む）。wagepan_trendはさらに時点トレンドyr（year列の複製）を加えた版。時点間でのみ変わる列（年トレンド等）は、バランスパネルではbetween回帰から落ち、ハウスマン検定の補助回帰でもX*とX̃の差が定数になるため検定から外れる（run_plm_hausman_tilde_benchmark.R）。"
   }
 }

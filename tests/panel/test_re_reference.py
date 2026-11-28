@@ -1,9 +1,17 @@
 """RE の主リファレンス（linearmodels）との数値照合。
 
 `tests/fixtures/benchmarks/re.json`（`benchmark/panel/fixtures/
-generate_re_fixtures.py`で生成）を読み込み、合成データの全シナリオ×
-classical/hc1 で、係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で
-厳密比較する。Wooldridge実データ（wagepan）も同じフィクスチャ経由で検証する。
+generate_re_fixtures.py`で生成）を読み込み、合成データのバランスパネルの全シナリオ
+（`BALANCED_SCENARIOS`）×classical/hc1 で、係数・標準誤差・検定統計量・適合度統計量・
+分散成分を相対誤差1e-8で厳密比較する。Wooldridge実データ（wagepan、バランス）も
+同じフィクスチャ経由で検証する。
+
+## 不均衡パネルを含まない理由
+
+不均衡パネルでは、本実装の1-wayのSwamy-Arora（plmの`swar`のトレース形、`T_i`で
+重み付けしたbetween回帰）と`linearmodels`のσ_u²（重みなしのbetween回帰と調和平均）が
+別の推定量になり、θ・係数・標準誤差も変わる。`r_squared_between`も本実装は`T_i`で
+重み付けする。不均衡パネルは`test_re_crosscheck.py`のplmで検証する。
 
 ## cluster/dkを含まない理由
 
@@ -51,8 +59,8 @@ from econometricsmodels import RE, REOptions
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
 from benchmark.panel.fixtures.generate_re_fixtures import (
+    BALANCED_SCENARIOS,
     COV_TYPES,
-    NUMERIC_SCENARIOS,
     WAGEPAN_COV_TYPES,
 )
 
@@ -86,7 +94,6 @@ def _check_result(res, ref: dict, label: str) -> None:
     )
 
     # `f_statistic_robust`（cov_type連動のWald二次形式）と比較する。
-    # classical/hc1ともに不均衡パネルでも機械精度で一致する。
     _assert_fields_close(
         res,
         ref,
@@ -115,7 +122,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
-@pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
+@pytest.mark.parametrize("scenario", BALANCED_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = x_columns(df)

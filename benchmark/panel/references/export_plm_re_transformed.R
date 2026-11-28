@@ -8,8 +8,8 @@
 # 自由度`G-1`の規約を、手計算でない別実装で検証できる
 # （`.claude/rules/testing-policy.md`「リファレンス実装」の優先順位1）。
 #
-# θ（分散成分）はplmの推定値を使うため、不均衡パネルではSwamy-Arora分散
-# 成分の差が出る。バランスパネルで比較すること。
+# θ（分散成分）はplmの推定値を使う（本実装の1-wayのSwamy-Aroraと同じ式で、
+# 不均衡パネルでも一致する）。
 #
 # 使用例:
 #   Rscript export_plm_re_transformed.R data.csv "y ~ x1 + x2" export entity time

@@ -39,16 +39,22 @@ All three methods estimate \(\sigma_\varepsilon^2\), \(\sigma_u^2\) (and \(\sigm
 | `"wallace_hussain"` | Pooled OLS of \(y\) on a constant and all regressors |
 | `"amemiya"` | The within estimator |
 
-**Swamy-Arora.** With \(\bar T\) the harmonic mean of the \(T_i\):
+**Swamy-Arora.** The between regression regresses the entity means \(\bar y_i\) on \(\bar z_i = (1, \bar x_i')'\), weighting entity \(i\) by its number of observations \(T_i\) (the same fit as pooled OLS of \(\bar y_i\) on \(\bar z_i\), repeated for every observation of the entity). With \(Q_{\text{between}} = \sum_i T_i \hat e_i^2\) its weighted sum of squared residuals and \(h_i\) the leverage of entity \(i\) in this weighted regression:
 
 \[
 \hat\sigma_\varepsilon^2 = \frac{\mathrm{SSR}_{\text{within}}}{n - N - k_{tv}}, \qquad
-\hat\sigma_u^2 = \max\Big(0,\ \frac{\mathrm{SSR}_{\text{between}}}{N - K_b - 1} - \frac{\hat\sigma_\varepsilon^2}{\bar T}\Big)
+\hat\sigma_u^2 = \max\Big(0,\ \frac{Q_{\text{between}} - (N - K_b - 1)\,\hat\sigma_\varepsilon^2}{n - \sum_i T_i h_i}\Big)
 \]
 
-where \(k_{tv}\) counts the time-varying regressors (those with within variation) and \(K_b\) the regressors in the between regression. In the two-way model \(\hat\sigma_\varepsilon^2\) uses \(n - N - T + 1 - k_{tv}\), and \(\hat\sigma_u^2\), \(\hat\sigma_\lambda^2\) use the entity-mean and time-mean regressions with \(\sigma_\varepsilon^2/T\) and \(\sigma_\varepsilon^2/N\) subtracted. On an unbalanced one-way panel this is the `linearmodels` formula, which differs from the one in R's `plm` (plm 2.6.7; the difference in \(\sigma_u^2\) depends on how unbalanced the panel is, and was 2.6 % in one test panel).
+where \(k_{tv}\) counts the time-varying regressors (those with within variation) and \(K_b\) the regressors in the between regression. \(\sum_i T_i h_i = \operatorname{tr}(B^{-1}S)\) with \(B = \sum_i T_i \bar z_i \bar z_i'\) and \(S = \sum_i T_i^2 \bar z_i \bar z_i'\). This is the moment equation of R's `plm` (`random.method = "swar"`, which uses this trace-term form on an unbalanced panel). When every entity has the same number of observations \(T\), it reduces to
 
-**Wallace-Hussain and Amemiya** follow `plm` (`random.method = "walhus"` and `"amemiya"`). On a balanced panel (a one-way panel whose entities all have the same number of observations; two-way panels are always balanced) they use closed forms, and on an unbalanced one-way panel the trace-term forms. The closed form (balanced) and the trace-term form (unbalanced one-way) do not give the same value even on a balanced panel, so \(\hat\sigma_\varepsilon^2\) is not continuous when a row is dropped from a balanced panel. These methods are not available for unbalanced two-way panels (the panel is rejected). If the estimated \(\sigma_\varepsilon^2\) is not positive, `fit()` raises an error, whereas plm 2.6.7 sets it to 0 and continues (in a test case with unequal group sizes it then returned `theta = 1` for every entity). `"amemiya"` rejects a regressor without within variation (it would bias \(\sigma_u^2\)); `"wallace_hussain"` and `"swamy_arora"` accept it.
+\[
+\hat\sigma_u^2 = \max\Big(0,\ \frac{\mathrm{SSR}_{\text{between}}}{N - K_b - 1} - \frac{\hat\sigma_\varepsilon^2}{T}\Big),
+\]
+
+the formula of `linearmodels` and of `plm` on a balanced panel, so one formula covers balanced and unbalanced panels. On an unbalanced panel, `linearmodels` instead uses the unweighted between regression and the harmonic mean of the \(T_i\) in place of \(T\), which gives a different \(\hat\sigma_u^2\). In the two-way model (balanced panels only) \(\hat\sigma_\varepsilon^2\) uses \(n - N - T + 1 - k_{tv}\), and \(\hat\sigma_u^2\), \(\hat\sigma_\lambda^2\) use the entity-mean and time-mean regressions with \(\sigma_\varepsilon^2/T\) and \(\sigma_\varepsilon^2/N\) subtracted.
+
+**Wallace-Hussain and Amemiya** follow `plm` (`random.method = "walhus"` and `"amemiya"`). On a balanced panel (a one-way panel whose entities all have the same number of observations; two-way panels are always balanced) they use closed forms, and on an unbalanced one-way panel the trace-term forms. The closed form (balanced) and the trace-term form (unbalanced one-way) do not give the same value even on a balanced panel, so \(\hat\sigma_\varepsilon^2\) is not continuous when a row is dropped from a balanced panel (Swamy-Arora has no such jump, because its trace-term form reduces to the balanced formula). `plm` treats a panel as balanced only when the entities also share the same periods, so on a one-way panel whose entities have the same number of observations but different periods, these two methods give values different from `plm`'s. These methods are not available for unbalanced two-way panels (the panel is rejected). If the estimated \(\sigma_\varepsilon^2\) is not positive, `fit()` raises an error, whereas plm 2.6.7 sets it to 0 and continues (in a test case with unequal group sizes it then returned `theta = 1` for every entity). `"amemiya"` rejects a regressor without within variation (it would bias \(\sigma_u^2\)); `"wallace_hussain"` and `"swamy_arora"` accept it.
 
 ## Degrees of freedom
 
@@ -80,10 +86,10 @@ The three R² values use \(\hat\beta_0\) and \(\hat\beta\) on the respective var
 | Statistic | Computed on |
 |---|---|
 | `r_squared_within` | The within-transformed variables (both effects removed in the two-way model); the slope coefficients only |
-| `r_squared_between` | The entity means |
+| `r_squared_between` | The entity means, each weighted by its number of observations \(T_i\), with the total sum of squares taken around the mean of all observations |
 | `r_squared_overall` | The original variables |
 
-With no slope coefficient the three values are 0. They agree with `linearmodels`' `rsquared_within`, `rsquared_between` and `rsquared_overall` for the one-way model with the classical covariance. `r_squared_between` can be negative.
+With no slope coefficient the three values are 0. The denominator of `r_squared_between`, \(\sum_i T_i(\bar y_i - \bar y)^2\), is the between part of \(\sum(y - \bar y)^2 = \sum(y - \bar y_i)^2 + \sum_i T_i(\bar y_i - \bar y)^2\). On a balanced panel the weights are equal, and the three values agree with `linearmodels`' `rsquared_within`, `rsquared_between` and `rsquared_overall` for the one-way model with the classical covariance. On an unbalanced panel `linearmodels` does not weight the entity means (and estimates different variance components), and [FE](fe.md#fit-statistics)'s `r_squared_between` does not weight them either. `r_squared_between` can be negative.
 
 ## Time-invariant regressors and correlated random effects
 
@@ -91,7 +97,7 @@ A time-invariant regressor is allowed. So is a regressor together with its entit
 
 ## Hausman test
 
-`hausman_statistic`, `hausman_p_value` and `hausman_df` are computed by `fit()`; they are `None` only when no slope coefficient can be tested. The test is the regression-based (auxiliary regression) version of Wooldridge (2010, section 10.7.3). It gives the same statistic as `plm::phtest(method = "aux")` when no regressor is time-invariant and the variance components are the same (always on a balanced panel; on an unbalanced panel with `variance_method="swamy_arora"` the components differ from plm's) (see [Inference conventions](../guide/inference-conventions.md#other-diagnostics)). The quasi-demeaned \(y^*\) is regressed on an untransformed constant, the quasi-demeaned regressors \(X^*\) and the within-transformed regressors \(\tilde X\), and the Wald test that the coefficients of \(\tilde X\) are zero is reported:
+`hausman_statistic`, `hausman_p_value` and `hausman_df` are computed by `fit()`; they are `None` only when no slope coefficient can be tested. The test is the regression-based (auxiliary regression) version of Wooldridge (2010, section 10.7.3). It gives the same statistic as `plm::phtest(method = "aux")` when no regressor is time-invariant and the variance components are the same as plm's, which they are except for `"wallace_hussain"` and `"amemiya"` on a one-way panel whose entities have the same number of observations but different periods (see [Inference conventions](../guide/inference-conventions.md#other-diagnostics)). The quasi-demeaned \(y^*\) is regressed on an untransformed constant, the quasi-demeaned regressors \(X^*\) and the within-transformed regressors \(\tilde X\), and the Wald test that the coefficients of \(\tilde X\) are zero is reported:
 
 \[
 H = \hat\delta'\hat\Sigma_\delta^{-1}\hat\delta \sim \chi^2(\mathrm{df}), \qquad \mathrm{df} = \text{number of tested columns of } \tilde X

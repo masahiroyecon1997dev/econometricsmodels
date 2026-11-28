@@ -25,20 +25,17 @@
 #   cadjust = TRUE)`（OLSクロスチェック`run_lm_crosscheck.R`と同じStata・R型補正
 #   `G/(G-1)·(n-1)/(n-K)`）を当てる。entityクラスターではこの経路が
 #   `vcovHC(arellano, sss)`と一致することを確認済み。θ（分散成分）はplm側の
-#   推定値を使うため、不均衡パネルでは本実装とSwamy-Arora分散成分の差が出る
-#   （バランスパネルで比較すること）。
+#   推定値を使う（本実装の1-wayのSwamy-Aroraと同じ式で、不均衡パネルでも一致する）。
 #
 # classical（`vcov(model)`、plmの古典的分散共分散行列）・hc1（`vcovHC(method="white1",
-# type="HC1")`、`n/(n-K)`補正）もplmで計算する。バランスパネルでは本実装と機械精度で
-# 一致する（実測確認済み）。hc1は`linearmodels`の"robust"とも同じ式。
+# type="HC1")`、`n/(n-K)`補正）もplmで計算する。本実装と機械精度で一致する（バランス・
+# 不均衡とも実測確認済み）。hc1は`linearmodels`の"robust"とも同じ式。
 #
 # 上記のcov_type→vcovの対応とt検定への変換の実装は`_plm_common.R`
 # （`plm_vcov_function`・`plm_t_df`・`plm_t_inference`）。
 #
-# plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる実装の
-# ため、点推定自体が不均衡パネルで最大0.1%程度乖離することを実測確認済み
-# （バランスパネルでは6桁程度で一致）。この乖離のためplm側の値は不均衡パネルで
-# クロスチェック水準（1e-2）でしか一致しない。
+# 不均衡パネルでは、plmのSwamy-Arora（`swar`、`dfcor = 3`のトレース形）は
+# linearmodelsの式（重みなしのbetween回帰と調和平均）と異なり、本実装はplmに合わせている。
 #
 # ## t検定への変換（plmの既定はz検定、慣習差の手計算——testing-policy.md
 # 「リファレンス実装」の優先順位3に該当）
@@ -189,9 +186,8 @@ result <- list(
   ),
   f_statistic = unname(wald_f$statistic),
   f_p_value = unname(f_p_value_val),
-  # plmの分散成分（Swamy-Arora）。不均衡パネルでは本実装とσ_u²の定義が異なる
-  # ため、この値を手計算のGLSに与えてplmと一致することを確認するために出力する
-  # （テスト`test_re_time_invariant.py`）。
+  # plmの分散成分（Swamy-Arora）。本実装の分散成分と比べ、手計算のGLSに与えて
+  # plmと一致することも確かめる（テスト`test_re_time_invariant.py`）。
   sigma2_eps = unname(ercomp(model)$sigma2["idios"]),
   sigma2_u = unname(ercomp(model)$sigma2["id"])
 )

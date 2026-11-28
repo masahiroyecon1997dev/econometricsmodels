@@ -2112,7 +2112,7 @@
     "method": "re_time_invariant",
     "purpose": "R plmによる、時不変の説明変数を含むREの係数の分散共分散行列（cov_typeごと）。標準誤差のフィクスチャre_time_invariant.jsonと同じケース。",
     "source_fixture": "re_time_invariant.json",
-    "generated_at": "2026-10-31T03:52:49.433825+00:00",
+    "generated_at": "2026-11-28T02:35:28.797766+00:00",
     "r_version": "4.5.3",
     "plm_version": "2.6.7"
   }

@@ -14,9 +14,9 @@
 
 ## 検証範囲
 
-バランスパネルの`cov_type="cluster"`のみ（entityクラスターに加え、entity以外の
-クラスター列による境界ケース: 不均衡サイズ・G=3）。分散成分はplm
-推定のため、不均衡パネルは対象外。DK（Driscoll-Kraay）の自由度`T-1`は
+`cov_type="cluster"`のみ（バランス・不均衡パネルのentityクラスターに加え、entity以外の
+クラスター列による境界ケース: 不均衡サイズ・G=3）。分散成分はplmの推定値で、本実装の
+1-wayのSwamy-Aroraと同じ式なので不均衡パネルでも一致する。DK（Driscoll-Kraay）の自由度`T-1`は
 statsmodelsが同じ規約を持たず（`hac-groupsum`の`df_resid_inference`は`T-1`に
 ならない）、第2リファレンスがない（`docs/guide/verification.md`参照）。
 

@@ -330,7 +330,7 @@ pub enum PanelError {
     },
 
     /// RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）のbetween回帰
-    /// （`between_ssr_and_df`。エンティティ平均への`least_squares`）が失敗した。
+    /// （`between_regression`。エンティティ平均への最小二乗）が失敗した。
     ///
     /// `WithinRegressionFailed`と同じ`LeastSquaresError`ラップだが、対象がFEのwithin回帰
     /// ではなくREのbetween回帰のため別バリアントにする（`FTestFailed`と同じ判断、

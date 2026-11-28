@@ -89,7 +89,7 @@ FEの`fit`と同じ構成: `build_re_input`が返す`BuiltReInput`（`input: ReI
   再計算が必要だった、という違い）。`std_errors`/`test_stats`/`p_values`/`conf_lower`/
   `conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/`r_squared_*`/
   `hausman_*`は`ReEstimator`自身のgetterから取得する（FEと同じ理由）。
-- **検証**: `fit`自体はFEと同じ理由（`SelectedData`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用のRustユニットテストは置かず、`maturin develop`後のPythonからの数値照合（engine単体テスト`re_estimator_fit_matches_linearmodels_reference`と同じデータを`_lib.fit_re`に渡して期待値と一致すること）と、`x=[]`・未知の`cov_type`・`cov_type="hc0"`・singletonエンティティ・`cov_type="dk"`で`dk_time`未指定などのエラー経路が`ValidationError`になることの確認で検証する。
+- **検証**: `fit`自体はFEと同じ理由（`SelectedData`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用のRustユニットテストは置かず、`maturin develop`後のPythonからの数値照合（engine単体テスト`re_estimator_fit_matches_plm_reference_on_unbalanced_panel`と同じデータを`_lib.fit_re`に渡して期待値と一致すること）と、`x=[]`・未知の`cov_type`・`cov_type="hc0"`・singletonエンティティ・`cov_type="dk"`で`dk_time`未指定などのエラー経路が`ValidationError`になることの確認で検証する。
 - RE自身に`fixed_effects()`のような追加メソッドは無い（`panel-common.md`2.4節、`panel/re.rs`モジュールdoc参照）。
 
 ## RE: データ抽出・pyclass定義

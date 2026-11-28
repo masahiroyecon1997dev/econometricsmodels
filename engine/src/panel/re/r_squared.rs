@@ -70,14 +70,18 @@ fn re_r_squared_within(fe: &FeEstimator, time_varying: &[usize], params: &Mat<f6
     if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
 
-/// `r_squared_between`（2.3節）: エンティティ平均`ȳ_i.`・`x̄_i.`に
-/// `β0 + Σ_j x̄_ij・β_j`を当てはめた残差平方和と、`ȳ_i.`自身の中心化TSS
-/// （エンティティ平均の単純平均を基準、`T_i`による重み付けはしない——`weights`引数を
-/// 本プロジェクトのREはサポートしないため常に`w=1`、`fe_r_squared_between`と同じ理由）
-/// で計算する。FEの`fe_r_squared_between`と異なり、当てはめ値に切片`β0`を含める
-/// （`re.rs`のモジュールdoc参照）。
+/// `r_squared_between`（2.3節）: エンティティ平均`ȳ_i.`・`x̄_i.`に`β0 + Σ_j x̄_ij・β_j`を
+/// 当てはめたR²で、各エンティティを観測数`T_i`で重み付けする（`re-spec.md`3.6節）:
+/// `1 - Σ T_i (ȳ_i - β0 - x̄_i'β)² / Σ T_i (ȳ_i - ȳ)²`、`ȳ = Σ T_i ȳ_i / n`（全観測の平均）。
+///
+/// 分母は全平方和の分解`Σ(y - ȳ)² = Σ(y - ȳ_i)² + Σ T_i (ȳ_i - ȳ)²`の個体間の部分で、
+/// 分散成分のbetween回帰（`between_regression`、重み`T_i`）とも揃う。バランスパネル（`T_i`が全て等しい）
+/// では重みなしの値（`linearmodels`の`rsquared_between`）に一致する。2-wayはバランスのみなので常にこの場合。
+///
+/// FEの`fe_r_squared_between`は重みなし（`linearmodels`の`PanelOLS`と同じ）のままで、不均衡パネルでは
+/// 定義が異なる。FEとの違いはもう1点あり、当てはめ値に切片`β0`を含める（`re.rs`のモジュールdoc参照）。
 fn re_r_squared_between(means: &EntityMeans, params: &Mat<f64>) -> f64 {
-    let (y_means, x_means) = (&means.y, &means.x);
+    let (y_means, x_means, weights) = (&means.y, &means.x, &means.t);
     let n_entities = y_means.len();
     let k = x_means.len();
 
@@ -88,11 +92,17 @@ fn re_r_squared_between(means: &EntityMeans, params: &Mat<f64>) -> f64 {
                 .map(|j| x_means[j][i] * *params.get(j + 1, 0))
                 .sum::<f64>();
         let resid = y_means[i] - fitted;
-        ssr += resid * resid;
+        ssr += weights[i] * resid * resid;
     }
 
-    let grand_mean: f64 = y_means.iter().sum::<f64>() / (n_entities as f64);
-    let tss: f64 = y_means.iter().map(|y| (y - grand_mean).powi(2)).sum();
+    let total_weight: f64 = weights.iter().sum();
+    let grand_mean: f64 =
+        y_means.iter().zip(weights).map(|(y, w)| w * y).sum::<f64>() / total_weight;
+    let tss: f64 = y_means
+        .iter()
+        .zip(weights)
+        .map(|(y, w)| w * (y - grand_mean).powi(2))
+        .sum();
     if tss > 0.0 { 1.0 - ssr / tss } else { 0.0 }
 }
 
@@ -297,5 +307,51 @@ mod tests {
             tss += y_w[i] * y_w[i];
         }
         assert_eq!(re.r_squared_within(), 1.0 - ssr / tss);
+    }
+
+    #[test]
+    fn re_estimator_fit_r_squared_between_is_the_between_share_of_the_observation_level_decomposition()
+     {
+        // 重み付きbetween R²の分母`Σ T_i (ȳ_i − ȳ)²`は、観測レベルの分解
+        // `Σ(y − ȳ)² = Σ(y − ȳ_i)² + Σ T_i (ȳ_i − ȳ)²`の個体間の部分（`ȳ`は全観測の平均）。
+        // 個体平均を観測ごとに並べた列への当てはめとして計算し直した値と一致する（不均衡・2傾き）。
+        let re = ReEstimator::fit(
+            hausman_two_slope_input(None),
+            ReEffects::OneWay,
+            ReCovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let input = re.input();
+        let n = input.nobs();
+        let codes = input.entity_codes().codes();
+        let group_mean = |col: &[f64], i: usize| -> f64 {
+            let members: Vec<f64> = (0..n)
+                .filter(|&r| codes[r] == codes[i])
+                .map(|r| col[r])
+                .collect();
+            members.iter().sum::<f64>() / members.len() as f64
+        };
+        let params = re.estimator().params();
+        let grand_mean = input.y().iter().sum::<f64>() / n as f64;
+        let (mut ssr, mut between, mut within, mut total) = (0.0, 0.0, 0.0, 0.0);
+        for i in 0..n {
+            let y_bar = group_mean(input.y(), i);
+            let fitted = *params.get(0, 0)
+                + (0..input.x().len())
+                    .map(|j| group_mean(&input.x()[j], i) * *params.get(j + 1, 0))
+                    .sum::<f64>();
+            ssr += (y_bar - fitted).powi(2);
+            between += (y_bar - grand_mean).powi(2);
+            within += (input.y()[i] - y_bar).powi(2);
+            total += (input.y()[i] - grand_mean).powi(2);
+        }
+        assert_rel(within + between, total, 1e-12, "decomposition");
+        assert_rel(
+            re.r_squared_between(),
+            1.0 - ssr / between,
+            1e-12,
+            "r_squared_between",
+        );
     }
 }

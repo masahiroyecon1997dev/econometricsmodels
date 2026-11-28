@@ -401,7 +401,7 @@ fn two_way_fit_reduces_to_pooled_ols_when_both_group_variances_are_zero() {
 #[test]
 fn re_estimator_fit_df_resid_and_df_model_with_no_slope_regressors() {
     // 説明変数0個（定数項のみ、k=1）のモデルでも`df_resid`/`df_model`が正しいことを
-    // 確認する（`re_estimator_fit_matches_linearmodels_reference`とは別のn/kの組み合わせ
+    // 確認する（`re_estimator_fit_matches_plm_reference_on_unbalanced_panel`とは別のn/kの組み合わせ
     // で検証、`linearmodels.RandomEffects(y, const).fit(cov_type="unadjusted")`で
     // 実地検証済み: df_resid=5, df_model=1, params=[4.666...]）。
     let entity = strings(&["a", "a", "b", "b", "c", "c"]);

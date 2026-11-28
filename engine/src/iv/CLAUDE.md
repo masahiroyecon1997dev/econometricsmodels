@@ -15,7 +15,8 @@
 
 - `gmm/CLAUDE.md`: Hansen J（`n`で割らない・`OneStep`と`Classical`の`S`）とGMMのWu-Hausmanの順序。
 - `.claude/rules/engine-gmm-core.md`（`gmm/`・`gmm.rs`と`engine/src/shared/gmm*.rs`・FE-GMMを読むとロードされる）: GMMの方式・収束判定・重み行列`S`・白色化した座標・サンドイッチ・`cov_type`の中心化と小標本補正・C統計量。
-- `common/CLAUDE.md`: 第一段階の`OlsInput`、弱操作変数の診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）、Wu-Hausman。
+- `common/CLAUDE.md`: 第一段階の`OlsInput`、Wu-Hausman。
+- `.claude/rules/engine-weak-instruments.md`（`common/weak_instruments.rs`・`common/first_stage.rs`と`engine/src/shared/`の診断の核・FEIVの診断を読むとロードされる）: 弱操作変数の診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）。
 
 ## 新しいIV系手法の`fit()`に入れるもの
 

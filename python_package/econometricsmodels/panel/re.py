@@ -532,9 +532,10 @@ class REResults:
         `cov_type` (default `"cluster"` gives the cluster-robust
         Hausman test; `"classical"` gives the classical version). The
         auxiliary regression uses the same small-sample corrections as
-        the RE standard errors. For unbalanced panels the
-        auxiliary regression's constant is left untransformed, as in
-        `plm::phtest`. `None` when no coefficient can be tested (no
+        the RE standard errors. The auxiliary
+        regression's constant is not quasi-demeaned, as in `plm::phtest`
+        (on a balanced panel a quasi-demeaned constant would only be
+        rescaled, so the statistic is the same). `None` when no coefficient can be tested (no
         regressor varies after the within transformation, or the
         remaining ones are aliased, for example because the entity
         mean of every time-varying regressor is also a regressor). If

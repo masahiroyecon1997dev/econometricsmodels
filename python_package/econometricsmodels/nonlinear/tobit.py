@@ -89,7 +89,9 @@ class Tobit:
                 builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
-                NaN/infinity, `y` is outside the censoring bounds,
+                NaN/infinity, `y` is outside the censoring bounds, `y` has
+                the same value in every row while `include_intercept=True`
+                (`OUTCOME_CONSTANT`),
                 the censoring bounds themselves are invalid,
                 insufficient observations, no uncensored observations,
                 `confidence_level` out of range, an unknown

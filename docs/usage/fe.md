@@ -105,7 +105,7 @@ The effects of the different columns are not separately identified, only their s
 Things specific to three or more effects:
 
 - A group with a single observation in any column is rejected, as in a two-way model; drop such rows first. A regressor that the effects absorb completely is rejected too. See [Validation and errors](../guide/validation.md).
-- `cov_type="hc2"` and `"hc3"` cannot be used when the groups of all columns except the one with the most groups total more than 3,000; use another `cov_type`, or fewer groups.
+- `cov_type="hc2"` and `"hc3"` cannot be used on an unbalanced two-way panel, or with three or more effects, when the groups of all columns except the one with the most groups total more than 3,000 (`LEVERAGE_DIMENSION_TOO_LARGE`); a balanced two-way grid is not affected. Use another `cov_type`, or fewer groups.
 - With `cov_type="cluster"`, an effect nested in the clusters (for example the firm effects when clustering by firm) is treated as not estimated in the small-sample correction; see [Definitions: FE](../methods/fe.md#cluster-robust-small-sample-factor).
 - On a thinly connected panel the projections may reach `max_iter` and raise an error; raise `tol` or `max_iter` (see [Options and results](../api/fe.md)).
 

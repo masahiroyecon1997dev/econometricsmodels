@@ -147,4 +147,4 @@ F = \frac{\big(\sum_t \hat\varepsilon_t^2 - \mathrm{SSR}_{\mathrm{aux}}\big)/m}{
 
 `time` and `nlags` have no defaults. The auxiliary regression uses `X` exactly as in the model, so no constant is added when the model has none.
 
-Here \(R^2\) is measured against \(\sum_t \hat\varepsilon_t^2\), not against the variation of \(\hat\varepsilon\) around its mean (an uncentered \(R^2\)). With an intercept the residuals have mean zero and the two coincide. Without one they differ, and the definition used here is that of R's `lmtest::bgtest` and of Greene; statsmodels adds a constant to the auxiliary regression in that case, so its value differs.
+Here \(R^2\) is measured against \(\sum_t \hat\varepsilon_t^2\), not against the variation of \(\hat\varepsilon\) around its mean (an uncentered \(R^2\)). With an intercept the residuals have mean zero and the two coincide. Without one they differ, and the definition used here is that of R's `lmtest::bgtest`; statsmodels adds a constant to the auxiliary regression in that case, so its value differs.

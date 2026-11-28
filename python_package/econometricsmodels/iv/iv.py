@@ -177,9 +177,11 @@ class IVResults:
       `cragg_donald()`, `kleibergen_paap()`, `effective_f()`.
     - Exogeneity of endogenous variables and orthogonality of excluded
       instruments, for either estimator (method, computed when called):
-      `c_stat()`. Unlike the Wu-Hausman test, which follows `cov_type`,
-      it uses the GMM weight, and it can test a subset of the endogenous
-      variables or of the instruments.
+      `c_stat()`. Unlike the Wu-Hausman test, which is a regression
+      test, it is the difference of two Hansen J statistics (its
+      covariance of the moment conditions follows `gmm_weight_type` for
+      two-step and iterated GMM, and `cov_type` otherwise), and it can
+      test a subset of the endogenous variables or of the instruments.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -434,8 +436,7 @@ class IVResults:
         it is the Sargan statistic, which assumes homoskedastic errors.
         For the other covariances it is Hansen's J statistic with the
         weight matrix of that covariance, evaluated at the GMM estimate
-        that uses this weight matrix. With `"hc0"` to `"hc3"` this is
-        the robust score test of Wooldridge (1995), and the four give
+        that uses this weight matrix. With `"hc0"` to `"hc3"` the four give
         the same value, because the weight matrix has no small-sample
         or leverage correction, as with `gmm_weight_type="robust"`.
         With `estimator="gmm"` it is Hansen's J statistic of the fit.
@@ -488,7 +489,7 @@ class IVResults:
         neither the second-stage coefficients nor the GMM weight, so for
         the same data and `cov_type` the value is the same with
         `estimator="2sls"` and `estimator="gmm"`; use `c_stat()` for a
-        test that uses the GMM weight.
+        test based on Hansen J statistics.
         """
         return self._raw.wu_hausman_statistic
 

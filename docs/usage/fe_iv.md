@@ -94,7 +94,7 @@ print(list(two_way.fixed_effects()))  # ["firm", "year"]
 
 ## Diagnostics and first-stage results
 
-The diagnostics are the same as in [IV](iv.md#diagnostics-and-first-stage-results) (except that FEIV also reports the Wu-Hausman test with GMM): the weak-instrument partial F statistic, the overidentification test and the Wu-Hausman endogeneity test are computed by `fit()` and read as fields, and the Cragg-Donald, Kleibergen-Paap and effective F statistics are methods that you call afterwards. The first stage, the weak-instrument diagnostics and the Wu-Hausman test depend only on the first stage (and, for Wu-Hausman, on a least-squares auxiliary regression), so they are the same with `estimator="2sls"` and with `estimator="gmm"`: for the same data and `cov_type` the two estimators return the same values. Only the overidentification test differs (Sargan with two-stage least squares, Hansen J with GMM; see [GMM estimator](#gmm-estimator)).
+The diagnostics are the same as in [IV](iv.md#diagnostics-and-first-stage-results): the weak-instrument partial F statistic, the overidentification test and the Wu-Hausman endogeneity test are computed by `fit()` and read as fields, and the Cragg-Donald, Kleibergen-Paap and effective F statistics are methods that you call afterwards. The first stage, the weak-instrument diagnostics and the Wu-Hausman test depend only on the first stage (and, for Wu-Hausman, on a least-squares auxiliary regression), so they are the same with `estimator="2sls"` and with `estimator="gmm"`: for the same data and `cov_type` the two estimators return the same values. Only the overidentification test differs (Sargan with two-stage least squares, Hansen J with GMM; see [GMM estimator](#gmm-estimator)).
 
 ```python
 print(result.weak_instrument_f_statistics)  # {"endog": ...}
@@ -215,7 +215,7 @@ Every field and method is available with both estimators. They differ in the tes
 | `weak_instrument_f_statistics`, `cragg_donald()`, `kleibergen_paap()`, `effective_f()` | yes | yes, the same values |
 | `wu_hausman_statistic` and its p-value | yes | yes, the same values |
 | `overid_statistic` | Sargan | Hansen J |
-| `c_stat()` weight | follows `cov_type` (not `"dk"`) | follows `gmm_weight_type` |
+| `c_stat()` weight | follows `cov_type` (not `"dk"`) | follows `gmm_weight_type` (classical for `gmm_type="one_step"`) |
 | `stat_dist`, `wald_dist` | `"t"`, `"f"` | `"normal"`, `"chi2"` |
 
 The first-stage coefficients, the weak-instrument diagnostics and the Wu-Hausman test do not depend on the second-stage estimator: both estimators use the same within-transformed variables. They follow `cov_type` (or are homoskedastic, as described above), never the GMM weight. The structural R² statistics are computed from the structural residuals with both estimators.

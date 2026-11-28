@@ -1,13 +1,17 @@
 """Result types of post-estimation diagnostics.
 
-Post-estimation diagnostics (for example `OLSResults.white_test()` or
-`IVResults.cragg_donald()` or `FEIVResults.c_stat()`) are separate methods that the user calls after
-fitting; they are never computed by `fit()`. Each returns a frozen
-dataclass so that values are read as attributes (`result.p_value`), like
-the properties of the fit results. Use `to_dict()` to get a plain `dict`.
-The hypothesis tests (those of OLS and the C statistic of IV and FEIV)
-share `DiagnosticResult`; the weak-instrument diagnostics of IV and FEIV have no
-p-value (or two statistics) and each has its own result type.
+Post-estimation diagnostics (for example `OLSResults.white_test()`,
+`IVResults.cragg_donald()` and `FEIVResults.c_stat()`) are separate
+methods that the user calls after fitting; they are never computed by
+`fit()`. Each returns a frozen dataclass so that values are read as
+attributes (`result.p_value`), like the properties of the fit results.
+Use `to_dict()` to get a plain `dict`. The hypothesis tests (those of OLS
+and the C statistic of IV and FEIV) share `DiagnosticResult`. The
+weak-instrument diagnostics of IV and FEIV are not tests with a single
+p-value: the Cragg-Donald and effective F statistics are compared with
+critical values, and the Kleibergen-Paap result holds two statistics (the
+rk LM statistic has a p-value, the rk Wald F does not). Each has its own
+result type.
 """
 
 from __future__ import annotations
@@ -273,8 +277,9 @@ class EffectiveFResult:
             than `simplified_critical_values`), keyed by `tau`, or `None`
             when the bound is not defined.
         bias_bound: The bound on the worst-case Nagar bias of 2SLS relative
-            to the benchmark, greater than 0 and at most 1, or `None` when it
-            is not defined.
+            to the benchmark, between 0 and 1 inclusive (it is 0 with two
+            excluded instruments and `cov_type="classical"`), or `None`
+            when it is not defined.
     """
 
     statistic: float

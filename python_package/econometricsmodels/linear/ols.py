@@ -509,8 +509,9 @@ class OLSResults:
         filled with zero (the convention of R's `lmtest::bgtest` and
         statsmodels). The auxiliary regression uses the model's
         regressors as they are: no constant is added to a model fitted
-        with `include_intercept=False` (the definition of R and Greene;
-        statsmodels adds one in that case, so its value differs). The test
+        with `include_intercept=False` (the definition of R's
+        `lmtest::bgtest`; statsmodels adds one in that case, so its value
+        differs). The test
         does not depend on `cov_type`.
 
         This is a post-estimation diagnostic: it is never computed by

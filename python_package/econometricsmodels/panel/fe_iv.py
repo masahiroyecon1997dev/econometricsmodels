@@ -611,7 +611,7 @@ class FEIVResults:
         least-squares regression, so it does not depend on the GMM
         weight: for the same data and `cov_type`, `estimator="2sls"` and
         `estimator="gmm"` give the same value. `c_stat()` is the
-        endogeneity test that uses the GMM weight.
+        endogeneity test based on Hansen J statistics.
 
         `None` when the augmented regression cannot be estimated (the
         augmented design is singular, `y` is exactly explained by the

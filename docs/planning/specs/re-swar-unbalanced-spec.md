@@ -102,4 +102,5 @@
 - `/review-docs`の指摘で判明: `linearmodels` 7.1の`RandomEffects.fit(small_sample=True)`は、不均衡パネルの1-wayのSwamy-Aroraを`plm`の`swar`と同じトレース形（`√T_i`で重み付けしたbetween回帰）で計算し、本実装と機械精度で一致する（既定の`small_sample=False`だけが重みなし＋調和平均）。時間不変の列もwithinの自由度に数えない（従来の「4桁目から食い違う」は7.1では成り立たない）。
 - ユーザー確認のうえ（2026-11-28）、`linearmodels`（`small_sample=True`、classical/hc1）を不均衡パネルと時間不変の列の2つ目の参照として`re.json`に追加: `unbalanced`・`zero_variance_regressor`・`time_invariant_unbalanced`・`time_invariant_multi_unbalanced`・`wagepan_unbalanced`・`wagepan_time_invariant`。バランスの既存値はビット一致。不均衡パネルの`rsquared_between`は`linearmodels`が重み付けしないため比べない。
 - `/review-docs`の指摘（must/should、一部nice）は公開ドキュメント・docstring・仕様書・ネストCLAUDE.mdに直接反映。
-- 残り: 全体テストの再実行、コミット・push。
+- 全体テスト再実行（23384 passed）・コミット（`6a226233`）・push・#526への追記コメントとクローズは済み。
+- `/review-docs`の2回目の指摘（must 1件: Hausmanの`phtest`一致条件の書き漏れと相互参照の循環。ほかshould・nice）も全て直接反映した。

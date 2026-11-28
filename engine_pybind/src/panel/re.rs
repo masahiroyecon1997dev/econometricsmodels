@@ -116,14 +116,15 @@ pub struct REOptions {
     /// for two-way effects), one of "swamy_arora" (default), "wallace_hussain", "amemiya"
     /// (case-insensitive; `plm`'s `random.method` "swar", "walhus", "amemiya"). Applies to
     /// one-way and two-way effects alike. All three follow `plm`: "swamy_arora" uses one
-    /// formula for balanced and unbalanced one-way panels (it equals the `linearmodels`
-    /// estimator on a balanced panel, and on an unbalanced one with `small_sample=True`);
-    /// "wallace_hussain" and "amemiya" use closed forms on a balanced panel and the trace-term
-    /// forms on an unbalanced one-way panel. `plm` uses the trace-term forms whenever the
-    /// entities are not observed in the same periods, so on a one-way panel with equal counts
-    /// but different periods these two methods give values different from `plm`'s. "amemiya"
-    /// raises `ValidationError` when a regressor has no within variation (time-invariant; for
-    /// two-way effects, varying in at most one dimension).
+    /// formula for balanced and unbalanced one-way panels (it equals `linearmodels`' estimator
+    /// on a balanced panel, and on an unbalanced panel when `linearmodels` is fitted with
+    /// `small_sample=True`); "wallace_hussain" and "amemiya" use closed forms on a balanced
+    /// panel and the trace-term forms on an unbalanced one-way panel. `plm` uses the trace-term
+    /// forms whenever the entities are not observed in the same periods, so on a one-way panel
+    /// whose entities have the same number of observations but different periods these two
+    /// methods give values different from `plm`'s. "amemiya" raises `ValidationError` when a
+    /// regressor has no within variation (time-invariant; for two-way effects, varying in at
+    /// most one dimension).
     #[pyo3(get)]
     pub variance_method: String,
 }

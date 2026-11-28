@@ -264,8 +264,9 @@ model tests — for each supported covariance type.
 standard errors. Its cluster and Driscoll-Kraay standard errors use
 different small-sample corrections, so R (`fixest`, `plm`) is the primary
 reference for those. On unbalanced panels, linearmodels estimates the RE
-variance components like this package and `plm` only with
-`small_sample=True`, which the comparison uses (its default differs there).
+variance components the same way as this package and `plm` only when fitted
+with `small_sample=True`; the comparison uses that setting, because its
+default (`small_sample=False`) gives different values there.
 Which implementation checks which statistic is detailed on the
 verification page.
 

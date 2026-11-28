@@ -385,7 +385,8 @@ class REResults:
         `linearmodels` does with `small_sample=True`. The default of
         `linearmodels` (`small_sample=False`) instead uses the unweighted
         between regression and the harmonic mean of the entity sizes. On
-        a balanced panel all of them give the same σ_u²."""
+        a balanced panel, Swamy-Arora gives the same σ_u² as `plm` and as
+        `linearmodels` with either setting."""
         return self._raw.sigma2_u
 
     @property

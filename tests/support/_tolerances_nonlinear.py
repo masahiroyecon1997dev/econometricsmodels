@@ -80,7 +80,7 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         # 2.32e-8。`tol`を締めて止まるのは`|Δcost| < ε`の判定で、勾配の床ではない（この判定を
         # 外すと勾配は4e-12まで下がる）。argminの`best_param`はコストが厳密に下がったときしか
         # 更新されないため、返却点は最終反復点のコストが最良点と区別できないとき最終反復点にした
-        # （`engine/src/nonlinear/CLAUDE.md`「bfgs/lbfgsの返却点と、newtonとの差の機序」）。
+        # （`docs/spec/nonlinear-common.md`1.3節「`bfgs`/`lbfgs`の返却点」）。
         # 既定`tol`の出力は変わらないので、この許容誤差の値も変えていない。
         "rtol_solver": 2e-7,
         # solver="bfgs"/"lbfgs"を打ち切り重い・区間打ち切りシナリオ、opg/hc0/hc1、

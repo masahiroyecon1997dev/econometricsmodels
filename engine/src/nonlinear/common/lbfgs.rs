@@ -60,7 +60,7 @@ pub(super) const LBFGS_HISTORY_SIZE: usize = 7;
 /// **正定値でない場合（Tobitのように尤度が大域凹でない手法のwarm start点）は、`H₀⁻¹`が降下方向を
 /// 作らないため従来の初期化（`γI`と1回目のline search初期ステップ幅の調整）へ戻す。**
 /// `h0`が`Some`のとき1回目のステップは既にNewtonステップに相当するスケールなので、初期ステップ幅は
-/// 標準の`1.0`のままにする。実測値と経緯は`engine/src/nonlinear/CLAUDE.md`参照。
+/// 標準の`1.0`のままにする。実測値と不採用案は`docs/spec/nonlinear-common.md`1.2節「L-BFGS」参照。
 pub(super) struct FaerLbfgs {
     /// line search。`self`が所有し反復間で使い回す（`FaerBfgs::linesearch`と同じ理由）。
     pub(super) linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,

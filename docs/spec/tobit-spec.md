@@ -429,9 +429,35 @@ Tobit固有の差分:
   組み立て（切片自動付加・列の対応付け）がRust側（`predict_new_data`/`design_matrix_element`）と
   Rの`model.matrix`規約とで一致するかであり、`new_mm %*% beta`という単純な行列積で十分（`numDeriv`
   等の追加の独立検証は不要）。
+- **property-basedテスト**（`tobit/fit/tests/proptests.rs`・`tobit/target.rs`・`tobit/problem.rs`の
+  `mod proptests`）:
+  - 打ち切り境界は`censoring_strategy`で左（`lower=0`）・右（`upper=0`）・両側（`[-1,1]`）を
+    ランダムに選ぶ。`score_is_near_zero`・列順序の不変性・HC0≤HC1に加え、`y`と境界の符号反転
+    （`(l,u)→(-u,-l)`）で係数が符号反転し`σ`とSEは不変という鏡像対称性を検証する。左右の打ち切りは
+    別のコードパス（`censored_contribution(direction)`）を通るので、片側だけの符号・スケールの誤りが
+    出る。右打ち切りの分岐へのバグ注入（`zeta>1`かつ`direction<0`のときだけ`score_beta_coef`を
+    1.05倍）は、固定値のテストでは検出されず、鏡像対称性と`score_is_near_zero`だけが失敗した。
+  - `expected_uncensored`は`fit()`を介さない3つのプロパティ（分解恒等式、値域`m∈[lower,upper]`・
+    `w∈[0,1]`、`(μ,lower,upper)→(-μ,-upper,-lower)`の鏡像対称性）を持つ。`μ`は`±60`まで振って
+    連分数・鏡像変換の分岐を通し、区間幅は`σ`の1/100以上に限る（未満は
+    `UncensoredIntervalTooNarrow`）。上側・下側の裾が別の分岐を通るので、`(Pa,Pb)`・`(A,B)`の
+    入れ替えの誤りが出る。
+  - クランプ領域（`|zeta|>U_CLAMP≈8.13`）のHessianの重みの符号は、`fit()`を通す生成器では収束点の
+    `|z|`が届かないため検出できない。Probit（`hessian_weight_is_non_negative_at_extreme_params`）・
+    Tobit（`censored_hessian_weight_is_non_negative_at_extreme_params`）は`fit()`を通さず、0行目の
+    説明変数を0にして`|β₀|`を大きく取り、クランプ領域の誤分類（打ち切り）観測を毎ケース作って
+    Hessianを直接評価する。符号に加えて、クランプ境界での閉形式（0行目の重み・`h_beta_s`/`h_ss`）と
+    `hessian()`の組み立て（寄与の和）も照合する（符号だけだと`|w|`で隠す変更や`h_ss`の誤りを
+    見逃す）。Tobitの符号の性質は`β`ブロックだけ（`(β,logσ)`全体は大域凹でない）。
+  - バグ注入で生成される`engine/proptest-regressions/`のシードはコミットしない。
 
 ## 4. 未実装・未対応
 
+- **大標本Newtonの回帰テストは性能計測のガードだけ**: 実際のTobitの経路を大標本で通す自動チェックは
+  `performance/compare_tobit.py`の`n_sweep_engine_only`と`max_n_iter`（`docs/performance/tobit.md`）。
+  大きい`n`のデータを凍結したフィクスチャでのpytestと`AER::tobit`のクロスチェックは、scipyの数値微分
+  MLEとの照合（`n=200,000 seed=1`で対数尤度の相対誤差`2.6e-13`、`n=1,000,000 seed=42`で対数尤度
+  `2.6e-13`・`σ`で`6e-9`）で正しさを確認済みのため、追加していない。
 - `predict()`のout-of-sample対応は実装済み（3.6参照）。`censoring_fit_check()`の
   out-of-sample対応は引き続き未実装。
 - `augment()`は実装済み（3.6参照）。

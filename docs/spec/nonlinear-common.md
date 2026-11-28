@@ -59,7 +59,11 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
     加算ごとの丸め誤差が`O(√n)`倍に積み上がり（`n=1e6`で`≈1e-8`、ULPの約100倍）、上記の
     分解能判定（約1 ULPの評価誤差を前提にした`10·ε·|cost|`）が成り立たない。勾配・Hessianの
     総和は素朴な加算のまま（収束点で勾配の累積値が小さく、丸め誤差が問題にならない）。
-    **新しいMLE手法の`cost`も補償和で書く**こと。
+    **新しいMLE手法の`cost`も補償和で書く**こと。補償和と上の分解能判定は**両方**要る:
+    補償和だけでは、ULPを下回る減少量（Tobit `n=1,000,000`の最終反復で予測減少量`7.6e-11` <
+    ULP`1.28e-10`）を判定できずラダー40段が全失敗する。分解能判定だけでは、素朴な和のノイズ
+    （約100 ULP）が閾値`10 ULP`を超え、その帯で空回りが残る。係数`10`は補償和後の約1 ULPに対する
+    余裕。`compensated_sum`は和が非有限のとき補正項を足さない（`∞-∞=NaN`を持ち込まない）。
 - **BFGS**: 組み込みBFGSの初期逆Hessianは単位行列（スケール`O(1)`）固定で、尤度Hessianの
   スケール（`O(n)`、観測数`n`個のスコアの和）との乖離が`n`が大きいほど開き、line searchが
   1反復あたり多数の関数評価を消費する（実測: n=1,000,000でnewton 0.65s・組み込みbfgs
@@ -68,7 +72,12 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   自前実装した。1回目の反復専用のline search初期ステップ幅を`min(1,1/‖g₀‖)`に調整し、
   2回目以降は標準の`alpha=1.0`に戻す。secant条件`yᵀs>0`を満たさない場合はrank-2更新を
   スキップする（閾値は絶対値`f64::EPSILON`固定、相対閾値は実測で反復回数・実行時間が
-  かえって悪化したため不採用）。
+  かえって悪化したため不採用。secant条件は行列の特異性判定ではなく、BFGS更新の正定値性を保つ
+  降下方向チェックで、`.claude/rules/rust-style.md`「線形代数」の相対閾値の方針とは性質が違う）。
+  `terminate()`は勾配ノルム基準に加え、組み込みBFGSと同じコスト変化の判定
+  （`|prev_cost-cost|<f64::EPSILON`）を持つ。near-separation等の退化した尤度面では、コストが
+  動かなくなっても勾配ノルムが`tol`を下回らないことがあり、この判定を落とすとLogitの分離データ・
+  Tobitの非classicalの`bfgs`/`lbfgs`のテストが`NonConvergence`になる。
   **初期逆Hessian**: warm start点（Logit/Probit）で`H`を1回評価し、正定値なら`H⁻¹`を
   初期逆Hessianにする（このとき1回目のself-scalingは行わず、初期ステップ幅も`1.0`）。
   上の`min(1,1/‖g₀‖)`は1回目のステップ長を初期点によらず`‖s₀‖=1`にするため、最適点に近い
@@ -76,7 +85,10 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   （実測: Logit n=100,000で8→13反復、line searchの評価回数は変わらない）。`H⁻¹`の初期化で
   同条件が13→6反復になる。`H`が正定値でない場合（Tobit等、尤度が大域凹でない手法）は
   `H⁻¹`が降下方向を作らないため、従来の単位行列＋self-scalingに戻す。nullモデルの
-  `w·X'X`で`H`を代用する案は、Hessian評価が不要になる反面、反復数が改善せず不採用。
+  `w·X'X`で`H`を代用する案は、Hessian評価が不要になる反面、反復数が改善せず不採用
+  （Logit n=1,000,000では悪化）。他の不採用案: 初期ステップ幅を`c/‖g₀‖`の`c`で調整する
+  （ケースごとに最良の`c`が違い、反復数が`c`に対して非単調）、`bfgs`のときだけゼロ初期値に戻す
+  （改善幅が劣り、solver共通の初期値からも外れる）。
 - **L-BFGS**: 同じ理由（`s`/`y`履歴・初期`γ`を注入する公開APIが無い）で自前実装
   （`two_loop_recursion`、Nocedal & Wright Algorithm 7.4）。two-loop recursionの初期行列は、
   warm start点の厳密Hessianが正定値ならその逆行列`H₀⁻¹`を直近のペアで`sᵀy/(yᵀH₀⁻¹y)`倍に
@@ -84,7 +96,18 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   スケールしか表せず、回帰変数間の相関による悪条件（centeringでは直らない。等相関`ρ=0.9`・`k=20`で
   条件数約235）で`lbfgs`が44反復かかり既定の`max_iter=35`を超えた（`newton`3・`bfgs`4反復）。
   `H₀⁻¹`を再スケールせず使うと、warm start点と収束点でHessianが大きく違うデータ
-  （Logit `near_separation`・Tobit `heavy_censoring`）で`γI`より悪化するため再スケールする。line search内側`Executor`に
+  （Logit `near_separation`・Tobit `heavy_censoring`）で`γI`より悪化するため再スケールする
+  （17→28・12→20反復。再スケールで17・14）。履歴長を20に伸ばすだけでは足りない（35反復超が
+  3件残る）。コストは初期点のHessian評価1回（`O(nk²)`）と逆行列（`inverse_if_positive_definite`、
+  列ピボットQR 1回で`O(k³)`）に加え、`h0`が`k×k`の密行列なのでtwo-loopの初期行列の適用が
+  反復あたり`O(k²)`（`γI`の`O(mk)`から増える）。`k`が数百以上では行列を持たないという
+  L-BFGSの利点が薄れる。組み込みLBFGSを置き換えた理由はもう1つあり、組み込みの`next_iter`は
+  line searchの`Err`を`?`で伝播せず`TerminationReason::SolverExit`として`Ok`に握りつぶしていた。
+  1回目のline search初期ステップ幅`min(1,1/‖g₀‖)`を`n_obs`で正規化する案
+  （`min(1,n_obs/‖g₀‖)`）は、Tobitの退化ケース（`n=41`、`tobit/fit/tests/proptests.rs`の
+  `fit_lbfgs_converges_for_a_previously_stalling_case`）が`LINE_SEARCH_MAX_ITERS`超過で失敗する
+  ため不採用（大標本の`lbfgs`の遅さの主因は初期ステップではなく、1.3節の収束点近傍の
+  line searchの停滞だった）。line search内側`Executor`に
   明示的な`max_iters`（`LINE_SEARCH_MAX_ITERS=100`）を設定し、到達時は`MleError::LineSearchFailed`
   （`code`は`LINE_SEARCH_FAILED`、`ComputationError`）として明示的にエラー化する（`FaerBfgs`には無い追加ガード）。`two_loop_recursion`の
   逆向きループには`yᵀs<=f64::EPSILON`のペアをゼロ除算回避のため無視するガードを持つが、
@@ -139,6 +162,11 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   `heavy_censoring`等の境界シナリオで`RTOL=1e-8`精度検証テストが28件失敗したため不採用
   （`newton`は2次収束による高精度前提でテストが組まれているため、正規化で実効閾値が
   `n`倍緩むと精度マージンを食いつぶす）。
+- **既定値の解決は構築時の1回だけ（既知の限界）**: `LogitOptions`等の`tol`・`solver`は構築後も
+  可変だが、`tol=None`のsolver別の既定値はコンストラクタで1回だけ解決される。構築後に`solver`
+  だけ変えても`tol`は再解決されない（`solver="newton"`で構築して`opts.solver="bfgs"`とすると
+  `tol=1e-6`のままで、`bfgs`の既定より100倍緩い）。`tol`のdocstringに明記し、setterでの
+  自動再解決はしない。
 - **大標本Newtonの副次収束判定**: `tol`は総和勾配に対する絶対閾値でスケールしないため、
   勾配の評価誤差の床が`tol`を上回るほど大きな標本では、勾配ノルム基準が発火しないことが
   ありうる。コスト比較でステップの良否を判定できなかった場合（LMラダーが全失敗し`λ=0`の
@@ -180,7 +208,12 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   短縮し、statsmodelsの同solverと同程度になった。line searchの前に予測減少量`-gᵀd`を
   コストの丸め誤差の水準と比べて打ち切る案も試したが、近似Hessianが粗い局面で`gᵀd`が
   達成可能な減少量を過小評価して早く止まり、Tobitの`bfgs`参照比較テストが精度不足で
-  失敗したため不採用とした。
+  失敗したため不採用とした（`K=10`でも許容`3.8e-8`に対し差`8e-8`）。他の不採用案: 既定`tol`を
+  `1e-7`に緩める（速くなるが根本対処でない）、scipyの`factr`相当の相対コスト変化の判定
+  （`|Δf|≤1e7·ε·|f|`。速くなるがパラメータの精度が相対`1e-5`〜`1e-4`まで緩む。なお初回反復は
+  `prev_cost=+∞`で右辺も`∞`になり1反復で止まるので、入れるなら`is_finite`のガードが要る）。
+  近傍の反復上限は`5`と`10`で精度・テスト結果に差が無く、安全側の`10`にした。Wolfe再判定だけでは
+  失敗するline search 1回分（約90評価）が残るので、反復上限の絞り込みと組み合わせる。
 
 - **`bfgs`/`lbfgs`の返却点**: 既定の`tol`では上の停滞検出は発火せず、勾配基準`‖g‖<tol·n`で止まる。
   `newton`・参照実装との差は、停止点の`|H⁻¹g|`そのものである（Tobitの`moderate_censoring`・`mroz`で、
@@ -190,7 +223,21 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   勾配が下がっても返却点が動かなかった。`extract_outcome`は`bfgs`/`lbfgs`のとき、最終反復点の
   コストが最良点と`10·ε·|cost|`以内なら最終反復点を返す（`newton`は対象外）。既定`tol`の出力は
   変わらず、`tol`を締めたときだけ縮む（`moderate_censoring`の係数で`1.44e-8→2.7e-9`・
-  `2.32e-8→6.1e-10`）。`|Δcost|<ε`の判定そのものを外す案は、反復が2〜3倍に増えるため見送った。収束後の最終Newtonステップ、既定`tol`の引き下げ（`1e-10`）も、効果が部分的、または参照実装にない処理で`tol`の意味が曖昧になるため見送った（比較の実測は`engine/src/nonlinear/CLAUDE.md`）。参照実装の準ニュートン法もnewtonとの差は同程度以上（下の実測）。
+  `2.32e-8→6.1e-10`）。差を縮める次の3案は見送った（実測は`tol`・Newton修正・判定撤去の各変種を
+  Tobit・Logit・Probitで比べた結果）:
+  - **収束後の最終Newtonステップ**（正確なHessianで1歩進める）: newtonとの差は`1e-14`前後まで
+    縮み全テストも通るが、参照実装（下の実測）は準ニュートン法の結果に最終Newtonステップを
+    足しておらず、準ニュートン法に別の手法を混ぜることになり`tol`の意味も曖昧になる。Hessian評価
+    1回分で時間の中央値が+8〜14%。
+  - **既定`tol`の引き下げ（`1e-8→1e-10`）**: 反復+0〜2・時間+5%と安価だが、`lbfgs`が停滞検出で
+    止まるケース（`mroz`・`many_regressors`）には効かず、近共線Tobitの不変性テストの余裕が約13倍→
+    約1.06倍に縮み、Logit/Probitの既定にも及ぶ。`1e-10`より小さくしても`|Δcost|<ε`が先に止める。
+  - **`|Δcost|<ε`の判定の撤去**: 勾配は`4e-12`まで下がり、残る差はnewton自身の残差（`2.3e-10`）に
+    一致するが、反復が増え（各変種の比較で+30〜100%。Tobitの`moderate_censoring`で12→20・10→28、
+    `mroz`で16→42・10→32（bfgs・lbfgsの順））、`bfgs`は`k>=20`で`max_iter=35`以内に収束しない。
+
+  参照実装の準ニュートン法もnewtonとの差は同程度以上（下の実測）なので、差そのものは欠陥ではなく、
+  公開ドキュメントに「約`2e-7`で一致、最も近い一致が要るならnewton」と明記して扱う。
 
 - **参照実装の準ニュートン法と、そのnewtonの差（実測。公開ドキュメントには載せない）**: 利用者にとって重要なのは本実装の`bfgs`/`lbfgs`が`newton`と一致する度合い（公開ページに記載）と、他パッケージの同名solverとの一致（`docs/guide/verification.md`のstatsmodels`bfgs`/`lbfgs`との比較）で、他パッケージの準ニュートン法と`newton`の差は判断に影響しないため載せない。ただし最終Newtonステップや既定`tol`の引き下げを検討するときの根拠になるので、ここに残す。同じデータ（合成データ`baseline`・`moderate_censoring`と`mroz`）で測った、各実装の自身のNewton（Tobitは`survreg`）に対するパラメータの最大相対差:
   - 本実装`bfgs`/`lbfgs`（既定`tol`）: `2e-7`以下。
@@ -234,6 +281,25 @@ Logit/Probitはこの列ピボットQR解（標準化空間のLPM最小二乗解
 `p≡p̄`起点のIRLS 1反復目に相当するスケール補正を施した値で初期値（warm start）にも使う
 （`ols_based_initial_params`）。Tobitは標準化した設計行列の直交座標でOLSを解き（`DesignCoordinates`）、その解を
 `β`初期値に、残差を`σ`初期値にする。`start_params`（ユーザー指定初期値）は現状未対応。
+
+### 1.5 fit中のメモリ（ピークRSS）
+
+設計行列（`n×k`）の複製を、最適化に使い続ける行列と同時に生かさない。効果はPythonから
+`resource.getrusage`で測るピークRSSで確かめる（列を早く解放しても、glibcの動的なmmap閾値のため
+8MB級の解放ではRSSが下がらない。ライブヒープの見積り（`engine/examples/memory_probe.rs`）は
+RSSの代わりにならない）。以下はn=100万・k=5＋定数でのピークRSSの増分。
+
+- **Logit/Probitの初期値**: `ols_based_initial_params`は標準化した設計行列を受け取り、複製せずに
+  その場で列ピボットQR分解する（`linear_algebra::col_piv_qr_in_place_lstsq`。判定は
+  `checked_col_piv_qr`と共有で受け入れ範囲は同じ）。呼び出し側は壊れた`x_std`をQRの後に元の`x`
+  から標準化し直す（`O(nk)`）。classicalが187→141MB。hc0・クラスター・OPGはスコア行列（`n×k`）の
+  段階がピークなので変わらない。
+- **スコアを使う`cov_type`**: 収束点のスコア評価には`run_solver_keeping_problem`が返す問題を使い、
+  最適化の前に`problem`（標準化した設計行列を含む）を複製しない。hc0のLogit/Probitが202→187MB。
+  スコア行列そのものはサンドイッチに要るので残る（hc0・クラスター・OPGのピークの下限）。
+- **Tobitの直交座標**: `DesignCoordinates::new`は`OrthonormalDesign::new_checked_owned`で、標準化
+  した`x_std`を消費してその場で分解する（`new_checked`は`x_std`・QRの格納・`Q`の`3·n·k`を同時に
+  持つ）。classicalが234→188MB、hc0が234→203MB。
 
 ## 2. エラー型（`MleError`、共有）
 

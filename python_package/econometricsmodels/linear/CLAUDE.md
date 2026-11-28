@@ -1,28 +1,20 @@
 # python_package/econometricsmodels/linear/ 実装ノート（OLS/WLS）
 
-このファイルは `python_package/econometricsmodels/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/spec/ols-spec.md`が正本。
+このファイルは `python_package/econometricsmodels/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠と確定済みの判断のみ。詳細は`docs/spec/ols-spec.md`・`docs/spec/wls-spec.md`が正本。
+
+**エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。
 
 ## 確定済みのスコープ（再提案しない）
 
-以下は既にユーザー承認済みで見送りが確定している。「使いやすさ」目的で再提案しない（CLAUDE.md 2章の非交渉事項に準ずる運用）。
+ユーザー承認済みで見送り・決定が確定している。「使いやすさ」を理由に再提案しない（CLAUDE.md 2章の非交渉事項に準ずる運用）。
 
-- `summary()` / `conf_int()`のDataFrame版は実装しない。「薄いラッパー」というスコープを優先する。ただし`*Results`の短い`__repr__`（被説明変数・`n_obs`・`cov_type`と、係数ごとの`param`・`std_error`の表のみ）は別機能として実装済み（`ols-spec.md`参照）。これを`summary()`へ育てない。
-- **`predict()`は例外的に実装する**。`fitted_values`という別名のプロパティは作らず、`predict(new_data=None)`の1メソッドに統一する。`new_data=None`（デフォルト）で学習データの予測値、指定時は新規データの予測値を返す。Logitの`predict()`（引数なしで学習データの予測確率を返す設計）と命名を揃えるため。戻り値は観測順の`list[float]`（`residuals`と同じ形。区間を足すなら別メソッドにし、`predict()`にキーを足さない。`ols-spec.md`「predict()」参照）。WLSにも同じ設計で実装済み（`wls-spec.md`「predict()」）。重みは予測値の計算に一切関与しない（学習データ・新規データいずれも`ŷ=x'β̂`）。`augment()`が付加する列名は`"predicted"`（学習データ・新規データで呼び分けない、OLS/WLS共通）。
-- **`augment(new_data=None)`も例外的に実装する**。`predict()`と同じ引数・エラー
-  意味論で、ソースデータ（学習データ or `new_data`）に予測値の列（`"predicted"`）を1列付加した
-  polars DataFrameを返す。プロジェクト全体の「DataFrameは返さない」方針の**唯一の例外**（既存の
-  `predict()`/`residuals`/`params_table()`は変更しない、フラグで戻り値の型を変える設計は不採用、
-  `ols-spec.md`「augment()」参照）。実装はRust側（`engine_pybind`、列名衝突を`ValidationError`
-  として送出しやすいため）。Python側は`self._raw.augment(new_data)`を素通しするだけ。
-- **`white_test(statistic="lm" | "f")`は事後診断として実装する**（`fit()`では計算しない。`ols-spec.md`「white_test()」・`docs/spec/inference-conventions.md`6章）。結果は検定共通の`DiagnosticResult`を継承した`WhiteTestResult`（`econometricsmodels.diagnostics`）で、Rust側の`WhiteTestOutput`を詰め替えるだけ（計算・バリデーションはRust側）。補助回帰は常に定数を含み`aux_terms[0]`は常に`"const"`、重複・定数の項は`dropped_terms`。`WLS`・IVへの展開は未対応（WLSは残差の意味が変わるため別途）。
-- **`breusch_pagan_test(variables=None, statistic="lm" | "f")`も事後診断として実装する**（`ols-spec.md`「breusch_pagan_test()」）。Koenkerの標準化版（`n·R²`）のみで、元の`ESS/2`版は扱わない。`variables`は不均一分散の変数の列名のlist（既定`None`はモデルの`x`。モデルに入っていない列・`y`列も指定でき、拒否しない）。補助回帰は常に定数を含み`aux_terms[0]`は常に`"const"`、定数・重複の列は`dropped_terms`（`WhiteTestResult`と同じ形の`BreuschPaganTestResult`）。Rust側の`BreuschPaganTestOutput`を詰め替えるだけで、`variables`の型検査（`list`以外・`str`以外の要素は`TypeError`）・空・重複・列の検査もRust側。
-- **`breusch_godfrey_test(time, nlags, statistic="lm" | "f")`も事後診断として実装する**（`ols-spec.md`「breusch_godfrey_test()」）。`time`（時間順を決める列名）と`nlags`は**必須**（行順を時間順とみなす暗黙の既定も、恣意的な既定のラグ次数も置かない）。サンプル前期間のラグは0埋め、補助回帰は元の`X`をそのまま使い切片なしでも定数を足さない（R・Greeneの定義。statsmodelsは足すため切片なしはRのみで照合）。結果は`DiagnosticResult`を継承した`BreuschGodfreyTestResult`（追加フィールド`nlags`）で、Rust側の`BreuschGodfreyTestOutput`を詰め替えるだけ。型の検査（`nlags`が`int`、`bool`・`float`は`TypeError`）はRust側（`extract_strict_int`）。
-- `OLSOptions`（`WLSOptions`も同様）は独自クラスとして再定義せず、`_lib`からそのまま再輸出する。
-- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`params_table()`（`list[dict]`、REST APIレスポンスにそのまま使える形）を使う。DataFrameには変換しない（`augment()`を除く。上記参照）。
-- `residuals`はそのまま`list[float]`を素通しする（polars Seriesへの変換等はしない）。
+- **`summary()`・DataFrame版の`conf_int()`は実装しない。短い`__repr__`（被説明変数・`n_obs`・`cov_type`と、係数ごとの`param`・`std_error`の表）は別機能で、これを`summary()`へ育てない**: 「薄いラッパー」のスコープを優先する。詳細: `docs/spec/ols-spec.md`2章。
+- **`predict()`は例外的に実装し、`predict(new_data=None)`の1メソッドに統一する（`fitted_values`の別名プロパティを作らない）。戻り値は観測順の`list[float]`で、区間を足すなら別メソッドにし`predict()`にキーを足さない。WLSの重みは予測値に関与しない（`ŷ=x'β̂`）**: Logitの`predict()`と命名を揃える。詳細: `docs/spec/ols-spec.md`3.4節、`docs/spec/wls-spec.md`。
+- **`augment(new_data=None)`はDataFrameを返す唯一の例外。追加する列名は`"predicted"`（学習データ・新規データ、OLS・WLSで共通）。既存の`predict()`/`residuals`/`params_table()`は変えず、フラグで戻り値の型を変える設計にしない。Python側は`self._raw.augment(new_data)`を素通しするだけ**: 列名の衝突は`engine_pybind`が`ValidationError`にする。詳細: `docs/spec/ols-spec.md`3.5節。
+- **事後診断（`white_test`・`breusch_pagan_test`・`breusch_godfrey_test`）は`fit()`で計算せず、検定共通の`DiagnosticResult`を継承した結果（`WhiteTestResult`等）にRust側の出力を詰め替えるだけ。計算・型の検査・バリデーションはRust側**: `breusch_godfrey_test`の`time`と`nlags`は必須（行順を時間順とみなす既定も恣意的な既定のラグ次数も置かない）。補助回帰の`aux_terms[0]`は常に`"const"`、除いた項は`dropped_terms`。Breusch-Paganの`variables`はモデル外の列・`y`も指定でき拒否しない。WLS・IVへの展開は未対応（WLSは残差の意味が変わる）。詳細: `docs/spec/ols-spec.md`3.9〜3.11節、`docs/spec/inference-conventions.md`6章。
+- **`OLSOptions`/`WLSOptions`は独自クラスとして再定義せず`_lib`から再輸出する。`params`等は係数名→値の`dict[str, float]`、行指向は`params_table()`（`list[dict]`）、`residuals`は`list[float]`のまま。DataFrameに変換しない（`augment()`を除く）**。
 
 ## 実装パターン
 
-- `OLS`/`WLS`クラスは`data`/`y`/`x`（+`weight`）/`options`のコンストラクタ引数を保持するだけで、`fit()`呼び出し時に初めて`_lib.fit_ols`/`_lib.fit_wls`を呼ぶ（コンストラクタでは検証しない）。
-- 係数名→値の`dict`化・`conf_int`・`params_table()`の行組み立ては`econometricsmodels/_results_utils.py`のヘルパー（`by_param`/`conf_int_by_param`/`params_table_rows`/`marginal_effect_rows`/`results_repr`）に集約している（全手法のResultsで共通）。プロパティ本体・docstringは各クラスに残し、基底クラス化はしない（手法ごとにdocstringやメンバーが分岐するため）。
-- `OLSResults`/`WLSResults`は`_lib`の結果オブジェクト（`_lib.OLSResult`等）を`_raw`として保持する薄いラッパー。新しいプロパティを追加する際も、Rust側`#[pyclass(get_all)]`のフィールドをそのまま`dict`化する以上のロジックをPython側に持ち込まない。
+- **`OLS`/`WLS`のコンストラクタは引数を保持するだけで検証せず、`fit()`で初めて`_lib.fit_ols`/`_lib.fit_wls`を呼ぶ。`*Results`は`_lib`の結果を`_raw`として持つ薄いラッパーで、`#[pyclass(get_all)]`のフィールドを`dict`化する以上のロジックをPython側に持ち込まない**: 詳細: `.claude/rules/python-style.md`「設計方針との整合性」。
+- **係数名→値の`dict`化・`conf_int`・`params_table()`の行の組み立ては`econometricsmodels/_results_utils.py`のヘルパー（`by_param`・`conf_int_by_param`・`params_table_rows`・`marginal_effect_rows`・`results_repr`）を使う。プロパティ本体とdocstringは各クラスに残し、基底クラスにしない**: 手法ごとにdocstringやメンバーが分岐する。

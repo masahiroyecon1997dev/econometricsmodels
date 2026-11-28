@@ -1,47 +1,32 @@
 # python_package/econometricsmodels/panel/ 実装ノート（FE/FEIV/RE）
 
-このファイルは `python_package/econometricsmodels/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（FEIV。2SLSとGMM）（FE/RE共通の論点は`docs/spec/panel-common.md`）が正本。
+このファイルは `python_package/econometricsmodels/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠と確定済みの判断のみ。詳細は`docs/spec/panel-common.md`・`docs/spec/fe-spec.md`・`docs/spec/re-spec.md`・`docs/spec/fe-iv-spec.md`が正本。
+
+**エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。
 
 ## 確定済みのスコープ（再提案しない）
 
-以下は既にユーザー承認済みで見送りが確定している。「使いやすさ」目的で再提案しない（CLAUDE.md 2章の非交渉事項に準ずる運用、`linear/CLAUDE.md`と同じ方針）。
+ユーザー承認済みで見送り・決定が確定している。「使いやすさ」を理由に再提案しない（`linear/CLAUDE.md`と同じ運用）。
 
-- `summary()`は実装しない（structured onlyの出力方針）。
-- `predict()`は実装しない（`panel-common.md`にpredict関連の合意が無く、OLSの`predict()`はあくまで例外扱い。必要になった時点で別issueで検討する）。
-- `FEOptions`/`REOptions`は`_lib`からそのまま再輸出する（独自クラスとして再定義しない、`OLSOptions`/`IVOptions`と同じ方針）。
+- **`summary()`は実装しない。`predict()`も実装しない（OLSの`predict()`は例外扱いで、パネルには合意が無い。必要になった時点で別途検討する）。`FEOptions`/`REOptions`/`FEIVOptions`は`_lib`から再輸出する**。
 
-## 実装パターン
+## FE・RE
 
-- `FE`/`FEResults`・`RE`/`REResults`はいずれも`IV`/`IVResults`と同型（`data`/`y`/`x`/`effects`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_fe`/`_lib.fit_re`を呼ぶ。コンストラクタでは検証しない）。
-- **`effects`は必須の`list[str]`（FEは1〜5要素、REは1〜2要素）**: 1要素=one-way、2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。REのtwo-wayはバランスパネル必須、FEは不均衡も可）、FEの3要素以上=高次元の固定効果（3つ目以降は同一性だけのキー）。`FEOptions.time`・`REOptions.time`は廃止した。上限を超えると`EFFECTS_TOO_MANY`（`ValidationError`）。先頭要素がデフォルトのクラスターキー。`dk_time`は`effects`とは独立（`cov_type="dk"`で必須、`effects`の列を借用しない）。理由は`panel-common.md`1.1節。
-- **件数と固定効果は列名キー**: `n_groups`（`dict[str, int]`、`effects`の列名→グループ数、`effects`の順。旧`n_entities`・`n_periods`の置き換え）、FEの`fixed_effects()`は常に`{列名: {水準: 効果}}`の入れ子（one-wayも入れ子）。一方、REの`sigma2_u`・`sigma2_lambda`・`theta`・`theta_entity`・`theta_time`・`theta_total`は意図的に現状維持（`panel-common.md`2.1節）。旧版のpickleは読めない（`FORMAT_VERSION`は上げていない）。
-- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`params_table()`（`OLSResults.params_table()`と同じキー: `param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。FE/REともOLS同様t検定のためIVの`stats`/`stat`のような汎用命名は不要）。
-- `fixed_effects()`（FE限定）はIVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。ただし`first_stage()`と異なり結果の型変換は不要（`_lib.FEResult.fixed_effects()`が返す`dict`をそのまま素通しする）。
-- **REにはFEの`fixed_effects()`に相当する追加メソッドが無い**: ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で自動計算済みの値をそのまま`REResults`のプロパティとして公開するだけで済む（`panel-common.md`2.4節「RE: ハウスマン検定は`fit()`内で自動計算」）。3つとも`float | None`/`int | None`型（検定できる傾き係数が無い場合のみ`None`。補助回帰・ロバスト共分散の計算失敗は`fit()`が`ValidationError`/`ComputationError`で失敗する）。比較相手はRE本体と同じ個体効果構造のFE（1-wayは個体のみ、2-wayは個体+時点）で、補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する。`REOptions.dk_time`（`cov_type="dk"`専用・必須）はDKの時点列にのみ使う。
-- **`REOptions.variance_method`**（`"swamy_arora"`・`"wallace_hussain"`・`"amemiya"`）と`REResults.variance_method`（正規化した値）: 分散成分と重みがどの推定法の値かを示す。`REOptions`は`_lib`の再輸出のままで、docstringはRust側（`engine_pybind/src/panel/re.rs`）が正本。
-- **REの分散成分と重み**: `sigma2_eps`・`sigma2_u`（`float`）、`sigma2_lambda`（2-wayのみ）、`theta`（1-wayのみ、エンティティID→θ_i、IDの辞書順の`dict`）、`theta_entity`/`theta_time`/`theta_total`（2-wayのみ）をプロパティで返す。使わない側は`None`（型安定。`re-spec.md`2章）。
-- **2-way RE（`effects`が2要素、バランスパネル）**: REは`effects`の順序に意味がある（`effects[0]`が個体: `sigma2_u`・`theta_entity`、`effects[1]`が時点: `sigma2_lambda`・`theta_time`）。バランスパネルでは入れ替えてもモデルが対称なので検証では検出できず、ドキュメントとテストで保証する（FEは入れ替えても係数・SEは同じだが、デフォルトのクラスターキー、`fixed_effects()`のキー順、時点側の基準期間が変わる）。ハウスマン検定・パネルR²は2-wayでも1-wayと同じプロパティで返す（`hausman_df`は2-way within変換後に分散のある列の数、`re-spec.md`3.6・3.7節）。`effects`と`dk_time`は別物で、`cov_type="dk"`では`dk_time`が必須（`effects`の列は借用されない）。
-- **REは切片を持つ**ため`param_names[0]`が常に`"const"`になる（FEはwithin変換で切片が構造的に消えるため無い）。`df_resid`の意味もFEと異なる（`n - k`、FEの`n - 個体数 - k`とは別式、`re-spec.md`3.3節）——docstringに明記して混同を防ぐ。
-
-## テスト
-
-`engine_pybind`側（FE・RE）は`PyDataFrame`引数を取る関数を`cargo test`で直接検証できない制約があるため（`docs/spec/nonlinear-common.md`10章「テストの制約」参照）、`maturin develop` + Pythonスモークテストのみで検証されている。`tests/panel/`配下のpytest（`fixest`/`linearmodels`との数値照合ベンチマーク）が、このPython側ラッパーを含めた最初の本格的なテストになる。
+- **コンストラクタは引数を保持するだけで検証せず、`fit()`で初めて`_lib.fit_fe`/`_lib.fit_re`を呼ぶ**: `IV`と同型。
+- **`effects`は必須の`list[str]`（FEは1〜5要素、REは1〜2要素）で、`effects[0]`が個体（既定のクラスターキー）、`effects[1]`が時点。`dk_time`は`effects`とは独立で`cov_type="dk"`では必須**: 詳細: `docs/spec/panel-common.md`1.1節。
+- **件数と固定効果は列名キーにする（`n_groups`は`dict[str, int]`、FEの`fixed_effects()`は1-wayでも`{列名: {水準: 効果}}`の入れ子）。REの`sigma2_u`・`theta*`等は意図的に列名キーにしていない**: 次元の数が変わっても同じ形で読めるようにする。詳細: `docs/spec/panel-common.md`2.1節。
+- **`params`等は係数名→値の`dict[str, float]`、行指向は`params_table()`（キーはOLSと同じ）。FEの`fixed_effects()`は`_lib`の`dict`を素通しし、型変換しない**: FE・REはt検定なのでIVの汎用命名は要らない。詳細: `docs/spec/fe-spec.md`3.5節。
+- **REにFEの`fixed_effects()`に相当する追加メソッドは足さない（ハウスマン検定は`fit()`で計算済みのプロパティ）**: `hausman_*`は検定できる係数が無いときだけ`None`で、計算の失敗は`fit()`が失敗する。詳細: `docs/spec/panel-common.md`2.4節、`docs/spec/re-spec.md`3.7節。
+- **REの分散成分と重み（`sigma2_eps`・`sigma2_u`・`sigma2_lambda`・`theta`・`theta_entity`・`theta_time`・`theta_total`）は、使わない側を`None`にして型を安定させる。`variance_method`のdocstringはRust側（`engine_pybind/src/panel/re.rs`）が正本**: 詳細: `docs/spec/re-spec.md`2章。
+- **REは`effects`の順序に意味がある（`[0]`が`sigma2_u`・`theta_entity`、`[1]`が`sigma2_lambda`・`theta_time`）が、バランスパネルでは入れ替えても検出できないので、ドキュメントとテストで保証する**: FEは入れ替えても係数・SEは同じだが、既定のクラスターキー・`fixed_effects()`のキー順・時点側の基準期間が変わる。詳細: `docs/spec/re-spec.md`1章。
+- **REは切片を持ち`param_names[0]`が`"const"`、`df_resid`は`n - k`（FEの`n - 個体数 - k`とは別の式）。docstringに明記して混同を防ぐ**: 詳細: `docs/spec/re-spec.md`3.3節。
+- **`engine_pybind`のFE・REの`fit`は`cargo test`で検証できないので、このラッパーを含めた検証は`tests/panel/`のpytest（fixest・linearmodelsとの照合）が担う**: 詳細: `docs/spec/nonlinear-common.md`10章「テストの制約」、`docs/spec/panel-common.md`4.7節。
 
 ## FEIV（`panel/fe_iv.py`）
 
-- `FEIV(data, y, x_exog, x_endog, instruments, effects, *, options=None)`・`FEIVResults`。`FEIVOptions`は`_lib`の再輸出。`fit()`で`_lib.fit_fe_iv`を呼ぶだけ（コンストラクタで検証しない）。
-  **2SLSとGMMは1つのクラス**で`FEIVOptions.estimator`（`"2sls"`既定・`"gmm"`）で切り替える（`IV`と同じ。別クラスにするとIVとのインターフェースが大きく異なり利用者が分かりにくくなるため）。
-- **`FEIVResults(raw, x_endog)`は`x_endog`を保持する**: `_lib`の`weak_instrument_f_statistics`・`first_stage()`は`HashMap`で順序が不定なので、ラッパーが`x_endog`の順の`dict`に直す。pickleはラッパーごと往復する（`_x_endog`も戻る）。
-- `first_stage()`は`dict[str, FEResults]`（既存の`FEResults`をそのまま使う。`f_statistic`等は`None`）。診断（`cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha)`）の`dataclass`への包み方は`IVResults`と共通で、
-  `_results_utils.py`の`cragg_donald_result`等に置いた。
-- **両推定量で項目・メソッドは同じ**（推定量ごとに`None`やエラーで表す差は設けない）。第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`はGMMでも持つ。`weak_instrument_f_statistics`は`IVResults`と同じく
-  `dict[str, float]`（`None`を取らない。`x_endog`が空でないため）、`*_df_num`・`*_df_denom`は`int | None`のまま（IVと同じ型）。2SLSの`c_stat()`は`cov_type`の系統で重みを決め、`dk`だけ
-  `C_STATISTIC_COV_TYPE_NOT_SUPPORTED`（`ValidationError`）。docstringに「2sls only」「gmm only」と書かない（`c_stat()`の重みの決め方だけ書く）。
-- テスト統計量は`IVResults`の命名（`wald_*`・`stat_dist`）。`stat_dist`は2SLSが`"t"`・GMMが`"normal"`（`stat_df`は`None`）、`wald_dist`は`"f"`・`"chi2"`（GMMの`wald_df_denom`は`None`、`wald_df_num`は`k`。Waldは`k`で割らない）。
-  `estimator`・`gmm_type`・`gmm_weight_type`（`one_step`と2SLSは`None`）・`n_iter`・`converged`を結果に持つ。`log_likelihood`・`aic`・`bic`は出さない。診断・`fixed_effects()`・`c_stat()`は呼ぶたびに再推定する（`source_data`を保持）。
-- **`c_stat()`は`IVResults.c_stat()`と同じ`CStatisticResult`を返す**（組み立ては`_results_utils.c_statistic_result`で共有）。重みは、GMMなら`gmm_weight_type`（`one_step`はclassical）で`cov_type`に依らず、2SLSなら`cov_type`の系統（classical→classical、`hc1`〜`hc3`→robust、cluster→cluster。`dk`は重み行列が無いので`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`）。
-  クラスター数が`Z_full`の列数に足りないと`ComputationError`（`fit`の`GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL`は`ValidationError`で、クラスが違う。docstringとmethodsに書いた）。
-- 横断テストへの登録先（足し忘れ注意）: `test_call_signatures`・`test_gil_release`（`FITS`は手法ごとなので、GMMは`FEIV.fit_gmm`・`FEIV.c_stat`のケース）・`test_results_repr`・`test_keyword_only_arguments`・`test_options_repr`・`test_option_types`・
-  `test_option_value_echo`・`test_validation_order`（`feiv`・`feiv_gmm`。`feiv_gmm`は`base_opts={"estimator": "gmm"}`。`unused_cluster`は既定の重み`cluster`も`cluster`を使うので`gmm_weight_type="robust"`を足す）・
-  `test_effects_argument`・`test_argument_types`・`test_data_input_types`・`test_numeric_column_values`・`test_key_columns`・`test_cov_params`・`test_stat_dist`・`test_unit_invariance`・`test_pickle`。
-  2SLSとGMMで同じ手法名のキーが重複しないよう、GMMは`FEIV_GMM`等のキーにする。ラッパー自体のテストは`tests/panel/test_fe_iv_api.py`・`test_fe_iv_gmm_api.py`（数値は`test_fe_iv_binding.py`・`test_fe_iv_gmm_binding.py`、検証は`test_fe_iv_validation.py`・`test_fe_iv_gmm_validation.py`）。
+- **2SLSとGMMは1つのクラス（`FEIVOptions.estimator`）にし、両推定量で項目・メソッドを同じにする。docstringに「2sls only」「gmm only」と書かない（`c_stat()`の重みの決め方だけ書く）**: `IV`と同じインターフェース。詳細: `docs/spec/fe-iv-spec.md`2.1節・2.4節。
+- **`FEIVResults(raw, x_endog)`は`x_endog`を保持し、`weak_instrument_f_statistics`・`first_stage()`を`x_endog`の順の`dict`に直す**: `_lib`側は`HashMap`で順序が不定。pickleはラッパーごと往復する。
+- **`first_stage()`は既存の`FEResults`の`dict`で返し、診断・`c_stat()`の結果への包み方は`IVResults`と共通の`_results_utils.py`の関数（`cragg_donald_result`・`c_statistic_result`等）を使う**: 詳細: `docs/spec/fe-iv-spec.md`2.4節〜2.6節。
+- **統計量はIVの命名（`wald_*`・`stat_dist`）。2SLSは`stat_dist="t"`・`wald_dist="f"`、GMMは`"normal"`・`"chi2"`（`wald_df_denom`は`None`、Waldは`k`で割らない）。`log_likelihood`・`aic`・`bic`は出さない**: 詳細: `docs/spec/fe-iv-spec.md`2.4節。
+- **`c_stat()`のクラスター数不足は`ComputationError`で、`fit`の`GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL`（`ValidationError`）とクラスが違う。2SLSの`dk`は`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`**: docstringとmethodsに書いてある。詳細: `docs/spec/fe-iv-spec.md`3.5節。
+- **横断テストへの登録を忘れない。登録先の一覧は`docs/spec/fe-iv-spec.md`6.1節。GMMは`FEIV_GMM`等の別のキーにし、`test_validation_order`の`feiv_gmm`は`base_opts={"estimator": "gmm"}`、`unused_cluster`には`gmm_weight_type="robust"`を足す**: 2SLSとGMMでキーが重複する。GMMの既定の重み`cluster`も`cluster`列を使うので、そのままでは未使用にならない。

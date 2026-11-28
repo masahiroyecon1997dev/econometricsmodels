@@ -284,7 +284,7 @@ engineの単体テストの軸（FE-GMM）: FE-2SLSへの還元、ダミー変�
 
 横断テストへの登録先（足し忘れ注意）: `test_call_signatures`・`test_gil_release`（`FITS`・`ROWS`・`CASES`。メソッドは自動検出されないので明示）・`test_results_repr`・
 `test_keyword_only_arguments`・`test_validation_order`・`test_effects_argument`・`test_argument_types`・`test_data_input_types`・`test_numeric_column_values`・`test_key_columns`・
-`test_cov_params`・`test_stat_dist`・`test_pickle`・`test_option_types`・`test_options_repr`・`test_option_value_echo`・`test_results_docstrings`（「Fields by purpose」）・
+`test_cov_params`・`test_stat_dist`・`test_unit_invariance`・`test_pickle`・`test_option_types`・`test_options_repr`・`test_option_value_echo`・`test_results_docstrings`（「Fields by purpose」）・
 `test_doc_examples`・`test_docstring_examples`・`test_public_docs`、`tests/support/_errors.py`の`MIGRATED_CODES`。
 
 ### 6.2 リファレンス

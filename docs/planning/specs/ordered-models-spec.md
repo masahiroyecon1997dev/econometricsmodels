@@ -437,7 +437,7 @@
 ### 12.2 最初のセッション（共通基盤）で行うこと
 
 1. **作業場所**: `/workspaces/econometricsmodels`の`release/v0.11.0`。並行する別作業の未コミットの変更がありうるので、コミットは自分のファイルだけをステージする。署名のたびにホスト端末で確認が出る（`.claude/rules/commit-signing.md`）。
-2. **読むもの**: 本ノートの1〜11章（特に1章の表、6章、11章）。`engine/src/nonlinear/CLAUDE.md`（自動で読まれる）と、ソルバー・分離検出を触るときは`engine/src/nonlinear/common/CLAUDE.md`・`separation/CLAUDE.md`（そのディレクトリのファイルを読むと自動で読まれる）。`docs/spec/error-handling.md`の3.1・4・5.2〜5.4章と`docs/spec/error-style-guide.md`。
+2. **読むもの**: 本ノートの1〜11章（特に1章の表、6章、11章）。`engine/src/nonlinear/CLAUDE.md`（自動で読まれる）と、ソルバー・分離検出を触るときは`engine/src/nonlinear/common/CLAUDE.md`・`.claude/rules/engine-separation.md`（該当するファイルを読むと自動で読まれる）。`docs/spec/error-handling.md`の3.1・4・5.2〜5.4章と`docs/spec/error-style-guide.md`。
 3. **既存実装の調査**（CLAUDE.md 4章。Exploreエージェントに委ねる）: `nonlinear/common/validation.rs`（`validate_binary_y`・`validate_fit_preconditions`・`validate_outcome_not_constant`）、`nonlinear/separation.rs`・`separation/lp.rs`・`separation/rows.rs`、`shared/linear_program.rs`（`BoxBoundedLp`・`DenseSimplex`）、FEの定数列の検査（`panel/common/validation.rs`の`RegressorConstant`）、`shared/error_catalog.rs`へのエラーの足し方（`.claude/rules/rust-style.md`のエラーハンドリング節の手順1〜5）。
 4. **計画**: `/implement-rust`で計画を立て、着手前に次の未決事項をユーザーに確認する（CLAUDE.md 14章）。**確定（2026-11-28）**:
    名前は`REGRESSOR_CONSTANT_WITH_CUTPOINTS`、文面は11.2のとおり（中立の文面）。新しい`code`は`UNREACHABLE_CODES`に一時登録。

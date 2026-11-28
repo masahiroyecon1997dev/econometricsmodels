@@ -1,6 +1,13 @@
-# engine/src/nonlinear/separation/ 実装ノート（分離検出）
+---
+paths:
+  - engine/src/nonlinear/separation.rs
+  - engine/src/nonlinear/separation/**/*
+  - engine/src/shared/linear_program.rs
+---
 
-このファイルは `engine/src/nonlinear/separation/` 配下のファイルを読み書きするときだけ自動ロードされる（親の`engine/src/nonlinear/CLAUDE.md`も一緒にロードされる）。ファサードの`separation.rs`と、LPの`engine/src/shared/linear_program.rs`を読むだけではロードされない。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・実測は`docs/spec/logit-spec.md`3.2節が正本。
+# 分離検出（Logit/Probit・順序モデルのLPと`DenseSimplex`）
+
+このファイルは上の`paths`に一致するファイルを読み書きするときだけ自動ロードされる。判定のLPは`engine/src/nonlinear/separation/`、LPソルバー`DenseSimplex`は`engine/src/shared/linear_program.rs`にあり、ディレクトリをまたぐので系統のネストCLAUDE.mdではなくここに置く。新しい手法の`fit()`で分離検出を呼ぶ規則は`engine/src/nonlinear/CLAUDE.md`。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・実測は`docs/spec/logit-spec.md`3.2節が正本。
 
 **エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。実測値・調査の経緯・不採用案の詳細はspecに置き、ここには書かない。
 

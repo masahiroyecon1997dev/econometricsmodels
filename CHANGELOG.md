@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Performance
+
+- Correction to 0.10.0: IV (2SLS) and RE did not become slower. The notes of 0.10.0 said that their speed-up over linearmodels had fallen since 0.9.0 (about 26x to 15x for IV and 10x to 5x for RE) for an unknown reason. The cause is the GitHub Actions runner: the 0.9.0 timings were taken on Ubuntu 24.04 and the 0.10.0 timings on Ubuntu 26.04, after `ubuntu-latest` moved. When 0.9.0 and 0.10.0 were timed in the same workflow run window on the same runner image, the time of `fit()` at 1,000,000 rows (`k = 5`, classical) was about 45% lower in 0.10.0 for IV (2SLS) and about 20% lower for RE (one run each). The performance guide no longer lists it as a known issue.
+
 ## [0.10.0] - 2026-11-23
 
 ### Added

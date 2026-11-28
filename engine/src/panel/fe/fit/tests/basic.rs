@@ -107,7 +107,7 @@ fn fe_estimator_fit_two_group_split_is_accepted_when_pattern_is_broken() {
 fn fe_estimator_fit_pins_faer_global_parallelism_to_seq() {
     // `fit()`冒頭の`crate::shared::parallelism::ensure_serial()`がfaerのグローバル
     // 並列度を`Par::Seq`へ引き戻すことの回帰ガード（panel系統代表、
-    // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
+    // `.claude/rules/rust-style.md`「パフォーマンス」参照）。
     faer::set_global_parallelism(faer::Par::rayon(0));
 
     let entity = strings(&["a", "a", "b", "b"]);

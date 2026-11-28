@@ -412,8 +412,8 @@ def test_insufficient_degrees_of_freedom_in_internal_within_regression_raises():
 def test_between_regression_insufficient_entities_raises():
     """between回帰は切片+傾き`k`個で`k+1`パラメータのため、
     `n_entities <= k+1`だと`OlsEstimator::fit`自身の`n<=k`検証で
-    `PanelError::BetweenRegressionFailed`（`engine/src/panel/CLAUDE.md`
-    「REのbetween回帰は切片+傾きk個でk+1パラメータ」参照）。entity 2つ
+    `PanelError::BetweenRegressionFailed`（`docs/spec/re-spec.md`
+    3.1節参照）。entity 2つ
     （singletonにならないよう各2観測、`x1`1本でk=1）で誘発する。
     """
     df = pl.DataFrame(

@@ -34,7 +34,7 @@
   1. `README.md`の表「RE: unbalanced panels: 5e-3 to 5e-2」。
   2. `engine/src/panel/re/hausman/tests/reference.rs:168`の不均衡Hausmanテスト（`plm`と`5e-2`）。
   3. 不均衡を`plm`と直接比べず、`plm`に**本パッケージ（linearmodels式）の分散成分を与える**回避策（given-variance方式）。
-- `engine/src/panel/CLAUDE.md`51行目の「`r_squared_between`に`T_i`ベースの重み付けをしてはいけない」は**FEについては有効**（FEは対象外）。REは今回逆になるのでREだけ書き換える。`re.rs:75`の「`T_i`ベースの重み付けは常に無効」もRE側は修正対象。
+- `engine/src/panel/CLAUDE.md`のFE節の「`r_squared_between`に`T_i`の重みを付けない」は**FEについては有効**（FEは対象外）。REは今回逆になるのでREだけ書き換える。`re.rs:75`の「`T_i`ベースの重み付けは常に無効」もRE側は修正対象。
 
 ## 2. 実装方針（案）
 
@@ -45,7 +45,7 @@
 | `variance.rs` `between_ssr_and_df` | 観測数の重み（`Option<&[f64]>`）を受け、`√w`でスケールして最小二乗。戻り値を`(SSR_w, p, Σ w_i h_i)`の構造体にする。2-way（バランスのみ）は重みなしのまま（値は変わらない） |
 | `variance.rs` `one_way_variance_components` | `t_bar`をやめ、`σ_u² = max(0, (Q_id − σ_ε²(N−p)) / (O − Σ T_i h_i))`。バランス・不均衡の分岐は作らない（1.2） |
 | `r_squared.rs` `re_r_squared_between` | 重み`T_i`（`means.t`）、重み付きの全体平均（`Σ T_i ȳ_i / O`）で`SSR_b`・`TSS_b`を作る（3.1の未決項目） |
-| doc | `variance.rs`・`variance_method.rs`・`re.rs`のモジュールdocと`VarianceMethod::SwamyArora`のdoc、`engine/src/panel/CLAUDE.md`（51・62・67行目付近のRE節）、`engine_pybind/src/panel/re.rs`と`python_package/.../panel/re.py`のdocstring（`sigma2_eps`・`sigma2_u`・`variance_method`・`r_squared_between`） |
+| doc | `variance.rs`・`variance_method.rs`・`re.rs`のモジュールdocと`VarianceMethod::SwamyArora`のdoc、`engine/src/panel/CLAUDE.md`（FE節の`r_squared_between`とRE節）、`engine_pybind/src/panel/re.rs`と`python_package/.../panel/re.py`のdocstring（`sigma2_eps`・`sigma2_u`・`variance_method`・`r_squared_between`） |
 
 `compute_theta`・`transform.rs`・Hausman・`fit.rs`のコードは変更不要（σ_u²が変わるだけで値が連鎖して変わる）。新しいエラーは増えない。
 

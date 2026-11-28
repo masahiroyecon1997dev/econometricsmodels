@@ -41,8 +41,8 @@ pub(super) fn fit_fe(
     absorption: &FeAbsorption,
 ) -> Result<FeEstimator, PanelError> {
     // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
-    // `cargo test -p engine`でFeEstimator::fitを直接叩く経路でも担保するためここで呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
-    // グローバル並列度」参照）。
+    // `cargo test -p engine`でFeEstimator::fitを直接叩く経路でも担保するためここで呼ぶ、`.claude/rules/rust-style.md`「パフォーマンス」
+    // 参照）。
     crate::shared::parallelism::ensure_serial();
 
     // 吸収する次元が`effects`と入力で食い違う入力（`time`の無い2-wayや、次元が足りない`MultiWay`）を、

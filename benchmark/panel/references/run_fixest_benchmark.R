@@ -22,13 +22,13 @@
 #
 # aic/bicはlinearmodels.PanelOLSが提供しないため、このスクリプト
 # （fixest::AIC()/BIC()、本実装と同じ式に数値一致することを
-# engine/src/panel/CLAUDE.mdで実地検証済み。R標準AIC()のk+1慣習差は
+# 実地検証済み（docs/spec/fe-spec.md 4章）。R標準AIC()のk+1慣習差は
 # lm/OLSクロスチェックの話でありfixestには当てはまらない）のみで検証する
 # （5.4節の単一参照実装の例外、ハウスマン検定と同型）。
 #
 # 2-way FEのr_squared_within（Within R2）もlinearmodels自身がentityのみdemean
 # の別定義を使うため、fixestのfitstat(model,"wr2")のみで検証する
-# （engine/src/panel/CLAUDE.md「パネル固有R²」参照）。
+# （docs/spec/fe-spec.md 3.4節参照）。
 #
 # r_squared_between/r_squared_overallはfixestに対応する概念が無いため
 # このスクリプトには含めない（linearmodelsのみで検証、5.4節）。
@@ -36,7 +36,7 @@
 # f_statistic/f_p_valueはfixestのfitstat(m, "f")ではなく`wald()`で求める
 # （fitstat(m, "f")は固定効果ダミー自体も検定対象に含めるモデル全体のF検定で、
 # 本実装・linearmodelsの「傾き係数のみのWald検定」とは定義が異なるため、
-# engine/src/panel/CLAUDE.md「F統計量」参照）。`wald(model, keep = <全傾き係数>,
+# docs/spec/fe-spec.md 3.2節・4章参照）。`wald(model, keep = <全傾き係数>,
 # vcov = <cov_typeと同じvcov>)`は傾き係数が同時にゼロという帰無仮説の
 # ロバストWald検定で、分母自由度は`vcov`が`cluster`のとき`G-1`・`dk`のとき
 # `T-1`・それ以外は`df_resid`（fixestの既定、本実装のFEの規約と同じ）。

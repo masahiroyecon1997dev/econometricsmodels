@@ -141,6 +141,15 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 クラスター数・時点数が検定する傾きの数以下だとWald Fのために弾くので、`PanelCovInput::tests_slopes`（`false`で`G > q`・`T > q`の検査を省き`f_statistic`を`None`にする）で切り替える。
 標準誤差に関わる検査（`G >= 2`、2グループ退化、完全適合）は残す。構造式は従来どおり`G <= k`でエラー。
 
+**第一段階の`FeEstimator`は推定量に保持しない**: 第一段階の推定量は生の列・within行列・残差を持ち、内生変数の数だけ`fit`の終わりまで
+持つとピークメモリがその数に比例して増える（内生3個・操作変数5個、n=100万で第一段階1つにつき約16列分）。`fit_with_first_stages(.., consume)`が、
+各第一段階から部分Fと第二段階・Wu-Hausmanに要る量（当てはめ値・残差・係数）を取り出した直後に`consume`へ渡して手放す。推定量が持つのは、
+CD・KP・有効Fが読む`FirstStageWithin`（`[x̃_exog, z̃]`を1つと`x̃_endog`の各列。第一段階の`within_input`とビット単位で同じ）だけ。
+IV本体の`compute_first_stage_with`と同じ方針。
+
+**構造残差の完全適合の判定**（`structural_fit_is_perfect`）は、交互射影の誤差を`|β̂_j|`倍した各`x`の分まで見積もる
+（変換後の列に射影の誤差が残るので、厳密な0と比べない）。
+
 ### 3.3 自由度と`n_absorbed`
 
 `neffects`（`n_absorbed`）は`FeEstimator`と同じ`Σn_d − (K−1)`（連結成分の数やネストによるランク落ちは引かない。`fixest`流）。検証は構造式（`n > k + neffects`）が先、
@@ -199,7 +208,8 @@ within=`1 − e'e/ỹ'ỹ`、between=個体平均に`β̂`を当てはめた残�
 
 - **GMMの反復コア・重み行列は`shared/`へ**（`shared/gmm_iteration.rs`・`gmm_weight.rs`・`gmm.rs`・`gmm_c_statistic.rs`。`iv::gmm`も同じコアを呼ぶ）。`GmmEstimator`が自由度`n − k`固定で吸収した効果の数を渡せないため、
   `gmm_iterate`・`sandwich_covariance`を行列受け取り・自由度引数付きに改めて共有する（CUE・Windmeijer補正を二重に書かない）。返すエラーは`IvError`でなく`CommonError`
-  （`code`・文面・`params`は不変）。FE-GMMは自前の`Ω̂`（FEのクラスター補正・DK・FEのレバレッジ）を白色化した`Z̃`から作り、`GmmSolution::covariance`に渡す（`iv::gmm`と同じ。`gmm_sandwich_covariance`は参照実装として`cfg(test)`だけに残る）。
+  （`code`・文面・`params`は不変）。FE-GMMは自前の`Ω̂`（FEのクラスター補正・DK・FEのレバレッジ）を白色化した`Z̃`から作り、`GmmSolution::covariance`に渡す（`iv::gmm`と同じ。`gmm_sandwich_covariance`は参照実装として`cfg(test)`だけに残る）。`panel_cov_params`は変えず、`Cluster`・`Dk`の事前検証と`K`の決め方
+  （`panel_cov.rs`の`cluster_setup`・`dk_setup`、DKのスコア和と補正）だけを共有関数に切り出して両方が使う。
 - 重みの型は`FeWeightType`（`Classical`・`Robust`・`Cluster{groups}`）、方式は`FeGmmType`。`iv::gmm`の`WeightType`とは別にした（`Hac`を型で表せない。`INTERNAL_ERROR`で弾くより、到達できない型にする）。
   重みの既定（`effects[0]`でのクラスター）はバインディングの責務で、engineは`Cluster{groups}`を明示で受ける。
 - 点推定: `β̂(W) = (X̃'Z̃ W Z̃'X̃)⁻¹X̃'Z̃ W Z̃'ỹ`。`Z̃ = [x̃_exog, z̃]`（`l = k_exog + k_instruments`列）。構造残差の完全適合は段階なしの`CommonError::PerfectFit`（GMMに第二段階は無い）。
@@ -268,7 +278,8 @@ GMMの第一段階・弱操作変数診断・Wu-Hausman・固定効果と2SLSの
 `test_fe_iv_c_statistic_2sls.py`は2SLSの`c_stat()`が対応する重みの2段階GMMと一致すること（全`cov_type`・検定の対象・1-way/2-way）、`classical`がダミー変数を明示した`IV`の`c_stat()`に`(n − n_absorbed)/n`を掛けた値と一致すること、`dk`の拒否と検査の順。
 engineの単体テスト（`gmm/fit/tests/first_stage.rs`・`fixed_effects.rs`）は構造6種×`cov_type`×GMM方式で同じ軸を確かめる（変異: `neffects`を0にする・重みの写像を取り違える、で失敗することを確認済み）。
 
-engineの単体テストの軸（FE-GMM）: FE-2SLSへの還元、ダミー変数を明示した`iv::gmm`との照合（FWL）、手計算（素朴な平均除去とダミーへの回帰の残差。1-wayと2-way・不均衡・3次元）、検出力。
+engineの単体テストの軸（FE-GMM）: FE-2SLSへの還元、ダミー変数を明示した`iv::gmm`との照合（FWL。一致するのは`OneStep`と`Classical`重みの2段階だけで、
+ロバスト・クラスター重みの2段階は重みを作る残差がwithin残差と違い、反復は3回目の推定から一致しない。クラスターはダミー込みだと`G`が足りず`iv::gmm`が弾く）、手計算（素朴な平均除去とダミーへの回帰の残差。1-wayと2-way・不均衡・3次元）、検出力。
 変異（HC2・HC3のダミーのレバレッジを外す、再スケールを外す・全重みに適用する、`S_c`の行の取り違え等）で失敗することを確認してある。
 
 横断テストへの登録先（足し忘れ注意）: `test_call_signatures`・`test_gil_release`（`FITS`・`ROWS`・`CASES`。メソッドは自動検出されないので明示）・`test_results_repr`・

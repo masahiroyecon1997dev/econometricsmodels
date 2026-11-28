@@ -17,8 +17,8 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 `engine::panel::fe`の`cov_type`と`linearmodels.PanelOLS.fit()`の`cov_type`の
 対応（`debiased`は`panel-common.md`3.3節「検定分布は常にt分布」の通り、
 本実装は`cov_type`によらず常にt(df_resid)分布で報告するため、
-`linearmodels`側も常に`debiased=True`で揃える。`engine/src/panel/CLAUDE.md`
-「`cov_type`対応」節で、`linearmodels`が`kernel`/`cluster`とも常に
+`linearmodels`側も常に`debiased=True`で揃える。`docs/spec/fe-spec.md`
+3.3節で、`linearmodels`が`kernel`/`cluster`とも常に
 `debiased=True`前提でしか自由度補正の数式が一致しないことを確認済み）。
 
 | engine cov_type | linearmodels cov_type | 備考 |
@@ -47,7 +47,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 
 `linearmodels.PanelOLS`の結果オブジェクトは`aic`/`bic`属性を持たない
 （実測確認済み）。この2つの検証はRクロスチェック（`fixest::AIC()`/`BIC()`、
-本実装と数値一致することを`engine/src/panel/CLAUDE.md`で実地検証済み）のみで
+本実装と数値一致することを実地検証済み。`docs/spec/fe-spec.md`4章）のみで
 行う（通常の「主リファレンス+Rクロスチェック」の2系統検証の例外、
 ハウスマン検定と同型）。
 
@@ -56,7 +56,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 `linearmodels`自身の`rsquared_within`は**常にentityのみのdemeanで固定**
 （2-wayモデルでも時間効果を含めない別定義）のため、2-way FEでは本実装の
 `r_squared_within`（実際に使ったFE構造でdemean）と意図的に数値が食い違う
-（`engine/src/panel/CLAUDE.md`「パネル固有R²」参照）。本関数は`linearmodels`の
+（`docs/spec/fe-spec.md`3.4節参照）。本関数は`linearmodels`の
 生の値をそのまま返すため、2-wayケースでは`r_squared_within`を数値比較の対象に
 含めないこと（`_meta.note`に明記する）。2-wayの`r_squared_within`検証は
 `fixest::fitstat(model, "wr2")`（クロスチェックスクリプト側）で行う。
@@ -65,8 +65,8 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 
 `run()`（FE）とほぼ同型のパイプライン（パネルインデックス構築→`cov_type`別の
 設定組み立て→`fit()`→結果抽出）を共有するが、以下の点がFEと異なる
-（`docs/spec/re-spec.md`3章・`engine/src/panel/CLAUDE.md`
-「RE」節参照、いずれも実測確認済み）。
+（`docs/spec/re-spec.md`3章・
+4章参照、いずれも実測確認済み）。
 
 1. **REは切片を持つ**（`engine::panel::re::ReEstimator`が常に準偏差変換した
    定数列を含む、`re-spec.md`3.2節）。`linearmodels.RandomEffects`はOLS同様、`exog`に
@@ -159,7 +159,7 @@ def _load_panel_dataset(
 # engine cov_type -> linearmodels cov_type。モジュールdocstring参照。
 # debiasedは常にTrue（panel-common.md 3.3節）。FE/RE共通
 # （`RandomEffects`も`PanelOLS`と同じ`_cov_estimators`実装、
-# engine/src/panel/CLAUDE.md「cov_type対応」参照）。
+# docs/spec/re-spec.md 3.4節参照）。
 _COV_TYPE_MAP: dict[str, str] = {
     "classical": "unadjusted",
     "hc1": "robust",
@@ -190,7 +190,7 @@ def _build_panel_index(
     else:
         # linearmodelsのPanelDataは時点インデックスに数値または日付型しか
         # 受け付けない。本実装は時点列を「辞書順=時系列順」の文字列IDとして
-        # 扱う契約（`engine/src/panel/CLAUDE.md`参照）のため、辞書順に並べた
+        # 扱う契約（`docs/spec/fe-spec.md`3.3節参照）のため、辞書順に並べた
         # カテゴリコード（0,1,2,...）に変換すれば意味を保ったまま数値化できる。
         pdf = df.to_pandas()
         time_categories = sorted(pdf[time_col].unique())

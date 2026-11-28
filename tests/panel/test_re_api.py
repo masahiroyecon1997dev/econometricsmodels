@@ -172,8 +172,8 @@ def test_confidence_level_changes_interval_width(fe_dataset):
 
 def test_dk_time_option_does_not_affect_coefficients(fe_dataset):
     """`REOptions.dk_time`は`cov_type="dk"`のHAC時点列にのみ使われ、係数・
-    ハウスマン検定・`df_model`には影響しない（`engine/src/panel/CLAUDE.md`
-    「RE」節参照。FEの`effects`の2要素目が`df_model`を変えるのとは対照的）。
+    ハウスマン検定・`df_model`には影響しない（`docs/spec/re-spec.md`
+    1章参照。FEの`effects`の2要素目が`df_model`を変えるのとは対照的）。
     """
     classical = our_fit_re(fe_dataset)
     dk = our_fit_re(
@@ -204,8 +204,8 @@ def test_cluster_defaults_to_entity(fe_dataset):
 
 def test_dk_bandwidth_zero_succeeds(fe_dataset):
     """`dk_bandwidth=0`（ラグ項なし）も有効な範囲`[0, t)`として受理される
-    （`FEOptions`の同名テストと同じ、engine/src/panel/CLAUDE.md
-    「Driscoll-Kraay型パネルHAC対応」参照）。
+    （`FEOptions`の同名テストと同じ、docs/spec/fe-spec.md
+    3.3節参照）。
     """
     options = REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
     res = our_fit_re(fe_dataset, options=options)

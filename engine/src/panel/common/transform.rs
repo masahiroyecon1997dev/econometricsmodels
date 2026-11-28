@@ -43,7 +43,7 @@ use crate::shared::group_codes::GroupCodes;
 ///
 /// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（`fe-spec.md`3.5節）の`α_i`復元は
 /// この関数を拡張せず`fe/fixed_effects.rs`側で`FeInput`の元データから独立に再計算する形で実装済み
-/// （`engine/src/panel/CLAUDE.md`参照）。σ_ε²再利用（`re-spec.md`3.2節、RE実装）で平均の保持が
+/// （`docs/spec/panel-common.md`4.6節参照）。σ_ε²再利用（`re-spec.md`3.2節、RE実装）で平均の保持が
 /// 必要になった場合は、その時点で改めて検討する。
 ///
 /// # Panics

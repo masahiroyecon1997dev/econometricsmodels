@@ -39,7 +39,7 @@ pub(super) fn fit_re(
     // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
     // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`
     // で`ReEstimator::fit`を直接叩く経路との統一のためここでも呼ぶ、
-    // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
+    // `.claude/rules/rust-style.md`「パフォーマンス」参照）。
     crate::shared::parallelism::ensure_serial();
 
     // 設定値の検査は、分散成分の推定（内部のFEが行うsingleton・自由度などのデータを見る検査）より先に行う。

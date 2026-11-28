@@ -222,6 +222,30 @@ FEはwithin変換したデータの設計行列を`shared::orthonormal::Orthonor
 （`DimensionMismatch`等）は`#[from]`でラップする既存パターンを踏襲し、FE/RE固有のバリアント
 （自由度計算失敗、singleton関連等）は`PanelError`に直接追加する。
 
+回帰の失敗を包むバリアント（`WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・`PooledRegressionFailed`・
+`QuasiDemeanedRegressionFailed`・`HausmanTestFailed`。いずれも`source: LeastSquaresError`）は`#[from]`を使わず`.map_err`で明示的に
+包む（`CommonError`が2経路で`PanelError`になる曖昧さを避けるため。`IvError::FirstStageFailed`と同じ判断）。包みは文面を持たず、
+`report()`が原因の`code`に`stage`を付ける（`stage`を付けられない`code`は包まずそのまま返す）。対象が異なる回帰は別バリアントにする。
+別の`PanelError`を計算の文脈つきで包むときは`PanelError::in_stage`（`InStage`）を使う。
+
+### 4.6 共有部品の実装上の決定
+
+- **グループは整数コード（`GroupCodes`）で扱う**: entity・time・クラスター・DKの時点は`engine_pybind`が行ごとの`String`を作らずに
+  コード化して渡し、within変換・準偏差変換・エンティティ平均・θ・singleton検出・クラスター/DKの集計はコードで配列を直接引く。
+  `String`キーの`HashMap`/`BTreeMap`で列ごと・統計量ごとに引き直すと、n=1,000,000で1列約0.2秒かかりFE/REの計算時間の大半になった
+  （コード化でRE約4秒→約0.9秒、FE約1.5秒→約0.25秒）。**コードはキーの辞書順に振る**（`BTreeMap`の反復順と同じ。クラスターの
+  `Σ_g S_g S_g'`のようなグループ間の加算とbetween回帰の行の順を固定するため。時点だけは`TimeKeys`が値の順序のコードを振る）。
+  グループ内の行は観測順（安定な計数ソート）。
+- **入力の次元の検証**は`validate_panel_input`（`x`の列→各次元の長さ（`effects`の先頭から）→各次元のキーの有無の順）を`FeInput`・`ReInput`が
+  共有する（FEIVの`PanelIndex::new`も同じ順）。`FeEstimator::fit`は冒頭で`absorbed_levels`を一度だけ解決し（2-wayで`time`が無ければ
+  `TwoWayRequiresTime`）、以降の1-way/2-way/3次元以上の分岐は吸収する次元の`Vec<&GroupCodes>`で行う。
+- **`quasi_demean_column`は列単位の関数で、FEは`θ_i = 1`の特殊ケース**（REは`θ_i = 1 - √(σ_ε²/(T_iσ_u² + σ_ε²))`）。θはエンティティの
+  コード順の配列で渡し、グループ平均は返さない。長さの不一致は内部の契約違反なので`assert!`でpanicする。
+- **`cov_type`ごとの共分散は`panel_cov_params`に集約し、FE・RE・FEIVで式を複製しない**: `shared::covariance`の係数共分散の関数は
+  FE固有の部分（HC1の`n/df_resid`、HC2/HC3のダミーのレバレッジ、クラスターの`K`、DKの`T/(T-1)`）があるのでそのままは使えない。
+  これらはここで決めて渡し、外積の和・カーネル和・クラスターの蓄積と補正式は`shared`を共有する。REのハウスマン補助回帰は
+  `K`（`2k+1`）が違うので`panel_cov_params`を使わない。
+
 ### 4.5 共通化しない（意図的に見送り）
 
 - OLSの`X'X`ベース分散計算とnonlinearのHessianベース分散計算は数式の前提が異なるため
@@ -292,3 +316,14 @@ REは`plm`）のみ）。
 既存方針（相対誤差1e-8を基本）を維持する。反復計算を伴う手法で乖離が大きい場合は、
 OLSのHAC（実測乖離に基づき1e-2に緩和した前例、`testing-policy.md`）と同様、実装・テスト後の
 実測値に基づいて個別に緩和を検討する（先に緩めない）。
+
+### 5.5 property-basedテスト
+
+- FE（`fe/fit/tests/proptests.rs`）は`y`への個体・時点の定数の加算、行の並べ替え＋ラベルの付け替え、`y`のスケールの線形性、
+  LSDVのオラクル（傾き・classicalのSE）を検証する。RE（`re/fit/tests/proptests.rs`）はθの値域`[0,1)`、`σ_u²=0`でのpooled OLSとの一致、
+  行の並べ替え＋ラベルの付け替え（ハウスマン統計量も含む）。生成器はFE（2-wayのためバランスパネル）とRE（不均衡パネル）で別定義。
+- `quasi_demean_column`はFE・REの両方の土台なので、バグ注入は`common/transform.rs`側で行うと両方のプロパティを確かめられる。
+  ただし`y = Σx + ノイズ`のDGPでは「グループ平均を定数倍ずらす」注入は`y`と`x`で相殺して検出されない。注入は観測単位で値を汚す
+  （`n>20`かつ値>5のときだけ+1e-3等）か、行の順序に依存させる（グループのk番目の観測を和から除く）形にする。
+- `σ_u²=0`でのpooled OLSとの一致は、個体効果なしのDGPだとSwamy-Arora推定量の`max(0)`により約半数のケースで自然に成立するので、
+  `prop_assume!(sigma2_u == 0.0)`で棄却しても`too many rejects`にならない。

@@ -192,7 +192,7 @@ def test_cluster_defaults_to_entity(fe_dataset):
 
 def test_dk_bandwidth_zero_succeeds(fe_dataset):
     """`dk_bandwidth=0`（ラグ項なし）も有効な範囲`[0, t)`として受理される
-    （engine/src/panel/CLAUDE.md「Driscoll-Kraay型パネルHAC対応」参照）。
+    （docs/spec/fe-spec.md 3.3節参照）。
     """
     options = FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
     res = our_fit(fe_dataset, effects=["entity", "time"], options=options)

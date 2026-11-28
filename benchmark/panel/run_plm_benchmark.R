@@ -8,7 +8,7 @@
 # ## 対象は全cov_type（classical/hc1はlinearmodelsでも検証するが、独立実装としてplmでも検証する）
 #
 # - hc2/hc3: linearmodels.RandomEffectsが提供しない（PanelOLSと同じ
-#   `_cov_estimators`実装、engine/src/panel/CLAUDE.md「cov_type対応」参照）ため、
+#   `_cov_estimators`実装、docs/spec/re-spec.md 3.4節参照）ため、
 #   `vcovHC(method="white1", type="HC2"/"HC3")`を唯一の参照実装とする
 #   （単一参照実装の例外、panel-common.md 5.4節と同型）。
 # - cluster/dk: 本実装の小標本補正がStata・R型（`G/(G-1)·(n-1)/(n-K)`、DKは

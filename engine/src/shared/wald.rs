@@ -134,7 +134,7 @@ pub(crate) fn wald_quadratic_form(
 /// （`wald_test_last_columns`と同じ「サンドイッチ計算を複製しない」方針。FEは
 /// `OlsEstimator`インスタンス自身の`cov_params`/`df_inference`とは異なる値を使うため
 /// `wald_test_last_columns`メソッドは使えず、この下位の自由関数を直接呼ぶ、
-/// `engine/src/panel/CLAUDE.md`参照）。
+/// `docs/spec/fe-spec.md`3.1節参照）。
 pub(crate) fn wald_f_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,

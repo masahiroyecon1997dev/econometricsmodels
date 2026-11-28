@@ -136,8 +136,8 @@ pub(super) fn swamy_arora_variance_components(
 ) -> Result<VarianceComponents, PanelError> {
     // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
     // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`で
-    // この関数を直接叩く経路との統一のためここでも呼ぶ、`engine/src/panel/CLAUDE.md`
-    // 「faerのグローバル並列度」参照）。
+    // この関数を直接叩く経路との統一のためここでも呼ぶ、
+    // `.claude/rules/rust-style.md`「パフォーマンス」参照）。
     crate::shared::parallelism::ensure_serial();
 
     match effects {

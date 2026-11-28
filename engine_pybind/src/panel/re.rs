@@ -616,7 +616,7 @@ pub(crate) fn build_re_input(
 /// `ReEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する。FEと異なり
 /// `aic`/`bic`もそのまま`estimator()`委譲でよい——REの`df_model`が`OlsInput::k()`と自動的に
 /// 一致する設計のため、`OlsEstimator`委譲時点で既に正しい値になっている
-/// （`engine/src/panel/CLAUDE.md`「`df_resid`/`df_model`（`re-spec.md`3.3節）」参照。FEの
+/// （`docs/spec/re-spec.md`3.3節参照。FEの
 /// `aic`/`bic`のようなRE独自の再計算は不要）。`std_errors`/`test_stats`/`p_values`/
 /// `conf_lower`/`conf_upper`/`df_resid`/`df_model`/`f_statistic`/`f_p_value`/
 /// `r_squared_within`/`r_squared_between`/`r_squared_overall`/`hausman_statistic`/

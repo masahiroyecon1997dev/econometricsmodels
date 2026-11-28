@@ -482,7 +482,7 @@ def generate_fe_dataset(
     elif scenario == "singleton_time":
         # 末尾の時点を1件だけ残す不均衡パネル（2-way FE要求時、singleton検出が
         # バランスパネル検証より先に走るためPanelError::SingletonGroupを誘発する。
-        # engine/src/panel/CLAUDE.md「パイプラインはsingleton検出→within変換」の
+        # docs/spec/fe-spec.md 3.1節の「singleton検出→within変換」の
         # 順序を利用したケース、エラーパス専用）。
         last_time = time_ids[-1]
         keep = (pl.col("time") != last_time) | (

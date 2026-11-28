@@ -1,8 +1,9 @@
 """REのGLSクロスチェック用フィクスチャ（tests/fixtures/benchmarks/re_gls.json）を生成する。
 
 不均衡パネルの1-way REは、本実装の分散成分（Swamy-Arora）が`plm`の`swar`
-（`dfcor = 3`のトレース形）と同じ式で、`linearmodels`は別の推定量になるため、主リファレンスは
-`plm`（`re_crosscheck.json`・`re_time_invariant.json`）になる。ここでは`plm`の分散成分
+（`dfcor = 3`のトレース形）と同じ式のため、主リファレンスは`plm`（`re_crosscheck.json`・
+`re_time_invariant.json`）になる（`linearmodels`は`small_sample=True`のときだけ同じ式で、
+classical・hc1を`re.json`で比べる）。ここでは`plm`の分散成分
 （`ercomp`の`sigma2`）を与え、密な`Ω = σ_ε² I + σ_u² ZZ'`を組んだstatsmodelsの`GLS`で、
 分散成分から先（GLS変換・係数・標準誤差・t検定）を`plm`とは独立な実装で確かめる。
 
@@ -12,7 +13,7 @@
   （`Ω^{-1/2}`に比例）とは個体ごとの直交変換だけ違う。classicalと個体クラスターの共分散は
   この変換で変わらないが、HC1〜HC3・時点のクラスター・DKは観測ごとのスコアが変わるため
   比べられない（`benchmark/panel/references/statsmodels_ref.py`の`run_re_gls`）。
-- **σ_u²そのもの**はこのフィクスチャでは検証しない（`plm`が唯一の参照。エントリの
+- **σ_u²そのもの**はこのフィクスチャでは検証しない（`plm`と`linearmodels`の`small_sample=True`（`re.json`）が参照。エントリの
   `sigma2_eps`・`sigma2_u`は`GLS`に与えた値で、テストは本実装の値がこれと一致することを
   前提として確かめる）。
 - **シナリオ**: 不均衡パネル（`unbalanced`、時間不変の列を含む

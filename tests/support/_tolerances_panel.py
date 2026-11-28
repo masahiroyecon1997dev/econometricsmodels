@@ -180,6 +180,11 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # OLS/WLS/IV/FEと同じ機械精度一致（実測相対誤差1e-9〜1e-14程度、
     # classical/hc1、engineの実出力と直接突き合わせて確認済み。cluster/dkは
     # 小標本補正がStata・R型でlinearmodelsと一致しないためplmクロスチェックのみ）。
+    # 不均衡パネル（linearmodelsは`fit(small_sample=True)`）も同じ水準: unbalanced・
+    # time_invariant_unbalanced・time_invariant_multi_unbalanced・wagepan_unbalancedで
+    # params 1e-14・std_errors 4e-15・p値 1e-12・conf_int 2e-12・F 6e-15・σ_u² 8e-15・
+    # θ 4e-15。時間不変の列を含むバランスパネル（zero_variance_regressor・
+    # wagepan_time_invariant）も params 3e-14・std_errors 3e-13・σ 3e-15。
     "re_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

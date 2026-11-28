@@ -98,4 +98,8 @@
 - 済: Rust（`between_regression`の重み・トレース形の`one_way_sigma2_u`・重み付き`re_r_squared_between`・doc）、Rustテスト（`plm`値への差し替え、`variance/tests/trace_form.rs`、between R²の分解テスト、不均衡の切り上げ、T_i={2,2,15}の`plm`照合、proptestにSwamy-Arora、バグ注入で検出を確認）、pybind・Pythonのdocstring、オラクル、フィクスチャ（`re.json`・`re_cov.json`はバランスのみ、`re_crosscheck*.json`に不均衡を`plm`直接で＋不均衡の実データ`wagepan_unbalanced`、`re_statsmodels_cluster*.json`に不均衡、新規`re_gls.json`・`re_gls_cov.json`、`re_variance_method*.json`の不均衡1-wayにswamy_arora）、given-variance方式の撤去、許容誤差コメント、仕様書、公開ドキュメント、README・CHANGELOG、ネストCLAUDE.md、#697へのコメント（FEのdocstring）。
 - レビュー: rust・python・testingの3エージェント実施、指摘は反映済み（テスト網羅性の拡張A〜Dはユーザー確認のうえ実施）。
 - GLSで比べられるのはclassicalと個体クラスターだけ（Choleskyの白色化と準偏差変換は個体ごとの直交変換だけ違い、HC1〜HC3は変わる）。
-- 残り: 全体テスト（`--check-cov-coverage`・`--check-no-skips`・`--check-error-coverage`）、`/review-docs`、Issue #526への訂正コメント、コミット。
+- 全体テスト・#526への訂正コメント・コミット（`c22082d3`、push済み）は済み。
+- `/review-docs`の指摘で判明: `linearmodels` 7.1の`RandomEffects.fit(small_sample=True)`は、不均衡パネルの1-wayのSwamy-Aroraを`plm`の`swar`と同じトレース形（`√T_i`で重み付けしたbetween回帰）で計算し、本実装と機械精度で一致する（既定の`small_sample=False`だけが重みなし＋調和平均）。時間不変の列もwithinの自由度に数えない（従来の「4桁目から食い違う」は7.1では成り立たない）。
+- ユーザー確認のうえ（2026-11-28）、`linearmodels`（`small_sample=True`、classical/hc1）を不均衡パネルと時間不変の列の2つ目の参照として`re.json`に追加: `unbalanced`・`zero_variance_regressor`・`time_invariant_unbalanced`・`time_invariant_multi_unbalanced`・`wagepan_unbalanced`・`wagepan_time_invariant`。バランスの既存値はビット一致。不均衡パネルの`rsquared_between`は`linearmodels`が重み付けしないため比べない。
+- `/review-docs`の指摘（must/should、一部nice）は公開ドキュメント・docstring・仕様書・ネストCLAUDE.mdに直接反映。
+- 残り: 全体テストの再実行、コミット・push。

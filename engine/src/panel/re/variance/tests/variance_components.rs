@@ -19,8 +19,8 @@ use crate::panel::re::variance::swamy_arora_variance_components;
 fn swamy_arora_variance_components_matches_plm_on_unbalanced_panel() {
     // 手動データ（不均衡パネル、entity a: T=3, b: T=2, c: T=2）。
     // `plm::ercomp(y ~ x1, method = "swar")`（不均衡なので`dfcor = 3`のトレース形）の
-    // `sigma2`と比較する。`linearmodels`の`variance_decomposition`はσ_u²が調和平均`t_bar`の
-    // 式で異なる（6.537912784161284）。
+    // `sigma2`と比較する。`linearmodels`の`variance_decomposition`は、既定の
+    // `small_sample=False`ではσ_u²が調和平均`t_bar`の式で異なる（6.537912784161284）。
     // between回帰は切片+傾き1個の2パラメータのため、`n_entities > k+1`（3章参照）を
     // 満たすには最低3エンティティが必要（2エンティティだと`neffects-nvar=0`で
     // 除算不能になることを`linearmodels`自身でも実地確認済み）。

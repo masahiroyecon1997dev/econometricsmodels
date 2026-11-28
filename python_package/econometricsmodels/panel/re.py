@@ -378,12 +378,14 @@ class REResults:
         """Estimated variance of the effect of the first column of
         `effects` (the entity), σ_u² (a negative
         estimate is raised to 0). The three `variance_method` estimators
-        follow `plm` on balanced panels and on unbalanced one-way panels.
-        On an unbalanced one-way panel, Swamy-Arora weights the between
-        regression by the number of observations per entity, as `plm`
-        does, whereas `linearmodels` does not weight it and uses the
-        harmonic mean of the entity sizes, so the two differ there. On a
-        balanced panel their between regressions agree."""
+        follow `plm`, with one exception for Wallace-Hussain and Amemiya
+        described under `REOptions.variance_method`. On an unbalanced
+        one-way panel, Swamy-Arora weights the between regression by the
+        number of observations per entity, as `plm` does and as
+        `linearmodels` does with `small_sample=True`. The default of
+        `linearmodels` (`small_sample=False`) instead uses the unweighted
+        between regression and the harmonic mean of the entity sizes. On
+        a balanced panel all of them give the same σ_u²."""
         return self._raw.sigma2_u
 
     @property
@@ -513,9 +515,9 @@ class REResults:
         effects). Each entity is weighted by its number of
         observations, and the total sum of squares is taken around the
         mean of all observations. On an unbalanced panel this weighting
-        differs from `linearmodels` and from
-        `FEResults.r_squared_between`, which weight every entity
-        equally."""
+        differs from `linearmodels`, which weights every entity equally.
+        `FEResults.r_squared_between` is a different statistic (no
+        intercept, uncentered total sum of squares, unweighted)."""
         return self._raw.r_squared_between
 
     @property

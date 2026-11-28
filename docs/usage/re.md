@@ -80,7 +80,7 @@ dk = RE(
 print(one_way.sigma2_u, wallace.sigma2_u, dk.std_errors)
 ```
 
-`variance_method` chooses how the variance of the entity effect (`sigma2_u`), of the time effect (`sigma2_lambda`, two-way only) and of the idiosyncratic error (`sigma2_eps`) are estimated: `"swamy_arora"` (the default), `"wallace_hussain"` or `"amemiya"`. The formulas, and the unbalanced or time-invariant cases that `"amemiya"` rejects, are in [Definitions: RE](../methods/re.md#variance-components-variance_method). Time-invariant regressors are accepted (FE rejects them).
+`variance_method` chooses how the variance of the entity effect (`sigma2_u`), of the time effect (`sigma2_lambda`, two-way only) and of the idiosyncratic error (`sigma2_eps`) are estimated: `"swamy_arora"` (the default), `"wallace_hussain"` or `"amemiya"`. The formulas, and the unbalanced or time-invariant cases that `"amemiya"` rejects, are in [Definitions: RE](../methods/re.md#variance-components-variance_method). Time-invariant regressors are accepted (FE rejects them). On an unbalanced panel the default Swamy-Arora estimator follows R's `plm` and matches linearmodels' `RandomEffects` only with `small_sample=True`, so `sigma2_u` and the estimates differ from linearmodels' default there (see [Inference conventions](../guide/inference-conventions.md#linearmodels)).
 
 ## Reading the Hausman test
 

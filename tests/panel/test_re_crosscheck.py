@@ -33,8 +33,10 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 本実装の1-wayのSwamy-Arora分散成分はplmの`swar`（不均衡では`dfcor = 3`のトレース形）と
 同じ式なので、`unbalanced`も他のシナリオと同じくplm自身のRE・`phtest`と機械精度で
 比べる。分散成分（`sigma2_eps`・`sigma2_u`）も全シナリオでplmの`ercomp`と比べる
-（`test_variance_components_match_plm`）。`linearmodels`の`RandomEffects`は不均衡パネルで
-between回帰を重み付けせず調和平均を使うため、σ_u²が違う（`re.json`はバランスパネルだけ）。
+（`test_variance_components_match_plm`）。`linearmodels`の`RandomEffects`も
+`fit(small_sample=True)`なら同じトレース形になり、classical・hc1は`test_re_reference.py`が
+不均衡パネルでも比べる（既定の`small_sample=False`は重みなしのbetween回帰と調和平均で、
+σ_u²が違う）。
 
 ## dkの明示バンド幅・時点数の境界・実データ
 

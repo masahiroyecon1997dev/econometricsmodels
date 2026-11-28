@@ -20,13 +20,16 @@ FEでは識別できず拒否されるが、REでは識別できる（`re-spec.m
    加えて、plmが推定した`σ_ε²`・`σ_u²`を手計算のGLSに与え、plmの係数・標準誤差・t・p値・
    信頼区間・F統計量・ハウスマン検定と機械精度で一致することも確認する（分散成分から先の
    手計算がplmと同じ推定量を計算していることの検証）。
-3. **R²（between/overall）**: `linearmodels`が使えず、plmに相当する統計量が無いため、plmの係数から
-   定義どおりに計算した値と比較する（`re-spec.md`5章）。
+3. **R²（between/overall）**: plmに相当する統計量が無いため、plmの係数から定義どおりに計算した値と
+   比較する（`re-spec.md`5章）。`zero_variance_regressor`・不均衡の2シナリオは
+   `test_re_reference.py`がlinearmodelsとも比べる（不均衡パネルのbetween R²は除く）。
 
 ## 参照実装
 
-`linearmodels.RandomEffects`は時間不変の列も内部FEの自由度に数えるためσ_ε²が食い違い、
-参照にできない。ハウスマン検定は`plm::phtest(method="aux")`が検定する係数を位置で選び
+全cov_typeとハウスマン検定の主リファレンスは`plm`。`linearmodels.RandomEffects`（7.1）も
+時間不変の列をwithin回帰の自由度に数えず同じ値になるため、`zero_variance_regressor`・
+不均衡の2シナリオ・wagepanの時間不変版は`test_re_reference.py`がclassical・hc1で
+2つ目の参照として比べる。ハウスマン検定は`plm::phtest(method="aux")`が検定する係数を位置で選び
 間違えるため、補助回帰を再現して名前で選んだ値（`run_plm_hausman_tilde_benchmark.R`）が参照。
 フィクスチャ: `tests/fixtures/benchmarks/re_time_invariant.json`
 （`generate_re_time_invariant_fixtures.py`）。

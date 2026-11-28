@@ -1,7 +1,8 @@
 """不均衡パネルの1-way REの、statsmodels `GLS`とのクロスチェック。
 
 不均衡パネルの主リファレンスは`plm`（`test_re_crosscheck.py`・`test_re_time_invariant.py`）で、
-`linearmodels`はσ_u²の式が違うため参照にならない。このファイルは、`plm`の分散成分（`ercomp`の
+classical・hc1は`linearmodels`（`fit(small_sample=True)`、`test_re_reference.py`）とも比べる。
+このファイルは、`plm`の分散成分（`ercomp`の
 `sigma2`）から密な`Ω = σ_ε² I + σ_u² ZZ'`を組んだstatsmodelsの`GLS`と、係数・classicalと
 個体クラスター（t分布の自由度`G-1`）の標準誤差・係数の分散共分散行列・t統計量・p値・
 信頼区間・傾きの同時F検定を比べ、分散成分から

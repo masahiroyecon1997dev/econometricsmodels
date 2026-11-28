@@ -35,8 +35,9 @@
 
 本実装の1-wayのSwamy-Arora分散成分はplmの`swar`（不均衡では`dfcor = 3`のトレース形）と
 同じ式なので、`unbalanced`も他のシナリオと同じくplm自身のRE・`phtest`の値をそのまま
-参照値にする（分散成分`sigma2_eps`・`sigma2_u`も持つ）。`linearmodels`は不均衡パネルで
-σ_u²の式が異なるため、`re.json`はバランスパネルだけを持つ。
+参照値にする（分散成分`sigma2_eps`・`sigma2_u`も持つ）。`linearmodels`も
+`fit(small_sample=True)`なら同じ式になり、`re.json`がclassical・hc1で不均衡パネルも持つ
+（既定の`small_sample=False`はσ_u²の式が異なる）。
 
 ## entity以外の列でクラスターするケース
 

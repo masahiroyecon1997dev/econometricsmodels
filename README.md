@@ -264,8 +264,9 @@ model tests — for each supported covariance type.
 standard errors. Its cluster and Driscoll-Kraay standard errors use
 different small-sample corrections, so R (`fixest`, `plm`) is the primary
 reference for those. On unbalanced panels, linearmodels estimates the RE
-variance components differently, so `plm` is the primary reference for RE
-there. Which implementation checks which statistic is detailed on the
+variance components like this package and `plm` only with
+`small_sample=True`, which the comparison uses (its default differs there).
+Which implementation checks which statistic is detailed on the
 verification page.
 
 <sup>2</sup> There is no Python Tobit implementation, so both references are

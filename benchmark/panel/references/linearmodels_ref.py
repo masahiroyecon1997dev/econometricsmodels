@@ -64,7 +64,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
 ## RE（`run_re()`）固有の相違点
 
 `run()`（FE）とほぼ同型のパイプライン（パネルインデックス構築→`cov_type`別の
-設定組み立て→`fit()`→結果抽出）を共有するが、以下の3点がFEと異なる
+設定組み立て→`fit()`→結果抽出）を共有するが、以下の点がFEと異なる
 （`docs/spec/re-spec.md`3章・`engine/src/panel/CLAUDE.md`
 「RE」節参照、いずれも実測確認済み）。
 
@@ -89,6 +89,14 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/panel/freeze.py`参
    `"no applicable method for 'logLik'"`）なため。REのaic/bic/log_likelihood
    自体はOLS委譲による計算式（`docs/spec/re-spec.md`3.3節参照）で、この式自体の
    正しさはOLS本体のテストで別途担保されている。
+
+5. **`fit(small_sample=True)`で推定する**: 不均衡パネルの1-wayのSwamy-Aroraを、
+   `T_i`で重み付けしたbetween回帰とトレース形の分母（`plm`の`swar`、`dfcor = 3`）で
+   計算する。本実装（`docs/spec/re-spec.md`3.1節）と同じ式で、既定の
+   `small_sample=False`（重みなしのbetween回帰と調和平均`t_bar`）とは別の推定量になる。
+   バランスパネルでは両者が一致し、既定と同じ値を返す（実測確認済み）。
+   `rsquared_between`は`small_sample`に依らず個体を重み付けしないため、不均衡パネルでは
+   本実装（`T_i`で重み付け）と比べない（`generate_re_fixtures.py`参照）。
 
 `hc2`/`hc3`はFEと同じ理由（`linearmodels`が提供しない）で対象外——REは
 `plm::vcovHC(method="white1", type="HC2"/"HC3")`を唯一の参照実装とする
@@ -376,6 +384,7 @@ def run_re(
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
     y_col: str = "y",
+    df_override: pl.DataFrame | None = None,
 ) -> dict:
     """`RandomEffects`でREのベンチマーク値（係数・標準誤差・適合度統計量）を生成する。
 
@@ -398,10 +407,13 @@ def run_re(
         confidence_level: 信頼区間の信頼水準。
         dataset_source: "synthetic" または "wooldridge"。
         y_col: 被説明変数の列名。
+        df_override: 指定があれば`dataset_source`/`dataset`を無視し、この
+            DataFrameをそのまま使う（wagepanから行を落とした不均衡版など、
+            ロードしたデータを加工して渡す場合。`_load_panel_dataset`参照）。
     """
     from linearmodels.panel import RandomEffects
 
-    df, true_beta = _load_panel_dataset(dataset_source, dataset)
+    df, true_beta = _load_panel_dataset(dataset_source, dataset, df_override)
     pdf, n_entities, n_periods = _build_panel_index(df, entity_col, time_col)
 
     # REは切片を持つ（モジュールdocstring「RE固有の相違点」1参照）。
@@ -421,7 +433,9 @@ def run_re(
         n_periods=n_periods,
     )
 
-    res = mod.fit(cov_type=lm_cov_type, **cov_config)
+    # 不均衡パネルの1-wayのSwamy-Aroraを本実装と同じトレース形にする
+    # （モジュールdoc「RE固有の相違点」5参照）。
+    res = mod.fit(cov_type=lm_cov_type, small_sample=True, **cov_config)
 
     coef = {k: float(v) for k, v in res.params.to_dict().items()}
     se = {k: float(v) for k, v in res.std_errors.to_dict().items()}
@@ -471,6 +485,7 @@ def run_re(
         "generated_at": datetime.now(UTC).isoformat(),
         "cov_type_requested": cov_type,
         "cov_type_linearmodels": lm_cov_type,
+        "small_sample": True,
         "confidence_level": confidence_level,
         "hac_bandwidth": hac_bandwidth_used,
         "note": (

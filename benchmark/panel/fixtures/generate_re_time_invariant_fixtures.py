@@ -5,13 +5,14 @@ REは時間不変の説明変数（within変換後に分散がゼロの列）を
 （`docs/spec/re-spec.md`5章）。このフィクスチャは、その入力で
 `plm`（R、変量効果、Swamy-Arora）と一致することを確認するための参照値を持つ。
 
-## 参照実装が`plm`だけの理由（単一参照実装の例外）
+## 参照実装
 
-- **係数・標準誤差・F統計量**: `linearmodels.RandomEffects`は、時間不変の列も
-  within回帰の自由度に数えるため`σ_ε²`が`plm`と食い違い（`plm`は`cstcovar.rm =
-  "all"`で定数列を除く）、バランスパネルでも係数が4桁目から異なる。本実装は`plm`と
-  同じく実際に推定したwithin係数の数`k_tv`で自由度を数える
-  （`re-spec.md`5章）ため、`plm`が参照になる。
+- **係数・標準誤差・F統計量**: 全cov_typeで`plm`を参照にする。本実装は`plm`
+  （`cstcovar.rm = "all"`で定数列を除く）と同じく、実際に推定したwithin係数の数`k_tv`で
+  自由度を数える（`re-spec.md`5章）。`linearmodels.RandomEffects`（7.1、
+  `fit(small_sample=True)`）も同じ値になるため、`zero_variance_regressor`・
+  `time_invariant_unbalanced`・`time_invariant_multi_unbalanced`・wagepanの時間不変版は
+  classical・hc1で`re.json`（`generate_re_fixtures.py`）とも比べる。
 - **ハウスマン検定**: `plm::phtest(method = "aux")`は、検定する係数を位置で選ぶため、
   時間不変変数があると`X̃`ではなく`X*`の係数を検定してしまう
   （`run_plm_hausman_tilde_benchmark.R`モジュールコメント参照）。そのため
@@ -200,8 +201,8 @@ def build_fixtures() -> dict:
         "plm_version": plm_version,
         "note": (
             "時間不変の説明変数x_invariantを含むREの係数・標準誤差・F統計量は"
-            "plm（model='random'、swar）の値。linearmodelsは時間不変の列も"
-            "withinの自由度に数えるためσ_ε²が食い違い参照にできない。"
+            "plm（model='random'、swar）の値。classical・hc1はlinearmodels"
+            "（small_sample=True）とも一致し、re.jsonで別に比べる。"
             "ハウスマン検定はplm::phtest(method='aux')が時間不変変数で検定する"
             "係数を取り違えるため、その補助回帰を再現して係数を名前で選んだ"
             "独立な手計算（run_plm_hausman_tilde_benchmark.R）の値。"

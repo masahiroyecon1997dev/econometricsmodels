@@ -35,7 +35,8 @@
 # （`plm_vcov_function`・`plm_t_df`・`plm_t_inference`）。
 #
 # 不均衡パネルでは、plmのSwamy-Arora（`swar`、`dfcor = 3`のトレース形）は
-# linearmodelsの式（重みなしのbetween回帰と調和平均）と異なり、本実装はplmに合わせている。
+# linearmodelsの既定（`small_sample=False`。重みなしのbetween回帰と調和平均）と異なり、
+# 本実装はplmに合わせている（linearmodelsも`small_sample=True`ならplmと同じ式）。
 #
 # ## t検定への変換（plmの既定はz検定、慣習差の手計算——testing-policy.md
 # 「リファレンス実装」の優先順位3に該当）

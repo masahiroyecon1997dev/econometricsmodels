@@ -256,6 +256,50 @@ FEはwithin変換したデータの設計行列を`shared::orthonormal::Orthonor
   結果フィールドの差が大きく、無理に共通化すると可読性が落ちる。「抽出→バリデーション→
   engine呼出→結果構築」という大枠の流れだけ踏襲し、実装は個別に書く。
 
+### 4.7 engine_pybind（FE・RE・FEIV）
+
+- **`fit`のテスト**: `fit`は`SelectedData`（GILが要る）を取るので`cargo test`から直接呼べない。検証は`maturin develop`後の
+  Pythonからの数値照合（engineの単体テストと同じデータを`_lib.fit_*`に渡す）とエラー経路の確認で行う。純Rust部分の
+  `fit_frame`（`py.detach`の中で走る）は`Python`なしで呼べるが、専用のユニットテストは置いていない。
+- **件数**: `n_groups`は`effects`（列名）と`group_counts`（件数）の2つの非公開フィールドから`dict[str, int]`を作る。
+  個体数は`FeInput`/`ReInput`が構築時に数えた値、時点数は推定量が`fit`内で数えた値を使い、`engine_pybind`で数え直さない。
+  pickleの状態キーも`effects`・`group_counts`（旧版のpickleはキー集合の検査で弾かれる）。
+- **getterの使い分け**: FEの`params`・`residuals`・`log_likelihood`はwithin変換後の最小二乗の値、名前・`n_obs`は`within_input()`、
+  標準誤差・自由度・F・AIC/BIC・R²はFEが`cov_type`とパネルの自由度で計算し直した値。REの`log_likelihood`・`aic`・`bic`は
+  内部の`OlsEstimator`の値をそのまま使う（REの`df_model`は`OlsInput::k()`と一致するので再計算が要らない。`ReEstimator`は
+  `aic()`等を持たない）。それ以外の推論・`hausman_*`は`ReEstimator`自身のgetter。
+- **`fixed_effects()`の遅延計算**: `FEResult`は`LazyFixedEffects`（`FeEstimator`を`Arc`で持ち、初回の`fixed_effects()`か
+  pickleのときに計算して`OnceLock`に保持する）を持つ。エンティティ数に比例する辞書を使わない利用者に作らせないため。
+  pickleから復元した結果は計算済みの固定効果だけを持つ。`Arc`で共有するので`FEResult`は`Clone`できる（FEIVの`first_stage()`が
+  複製を返す）。`fit`の末尾で推定量を`LazyFixedEffects::new`へムーブするので、他のフィールドはそれより前に借用で計算する。
+  返す形は1-way・2-wayとも`{列名: {水準: 効果}}`の入れ子の`dict`（2.1節）。
+- **`x=[]`はFE・REとも`validate_role_non_empty`で拒否する**（engineのFEはk=0を受理する）。FEの固定効果のみのモデルは
+  説明変数のない別の操作になり、REの分散成分のみのnullモデル（ICC）は単独で意味があるが、明示的な決定が無いので他手法と
+  揃えた（nullモデルのサポートは別途検討）。`FEOptions`に`include_intercept`は無い（within変換で切片が消える）。
+- **`hc0`は専用の`code`（`COV_TYPE_NOT_AVAILABLE_FOR_MODEL`）で弾く**: OLS・WLS・IVでは有効な値で利用者が混同しやすいので、
+  他の未知の値と区別する。モデル名は`PanelModel`で切り替える。
+- **`cov_type`の検査は3段**: `parse_panel_cov_kind`（値）→`check_panel_cov_options`（`cluster`・`dk_time`・`dk_bandwidth`の未使用 →
+  `dk`での`dk_time`の欠落）→`resolve_fe_cov_type`/`resolve_re_cov_type`（列の抽出）。`build_{fe,re}_input`の報告順は、DataFrameを
+  見ない検査（`cov_type`の値 →（REは`variance_method`の値）→ 組合せ）→`validate_panel_roles`（`effects`の列数（空は`ROLE_EMPTY`、
+  上限FE=5・RE=2を超えると`EFFECTS_TOO_MANY`）→`x`が空 → 役割間の重複 →`x`内の重複 →`effects`内の重複 →`dk_time`の役割）→
+  列の抽出（`y`→`x`→`effects`→`cluster`/`dk_time`）。`tests/cross_method/test_validation_order.py`が固定する。役割の検査のテストは
+  `validate_panel_roles`を直接呼ぶ形で`common.rs`に集約する。REの`variance_method`は`build_re_input`の中でパースして返す。
+- **`effects`の列の型は位置で決まる**: `effects[0]`は同一性だけのキー（`extract_entity_groups`）、`effects[1]`は時点のキー
+  （`extract_time_keys`）、FEの3つ目以降は同一性だけのキー。エラーの`argument`は`"effects"`に揃え、どの列かは`column`で示す
+  （エンジンは`with_effect_names`で列名を受け取るだけで計算に使わない）。`EFFECTS_TOO_MANY`の文面は上限だけを示す
+  （同じ`code`は同じ`hint`）。`dk_bandwidth`は時点数ベースで観測数ベースの`hac_lags`と意味が違うので別名にした。
+- **キー列のコード化**: `effects`・`cluster`・`dk_time`は行ごとの`String`を作らず、列の値そのもの（文字列・整数の内部表現・
+  浮動小数のビット列）でハッシュして仮コードを振り、ユニークな値ごとにだけ文字列表現を作って`engine`（`GroupCodes::from_factorized*`・
+  `TimeKeys::*_factorized`）に渡す。辞書順・同じ文字列になる値のまとめ方・時点の順序づけは`engine`の規則で、`engine_pybind`は
+  等しさの判定と時点の代表値の取り出しだけを担う。`extract_time_keys`は`TimeKeys`がpanelの型なので`panel/common.rs`に置く。
+  旧経路（行ごとに`String`を作る`extract_group_key_column`）は、同じコードになることを確かめるテストのオラクルとして
+  `#[cfg(test)]`で残している。
+- **空・空白だけのラベルは`factorize_checked_key`で拒否する**（`COLUMN_BLANK_LABEL`。`effects`・`cluster`・`dk_time`の全てが通る1か所）。
+  時点列に空文字列が入ると以前は`SINGLETON_GROUP`に見えて原因が分からなかった。仮グループごとの代表値だけを`str::trim`で調べるので
+  費用は仮グループの数に比例し、全行を数え直すのは該当があったときだけ。データに現れないカテゴリは検査しない。`"NA"`・`"null"`や
+  前後に空白のあるラベルは正当なラベルとして通す。nullの検査が先なので、nullと空白が混在すればnullが先に報告される。
+  旧経路のオラクルはこの検査を持たないので、オラクルと比べるテストのラベルに空文字列を使わない。
+
 ## 5. リファレンス実装・テスト方針
 
 ### 5.1 Python主リファレンス

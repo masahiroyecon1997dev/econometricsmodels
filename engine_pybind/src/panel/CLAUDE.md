@@ -1,6 +1,6 @@
 # engine_pybind/src/panel/ 実装ノート（FE/FEIV/RE）
 
-このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景は `docs/spec/panel-common.md`（4.7節がバインディング）/ `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（4章がバインディング）が正本（このファイルはその要約ではなく差分の索引）。
+このファイルは `engine_pybind/src/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景は `docs/spec/panel-common.md`（4.7節がバインディング）/ `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` / `docs/spec/fe-iv-spec.md`（4章がバインディング）が正本（このファイルはその要約ではなく差分の索引）。FEIVだけに関わる罠は`fe_iv/CLAUDE.md`に分けてある（下の「サブディレクトリのノート」）。
 
 **エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。実測値・調査の経緯・不採用案の詳細はspecに置き、ここには書かない。
 
@@ -8,6 +8,12 @@
 
 - FE・REは`panel/fe.rs`・`panel/re.rs`に`*Options`/`*Result`と`build_*_input`（列の抽出・検証・`FeInput`/`ReInput`の構築）・`fit`を置き、`lib.rs`の`fit_fe`/`fit_re`が呼ぶ。FE・RE（・FEIV）で共有するもの（エラー変換・`cov_type`の検査・`effects`の検査と抽出・`n_groups`の組み立て・`extract_time_keys`）は`panel/common.rs`。FEIVは`panel/fe_iv.rs`＋`fe_iv/`（`options`・`option_values`・`gmm_setup`・`input`・`fit`・`result`）で、構成は`iv/common/`と同じ。
 - **`fit`は`cargo test`から直接呼べない（`SelectedData`がGILを要る）ので、数値はPythonからの照合で確かめる。FEIVは`tests/panel/test_fe_iv_binding.py`・`test_fe_iv_gmm_binding.py`が`_lib.fit_fe_iv`を直接呼ぶ**: 純Rust部分の`fit_frame`は`Python`なしで呼べるが、専用のユニットテストは無い。詳細: `docs/spec/panel-common.md`4.7節。
+
+## サブディレクトリのノート
+
+次のファイルは、そのディレクトリ配下のファイルを読み書きするときに、このファイルと一緒に自動ロードされる。`panel/fe_iv.rs`（モジュールの宣言）を読むだけではロードされないので、FE・REとFEIVをまたぐ変更では明示的に読む。
+
+- `fe_iv/CLAUDE.md`: FEIV（2SLSとGMMを1クラスにする・`gmm_weight_type`の既定・未使用オプションの検査・呼び出し時の再変換・標準誤差の数値の検証の分担）。
 
 ## FE・RE
 
@@ -22,14 +28,6 @@
 - **`effects`・`cluster`・`dk_time`は行ごとの`String`を作らずにコード化する。順序と値のまとめ方は`engine`に任せ、`engine_pybind`は等しさの判定と時点の代表値の取り出しだけを担う。旧経路`extract_group_key_column`は`#[cfg(test)]`のオラクルとして残す**: 詳細: `docs/spec/panel-common.md`4.7節。
 - **空・空白だけのラベルは`factorize_checked_key`の1か所で`COLUMN_BLANK_LABEL`にし、検査は仮グループの代表値だけで行う（全行を数えるのは該当があったときだけ）。オラクルと比べるテストのラベルに空文字列を使わない**: 時点列の空文字列は以前`SINGLETON_GROUP`に見えた。旧経路のオラクルはこの検査を持たない。`"NA"`・前後に空白のあるラベルは正当なラベル。詳細: `docs/spec/panel-common.md`4.7節、`docs/guide/validation.md`。
 - **`REOptions`のフィールド（`variance_method`等）は末尾に追加する**: `FEOptions`と先頭の並びを揃える（`repr`の順とAPIページに出る）。`variance_method`は`build_re_input`の中でパースして返し、`fit`で別にパースしない。詳細: `docs/spec/re-spec.md`1章。
-
-## FEIV（`panel/fe_iv.rs`と`fe_iv/`）
-
-- **2SLSとGMMは1つのクラス（`FEIVOptions.estimator`）にし、両推定量で結果の項目・メソッドを同じにする（推定量ごとに`None`やエラーで差を作らない）**: IVと同じインターフェースにする。詳細: `docs/spec/fe-iv-spec.md`2.1節・2.4節。
-- **`gmm_weight_type`の既定は`cluster`（IVの`classical`と逆。`cov_type`の既定に揃う）。重みの語彙は`classical`・`robust`・`cluster`の3つで、`hac`は`parse_choice`の`OPTION_UNKNOWN_VALUE`で弾き専用の`code`を足さない。`GmmKind`・`WeightKind`は`iv/common`のものを使い回さない**: `FeWeightType`が`Hac`を型で持たないのと揃える。`tol`・`max_iter`は交互射影用で`gmm_tol`・`gmm_max_iter`とは別。詳細: `docs/spec/fe-iv-spec.md`2.3節。
-- **使われないオプションの明示指定は`check_fe_iv_options`で`OPTION_UNUSED`にする。`estimator="gmm"`の`cluster`は「`cov_type="cluster"`」か「重みを使う`gmm_type`で`gmm_weight_type="cluster"`」のどちらかが使えば有効**: 判定表は`option_values.rs`の`mod tests`。詳細: `docs/spec/fe-iv-spec.md`2.3節。
-- **診断・`fixed_effects()`・`c_stat()`は呼び出し時に`source_data`と`FEIVOptions`から`build_fe_iv_input`で推定量を作り直して計算する（`with_estimator`、`Estimated`の両アームを書く）**: 結果は設計行列を持たない（1回呼ぶごとに推定が1回走る）。`c_stat`の重みはGMMなら`fit()`の重み（`one_step`は`Classical`）、2SLSなら`cov_type`の系統で、2SLSの`Dk`は再推定の前に`C_STATISTIC_COV_TYPE_NOT_SUPPORTED`で弾く。詳細: `docs/spec/fe-iv-spec.md`2.5節・3.5節・4章。
-- **`cluster`・`dk`の標準誤差の数値はengineの単体テストに任せ、バインディングのテストは配線（`cluster`の共用・既定）だけを見る。新しい`#[pyclass]`は`tests/cross_method/test_pickle.py`の`SAMPLES`に足す**: 詳細: `docs/spec/fe-iv-spec.md`6.1節。
 
 ## Rust側の罠
 

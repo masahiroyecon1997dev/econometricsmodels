@@ -1,6 +1,6 @@
 # engine/src/linear/ 実装ノート（OLS/WLS）
 
-このファイルは `engine/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式・実測は`docs/spec/ols-spec.md`・`docs/spec/wls-spec.md`・`docs/spec/orthogonal-coordinates.md`が正本（このファイルはその要約ではなく差分の索引）。
+このファイルは `engine/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式・実測は`docs/spec/ols-spec.md`・`docs/spec/wls-spec.md`・`docs/spec/orthogonal-coordinates.md`が正本（このファイルはその要約ではなく差分の索引）。事後診断（`diagnostics/`）だけに関わる罠はサブディレクトリの`CLAUDE.md`に分けてある（下の「サブディレクトリのノート」）。
 
 **エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。実測値・調査の経緯・不採用案の詳細はspecに置き、ここには書かない。
 
@@ -8,6 +8,12 @@
 
 - `ols.rs`・`wls.rs`・`diagnostics.rs`は外から見える面（構造体・getter・`fit*`の契約と委譲・`wald_test_last_columns`・再エクスポート）だけを持つファサードで、ロジックは`ols/`（`fit`・`auxiliary`・`wald`・`cov_type`・`cov_params`・`input`・`predict`）・`wls/`（`fit`・`statistics`）・`diagnostics/`（`aux_regression`・`white`・`breusch_pagan`・`breusch_godfrey`）にある。`ols/cov_params.rs`は`shared::covariance`の部品をOLS固有の規則でつなぐ層で、`LeastSquaresError`を返すので`shared/`に置けない。`fit`を通すテストと`mod proptests`は`ols/fit/tests/`、`cov_params.rs`のテストは`ols/cov_params/tests/`にテーマ別。
 - 共分散・Wald検定・直交座標のQR・適合度・グループ化の部品は`engine/src/shared/`（`covariance`・`wald`・`orthonormal`・`goodness_of_fit`・`group_codes`。`least_squares`はテスト用の独立な参照実装だけ）にあり、`linear`のエラー型に依存しない（`CommonError`・`RankDeficient`を返し、呼び出し側が`map_err`する）。`engine`は列名を知らないので、列名の重複など列名が要る検証は`engine_pybind`の責務（`engine_pybind/src/linear/CLAUDE.md`）。
+
+## サブディレクトリのノート
+
+次のファイルは、そのディレクトリ配下のファイルを読み書きするときに、このファイルと一緒に自動ロードされる。ファサードの`diagnostics.rs`を読むだけではロードされないので、ファサードだけを変えるときや、補助回帰（`ols/auxiliary.rs`）と診断をまたぐ変更では明示的に読む。
+
+- `diagnostics/CLAUDE.md`: 事後診断（White・Breusch-Paganの補助回帰の標準化と項の選び方、`R²`の非有限の判定、Breusch-GodfreyのQRと行列の確保）。
 
 ## 計算の経路と数値
 
@@ -42,11 +48,3 @@
 - **被説明変数の定数（`OutcomeConstant`）・完全フィット（`PerfectFit`、`SSR <= k·ε·SST`）の判定は`fit`/`fit_with_optional_f_test`だけが行う。被説明変数が元のモデルの`y`でない回帰（診断の補助回帰、REの最終回帰）には`fit_auxiliary`か`AuxiliaryFit::fit(.., false)`を使う。新しい呼び出し元は「この回帰の結果を利用者にモデルの結果として見せるか」で選ぶ**: `SST`は`OlsInput`が元の`y`と重みから持つ（`outcome_sst`。WLSの変換後の`y`の平均で中心化した値は別の量）。ノイズなしの`y`をテストに使うと`PerfectFit`になる。詳細: `docs/spec/ols-spec.md`3.3節。
 - **`fit_releasing_design`（設計行列をその場で分解して手放す）は`engine_pybind`のOLS・WLSだけが使い、後で`input().x()`を読む呼び出し元（REの最終回帰、IVの第一段階）は`fit`のまま。事前検査は`preflight`を`fit_ols`と`AuxiliaryFit::fit`で共有し、片方だけ変えない**: 手放した後に`OlsInput::x()`を呼ぶとpanicする。`fit`との違いは`fitted_values()`（`Q·b̃`）だけで、QR以降を変えたら`ols/fit/tests/release_design.rs`と`ols/auxiliary.rs`のテストが落ちる。詳細: `docs/spec/ols-spec.md`3.1節。
 - **Python経由のピークRSSは、確保そのものをなくす変更と、mmapされる大きい行列の解放でしか下がらない。効果は`resource.getrusage`で変更前後を測って確かめる**: glibcの動的なmmap閾値のため、8MB級の列を早く`drop`してもRSSは下がらない。詳細: `docs/performance/ols.md`「メモリ」。
-
-## 事後診断（`diagnostics/`）
-
-- **White・Breusch-Paganの補助回帰は列を標準化してから`OlsEstimator::fit`に渡し、`fit`のエラーは検定の文脈（`White test:`）に言い換える（`aux_fit_error`）**: 平均が標準偏差より桁違いに大きい変数の二乗項が元の列とほぼ共線になり、特異性判定・条件数チェックで誤って失敗した。詳細: `docs/spec/ols-spec.md`3.9節。
-- **`R²`を`max(0.0)`で丸める前に`is_finite()`を判定する**: `f64::max`/`min`はNaNを無視し（`NAN.max(0.0) == 0.0`）、非有限の`R²`が統計量0.0として静かに返る。回帰ガード: `white_rejects_non_finite_residuals_instead_of_masking_nan`。詳細: 同上。
-- **補助回帰の項から、定数の説明変数（`include_intercept=false`に入れた定数列）を含む項は値の比較を待たず除く（Whiteのみ。BPの`z`には要らない）**: `c*x_k`は`c != 1`だと`x_k`と数値的に同一にならず、重複判定をすり抜けてランク落ちになる。回帰ガード: `white_drops_terms_that_involve_a_constant_other_than_one`。詳細: 同上。
-- **Breusch-Paganは補助回帰以降をWhiteと共有し（`aux_regression.rs`の`select_aux_terms`→`squared_residual_aux_test`）、違いは候補項だけにする。Koenker版（`n·R²`）のみ**: 詳細: `docs/spec/ols-spec.md`3.11節。
-- **Breusch-Godfreyは`OlsEstimator::fit`を使わず、列ノルムでスケールした列ピボットQRで`SSR_u`だけを求める。列を中心化しない。Fの分子`Σû² - SSR_u`はOLS残差のときだけ成り立つ。補助回帰の行列は`try_reserve`してから埋める**: 切片なしのモデルは中心化すると列空間が変わる。WLS等の非直交な残差では過大になる。確保失敗は`BREUSCH_GODFREY_MATRIX_TOO_LARGE`。詳細: `docs/spec/ols-spec.md`3.10節。

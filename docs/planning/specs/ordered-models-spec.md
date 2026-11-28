@@ -416,3 +416,33 @@
 - `docs/guide/accepted-data.md`: 順序モデルの`y`（整数コード、任意の開始値）。
 - `docs/guide/error-codes.md`: 生成物（`tools/render_error_catalog.py`）。
 - テスト: `tests/cross_method/test_validation_order.py`の`FAULTS`（新しい`code`の段階と順位）、`test_perfect_fit.py`（定数の`y`）、`tests/support/_errors.py`の`MIGRATED_CODES`。
+
+## 12. 実装の進め方（次のセッションへの引き継ぎ）
+
+### 12.1 タスクの順序
+
+1. **共通基盤**（Issue「Ordered models: 入力型・カテゴリバリデーション共通基盤」）: `y`の検証（整数・カテゴリ数・欠番）、閾値名の衝突・定数列の検査、新しいエラー`code`（11.2）、順序モデルの分離のLP（6章）と`DenseSimplex`の変数50個までの回帰テスト。
+2. **OrderedLogit engine**: 尤度・スコア・Hessian（5章の対数空間の式）→ `fit`（直接`τ`・中心化・初期値・`stpmax`・分離チェック）→ `cov_type` → 適合度 → カテゴリ別確率・`pred_table`。
+3. **OrderedLogit engine_pybind → python_package**（`params_table()`・閾値の名前・`categories`/`cutpoints`/`cutpoint_names`・`predict()`の`dict`・`augment()`・pickle・GIL）。新しい`code`を`UNREACHABLE_CODES`から`MIGRATED_CODES`へ移す。
+4. **OrderedLogit ベンチマーク・テスト**（`/test-new`。9章の表・10章のデータ）→ ドキュメント → 性能比較。
+5. **OrderedProbit**: `ln_normal_cdf`（`shared::normal`）→ リンク非依存の部分を`nonlinear/common/`へ抽出 → 2〜4と同じ。
+6. **限界効果**（`marginal_effects()`の追加のIssue）: Rの`marginaleffects::avg_slopes(polr)`が主リファレンス。
+
+### 12.2 最初のセッション（共通基盤）で行うこと
+
+1. **作業場所**: `/workspaces/econometricsmodels`の`release/v0.11.0`。並行する別作業の未コミットの変更がありうるので、コミットは自分のファイルだけをステージする。署名のたびにホスト端末で確認が出る（`.claude/rules/commit-signing.md`）。
+2. **読むもの**: 本ノートの1〜11章（特に1章の表、6章、11章）。`engine/src/nonlinear/CLAUDE.md`（自動で読まれる）。`docs/spec/error-handling.md`の3.1・4・5.2〜5.4章と`docs/spec/error-style-guide.md`。
+3. **既存実装の調査**（CLAUDE.md 4章。Exploreエージェントに委ねる）: `nonlinear/common/validation.rs`（`validate_binary_y`・`validate_fit_preconditions`・`validate_outcome_not_constant`）、`nonlinear/separation.rs`・`separation/lp.rs`・`separation/rows.rs`、`shared/linear_program.rs`（`BoxBoundedLp`・`DenseSimplex`）、FEの定数列の検査（`panel/common/validation.rs`の`RegressorConstant`）、`shared/error_catalog.rs`へのエラーの足し方（`.claude/rules/rust-style.md`のエラーハンドリング節の手順1〜5）。
+4. **計画**: `/implement-rust`で計画を立て、着手前に次の未決事項をユーザーに確認する（CLAUDE.md 14章）。
+   - 新しい`code`の最終的な名前（特に`REGRESSOR_CONSTANT_WITH_CUTPOINTS`は仮）と文面（`error-style-guide.md`のチェックリスト）。
+   - 新しい`code`をPythonから送出できるのはOrderedLogitのバインディングの後なので、それまで`tests/support/_errors.py`の`UNREACHABLE_CODES`に理由つきで登録する（`tests/cross_method/test_error_catalog.py`がカタログの全`code`の登録を検査する）。この進め方でよいか。
+   - `validate_categorical_y`の返り値（コードの一覧・最小値等）と、多項ロジットが後で再利用できる引数の形。
+5. **実装の注意**:
+   - 分離のLPは、制約の行を中心化・標準化した`x`から都度計算し（複製しない）、`K`に応じて端のカテゴリは1行、中間は2行。判定は最大マージン`>1e-6`。**`DenseSimplex`は変数30個までしかテストされていない**ので、`k+K-1`が約50になる場合の回帰テストを最初に足して確かめる（右辺0の錐の退化に注意。`engine/src/nonlinear/CLAUDE.md`の分離検出の節）。
+   - 分離のLPの単体テスト: 最上位カテゴリだけに現れるダミー（分離）・最下位だけ（分離）・1観測を隣のカテゴリに足したもの（分離なし）。ランダムな小標本でLPとMLEの存在の一致を見る試験は、`fit`ができる段階（OrderedLogit）で足す。
+   - 新しい`code`を足したら、`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`、`maturin develop`の後に`python tools/render_error_catalog.py`（`docs/guide/error-codes.md`と`error_codes.py`を生成し直す）。
+6. **確認**: `cargo test -p engine`・`cargo clippy --all-targets -- -D warnings`・`cargo fmt --check`、`pytest tests/cross_method`（カタログ・検査順の検査）。コミット前に`/review-rust`。
+
+### 12.3 プロトタイプについて
+
+C1・C4・C5・F1・F4の実験は、セッションのscratchpad（`/tmp/claude-1000/.../scratchpad/`）のPythonプロトタイプで行い、永続化していない。結果と数値は本ノートの各章に記録してあるので、実装では本ノートを根拠にする（プロトタイプが消えていても困らない）。

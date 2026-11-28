@@ -73,8 +73,8 @@ test = [
     # MOP有効F統計量のオラクル（`benchmark/iv/references/mop_oracle.py`）が使う
     # `ncx2`の分位点。statsmodels/linearmodelsの間接依存としても入るが、オラクルが
     # 直接importするため明示し、数値が変わらないよう`==`で固定する。
-    "scipy==1.18.0",
-    "ruff==0.17.4",
+    "scipy==1.18.1",
+    "ruff==0.17.5",
     # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
     # wooldridge_loader）。標準CIで確実に実行されるよう
     # 専用グループからここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
@@ -106,7 +106,7 @@ audit = [
 # postCreateCommandでもtestグループと併せて導入する）。
 docs = [
     "mkdocs==1.6.1",
-    "mkdocs-material==9.8.0",
+    "mkdocs-material==9.8.1",
     "mkdocstrings[python]==1.0.8",
 ]
 

@@ -1,7 +1,7 @@
 # uvのバイナリ取得元。Dependabot(docker)は`FROM`行しか解析せず、`COPY --from=<image>`に
 # 直接書いた参照は追跡されないため、`FROM ... AS uv`のステージとして宣言し、
 # 下の`COPY --from=uv`で参照する。版とダイジェストの更新はDependabot(docker)が行う。
-FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 # ベースイメージはタグだけでなくダイジェストでも固定する(同じタグの中身が差し替わっても
 # 検知できる)。ダイジェストの更新はDependabot(docker)が行う。

@@ -1,6 +1,6 @@
 # engine/src/iv/ 実装ノート（2SLS/GMM）
 
-このファイルは `engine/src/iv/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式・実測は`docs/spec/iv-spec.md`（GMMの白色化は`docs/spec/orthogonal-coordinates.md`4.2節）が正本（このファイルはその要約ではなく差分の索引）。
+このファイルは `engine/src/iv/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式・実測は`docs/spec/iv-spec.md`（GMMの白色化は`docs/spec/orthogonal-coordinates.md`4.2節）が正本（このファイルはその要約ではなく差分の索引）。GMMだけ、または`common/`の第一段階・診断だけに関わる罠はサブディレクトリの`CLAUDE.md`に分けてある（下の「サブディレクトリのノート」）。
 
 **エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。実測値・調査の経緯・不採用案の詳細はspecに置き、ここには書かない。
 
@@ -8,6 +8,13 @@
 
 - `two_sls.rs`・`gmm.rs`・`common.rs`は外から見える面（構造体・getter・`IvEstimate`実装・`fit`の契約と委譲・再エクスポート）だけを持つファサードで、ロジックは`two_sls/`（`fit`・`cov`・`overid`・`sargan`）・`gmm/`（`fit`・`hansen_j`・`sandwich`・`c_statistic`）・`common/`（`error`・`input`・`validation`・`wu_hausman`・`first_stage`・`estimate`・`weak_instruments`・`proptest_support`）にある。テストはロジックと同じファイルの`mod tests`（`fit`を通すテストと大きいファイルは`<ファイル名>/tests/`にテーマ別）。
 - **GMMの点推定の反復（`GmmType`・`gmm_iterate`・収束判定）・重み行列`S`（`WeightType`・`moment_covariance`・`validate_weight_type`）・白色化した座標の解（`shared/gmm.rs`）・C統計量の核は`engine/src/shared/`にある**（`gmm_iteration.rs`・`gmm_weight.rs`・`gmm.rs`・`gmm_c_statistic.rs`）: 固定効果つきGMM（`panel/fe_iv/gmm`）がwithin変換後の行列で同じコアを呼ぶため、行列だけを受け取り`CommonError`を返す。2SLSの行列版の部品（点推定・Sargan・部分F・Wu-Hausmanの列）は`shared/instrumental_variables.rs`、弱操作変数診断の核は`shared/`の`weak_instruments.rs`・`kleibergen_paap.rs`・`effective_f.rs`・`score_covariance.rs`。これらを`fit`越しに確かめるテストは`gmm/fit/tests/`（`iteration.rs`・`weight_validation.rs`・`weight_robust_hac.rs`・`weight_cluster.rs`）。
+
+## サブディレクトリのノート
+
+次のファイルは、そのディレクトリ配下のファイルを読み書きするときに、このファイルと一緒に自動ロードされる。ファサード（`two_sls.rs`・`gmm.rs`・`common.rs`）や、核を置いた`engine/src/shared/`のファイル（`gmm*.rs`・`weak_instruments.rs`・`kleibergen_paap.rs`・`effective_f.rs`等）を読むだけではロードされないので、それらを変えるときや、トピックをまたぐ変更では該当ファイルを明示的に読む。
+
+- `gmm/CLAUDE.md`: GMMの方式・収束判定・重み行列`S`・白色化した座標・サンドイッチ・`cov_type`の中心化と小標本補正、Hansen J・C統計量・GMMのWu-Hausmanの順序。
+- `common/CLAUDE.md`: 第一段階の`OlsInput`、弱操作変数の診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）、Wu-Hausman。
 
 ## 新しいIV系手法の`fit()`に入れるもの
 
@@ -22,32 +29,11 @@
 - **クラスター列は`engine_pybind`が一度だけ整数コード（`GroupCodes`）にして渡し、engineは`String`列を受け取ってコード化し直さない。`cov_type`と`gmm_weight_type`のコードは同じ列名でも別物として扱う**: 第一段階・Wu-Hausmanの拡張回帰・反復GMMで同じコードを借りる。詳細: `docs/spec/iv-spec.md`3.1節。
 - **定数の`y`（切片あり）は第一段階より前に`validate_outcome_not_constant`で弾く。完全フィットは構造残差`y - Xβ̂`で判定する（2SLSは`ssr`の直後、GMMは初期推定の残差で`S`が0になる前）。第二段階（`X̂`への回帰）と部分Fの制限モデルでは判定しない**: 第二段階は別の量。テストで操作変数が内生変数を完全に予測するデータ（`x_endog = z`）を使うと第一段階が`PERFECT_FIT`（`stage=FIRST_STAGE`）で失敗する。詳細: `docs/spec/iv-spec.md`1.1節。
 
-## 第一段階と診断統計量
+## 診断統計量の方針と過剰識別検定
 
-- **第一段階の`OlsInput`には、焼き込み済みの定数項列を除いた素の`x_exog`と`include_intercept=input.has_intercept()`を渡す（`without_baked_in_intercept`）。`include_intercept=false`で二重切片を避けない**: `has_intercept`は`k_constant`も兼ねるので、`false`だと第一段階の`r_squared`が静かに誤り（参照実装との比較では検出できない）、`G=2`の最小ケースが`ComputationError`になる。Wu-Hausmanの拡張回帰も同じ。回帰ガード: `two_sls/cov/tests/validation.rs`の`fit_succeeds_with_cluster_g2_boundary_when_x_exog_is_empty`、`tests/iv/test_iv_api.py`の`test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`、`tests/iv/test_iv_first_stage.py`。詳細: `docs/spec/iv-spec.md`3.7節。
 - **新しい診断統計量では「`cov_type`に追従するか、固定の計算方式か」と「失敗したら`fit()`ごと失敗させるか、その統計量だけ`None`にするか（`None`にする理由をどこまで広げるか）」を独自に決めず、都度ユーザーに確認する**: 既存の判断は統計量ごとに違う（弱操作変数のFは常に等分散前提、Wu-Hausmanと2SLSの過剰識別検定は`cov_type`に追従、Sargan・GMMのHansen Jの失敗は伝播）。詳細: `docs/spec/iv-spec.md`3.4節〜3.6節。
-- **弱操作変数の部分F（`partial_f_statistic`）は`cov_type`によらず常に等分散前提のネストF検定**: Stock-Yogoの臨界値が等分散前提で較正されている。`x_exog=[]`かつ切片なしでは制限モデルが0列になり、SSRは`y_endog`自体の二乗和（`OrthonormalDesign::new_checked`は0列を受理する）。退化した制限モデルが0変数になるケースを見落とさない。制限モデルは制限なしモデルの列の部分集合なので、その`new_checked`の失敗は理論上到達不能として`?`で伝えるだけ。回帰ガード: `two_sls/fit/tests/basic.rs`の`fit_computes_weak_instrument_f_statistic_when_x_exog_is_empty_and_no_intercept`。詳細: `docs/spec/iv-spec.md`3.4節。
-- **Wu-Hausman（`common/wu_hausman.rs`、2SLS・GMM共通）は`fit()`の`cov_type`に追従し、想定内の失敗（拡張回帰の`PerfectFit`・`SingularMatrix`・`InsufficientObservations`・`UnitLeverage`）だけを`None`にする。それ以外（Wald側の`NearSingularMatrix`を含む）は`HausmanRegressionFailed`として伝播する**: 広すぎる`Err(_)`のキャッチは将来の実装バグを`None`で隠す。拾う失敗は`is_expected_failure`に明示する。結果は`?`ではなく`match`で振り分ける。詳細: `docs/spec/iv-spec.md`3.6節。
-- **Wu-Hausmanのp値の分母自由度は拡張回帰自身の`df_resid`（主構造式の`df_resid - n_endog`）。統計量とp値は別々に照合する**: 主構造式の自由度を流用しても統計量は機械精度で一致し、p値だけがずれるので見逃しやすい。詳細: `docs/spec/iv-spec.md`3.6節。
-- **GMMのWu-Hausmanは、点推定・共分散・Wald・Hansen Jの後に回し、第一段階の残差は借用で受け取る（`fit_with_first_stage_residuals`。`engine_pybind`が先に回した残差を渡し、第一段階を二重に回さない）。補助回帰の前に`x`・`z`・`GmmSolution`を`drop`する**: 構造式のエラーを先に返し、第一段階の残差と同時に持つ時間を短くする。GMMの重みにも点推定にも依らないので、同じデータ・`cov_type`なら2SLSと同じ値（`gmm/fit/tests/wu_hausman.rs`）。詳細: `docs/spec/iv-spec.md`3.6節。
-- **2SLSの過剰識別検定（`two_sls/overid.rs`）は`cov_type`に追従する。`Classical`以外は2SLS残差から重み`S`を作ってGMMを再推定した解のHansen Jにし、2SLS残差のままの`(Z'e)'S⁻¹(Z'e)`は使わない。`None`にするのは丁度識別・`Cluster`で`G<l`・重みの白色化と`Ĝ`の分解の`NearSingularMatrix`の3つだけ**: 2SLS残差での形はχ²に従わず、不均一分散で棄却率が名目からずれる。診断1つのために`fit()`を失敗させない（近共線な外生変数×クラスターで実際に退行した）。回帰ガード: `two_sls/overid.rs`の`equals_the_two_step_gmm_hansen_j_of_the_same_weight`、`tests/cross_method/test_near_collinear_exact.py`。詳細: `docs/spec/iv-spec.md`3.5節。
-- **GMMのHansen J（`gmm/hansen_j.rs`）は`n`で割らない**: `S`は`n`で正規化していない生の和なので、標準形の`n`は相殺して`J=(Z'ê)'S⁻¹(Z'ê)`。`/n`にすると常に`1/n`倍に過小評価され、オラクルに同じ`/n`を複製する自己参照的な検証では検出できない。**`S`の正規化の有無を前提にする統計量では、自己参照的でない検証（Sarganとの一致等）を必ず用意する**。詳細: `docs/spec/iv-spec.md`3.5節。
-- **`OneStep`と`gmm_weight_type=Classical`のHansen Jの`S`は`σ̂²₀・Z'Z`（`σ̂²₀ = ê₀'ê₀/n`）**: 点推定はスカラー倍で不変だが、Jは絶対スケールに依存する。これで`Classical`×`TwoStep`のJが2SLSのSarganに一致する。回帰ガード: `gmm/hansen_j.rs`の`fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_classical`、`gmm/fit/tests/basic.rs`の`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`。詳細: `docs/spec/iv-spec.md`3.5節。
 - **Sargan・GMMのHansen Jの計算失敗は`None`にせず`IvError`として伝播する**（2SLSのロバストな過剰識別検定は別）: 使う行列は点推定で反転済みの行列の再利用で、特異は理論上到達不能。詳細: `docs/spec/iv-spec.md`3.5節。
-- **C統計量（核は`shared/gmm_c_statistic.rs`）の`J_c`の重みは`S_e`の部分行列の逆行列`S_c⁻¹`にし、`S_e⁻¹`の部分行列にしない。`J_c`の点推定も`Z_c`で推定し直す**: 共通の`S`から作るので`C = J_e − J_c ≥ 0`になる（`S_e⁻¹`の部分行列だと負になりうる）。常に2段階で重みの種類だけを引き継ぎ、クラスターは`G < l_full`で未定義、`validate_weight_type`は呼ばない（文面が`gmm_weight_type`のもの）。詳細: `docs/spec/iv-spec.md`3.9節。
-- **Cragg-Donaldの外生変数（定数列込み）は平均を引かず偏回帰で落とす。ランクの判定は列をノルム1にそろえてから行い、`Z`・`Y`が`X`の張る空間にほぼ入る場合は直交化後のノルムを元のノルムと比べて弾く**: 平均を引くと重みつきで切片が合わない。`checked_col_piv_qr`の閾値は自分自身の最大対角に対する相対値なので、`q=1`で`z∈span(X)`の丸め誤差の1列を見逃す。`fit()`はCD・KP・有効Fを呼ばない（バインディングが`compute_*`を呼ぶ）。詳細: `docs/spec/iv-spec.md`3.4.1節。
-- **Kleibergen-Paapの`cov_type`対応は、linearmodelsの`robust`のFが`Hc1`、LMが`Hc0`。ランク落ちの共分散に一般化逆行列を使わず`None`にし、LMとWald Fの定義可否は独立に返す。固定効果を吸収したHC2・HC3は`ScoreCovariance::HcAbsorbed`（吸収した効果のレバレッジを足す）を使い、`n_absorbed > 0`の`Hc(..)`のHC2・HC3は`None`**: fixestの`kpr`は参照にならない。詳細: `docs/spec/iv-spec.md`3.4.2節。
-- **有効F（`shared/effective_f.rs`）の一般化版TSLSの臨界値の探索で、`tr S1`の最小点`β*`まわりの`sinh`格子を落とさない。`tan`の格子にしない**: 誤差がほぼ比例する強い内生性で鋭い山を取りこぼし、`B_TSLS`が9%過小になった。`tan`の格子は端に埋もれる山を見落とす。`y_dep`は他の行列と同じ変換（`√w`・within）を済ませて渡す。詳細: `docs/spec/iv-spec.md`3.4.3節。
-
-## GMM
-
-- **方式は`GmmType`のenum（`OneStep`/`TwoStep{weight}`/`Iterated{weight,max_iter,tol}`）で選び、回数の整数に戻さない。3方式を`gmm_iterate`の1つのループで扱い、方式ごとにアルゴリズムを分岐させない**: 整数だと「2が2段階GMM」を知らないと読めず、矛盾した組み合わせ（1段階に反復設定・`weight_type`）を型で防げない。`OneStep`は`weight_type`を持たず検証もしない（`TwoStep`の`validate_weight_type`と本体の`match`の二重チェックは意図的）。詳細: `docs/spec/iv-spec.md`3.3節。
-- **収束判定は係数ごとの`max(rtol·|前回値|, atol)`で全係数が満たして収束（ベクトルノルムの比にしない）。`atol`（`GMM_CONVERGENCE_ATOL=1e-8`）は公開しない。`Iterated`の`max_iter`は初回推定を含めて数え3以上（`InvalidGmmMaxIter`）。`OneStep`/`TwoStep`は収束判定を持たず常に`converged=true`、`n_iter`は1・2**: 1つでも収束していない係数を見逃さない。未収束は`raise_on_non_convergence`でMLEと同じ意味論。回帰ガード: `gmm/fit/tests/iteration.rs`の`fit_treats_two_step_as_always_converged`。詳細: `docs/spec/iv-spec.md`3.3節。
-- **重み行列`S`（`shared/gmm_weight.rs`）にはHC1・クラスターの小標本補正を入れない**: `β̂`は`S`の正のスカラー倍で変わらない。HC2/HC3のレバレッジ補正は成分ごとに違うので、`gmm_weight_type`にHC2/HC3相当は無い。回帰ガード: `gmm/fit/tests/iteration.rs`の`gmm_point_estimate_is_invariant_to_positive_scaling_of_s`。詳細: `docs/spec/iv-spec.md`3.1節。
-- **GMMの係数・共分散・全体Wald・Hansen Jは白色化した操作変数の直交座標（`shared/gmm.rs`の`WhitenedInstruments`・`GmmSolution`）で求め、`X'ZS⁻¹Z'X`も`B⁻¹`も作らない。ロバスト・クラスターの`S`は条件数が`WEIGHT_CHOLESKY_MAX_CONDITION`を超えたら`S = A'A`の`A`のQRにし、`S`を明示的に作らない。`Ω̂`は`Z`ではなく`Z̃`から組んで`Ω̃`を直接得る**: どれも条件数が2乗になり、近共線な`Z`で精度を失った。ガードは`Ĝ`が`GMM_BREAD`、`Z`と重みが`GMM_WEIGHT`。回帰ガード: `tests/cross_method/test_near_collinear_exact.py`。詳細: `docs/spec/orthogonal-coordinates.md`4.2節。
-- **SEのサンドイッチは常に一般形`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`W`は点推定に使った重み）で、効率的GMMの特殊ケースでも`B⁻¹`だけに簡略化しない**: `gmm_weight_type`と`cov_type`は独立な選択。`OneStep`の`S_used`のスケールはサンドイッチ全体のスケール不変性で相殺する。回帰ガード: `gmm/sandwich/tests/reference.rs`の`fit_computes_hc1_std_errors_matching_manual_formula_with_one_step_gmm`。詳細: `docs/spec/iv-spec.md`3.1節。
-- **GMMの`cov_type=Classical`は残差を中心化して`σ̂²`を作る（HC0-3・HAC・クラスターの`Ω̂`は中心化しない）。`gmm_weight_type≠Classical`のケースを独立に（実装の式を複製しないオラクルで）検証する**: GMMの一次条件は一般に`ē=0`を保証しない。linearmodelsと同じ。詳細: `docs/spec/iv-spec.md`3.1節。
-- **HC1・クラスターの小標本補正の分母は構造パラメータの数`k`で、操作変数の数`l`にしない。2SLSの式を「`X̂`→`Z`、`k`→`l`」と機械的に置き換えない**: レバレッジ`z_i'(Z'Z)⁻¹z_i`は`Z`への置換が妥当だが、補正が表す消費した自由度は`k`次元の`β̂`のもの。新しい手法でも、各除算・各逆行列が実際にどの次元に依存するかを個別に確かめる（`gmm_hc_omega`/`gmm_cluster_omega`のdocコメント）。詳細: `docs/spec/iv-spec.md`3.1節。
+- **2SLSの過剰識別検定（`two_sls/overid.rs`）は`cov_type`に追従する。`Classical`以外は2SLS残差から重み`S`を作ってGMMを再推定した解のHansen Jにし、2SLS残差のままの`(Z'e)'S⁻¹(Z'e)`は使わない。`None`にするのは丁度識別・`Cluster`で`G<l`・重みの白色化と`Ĝ`の分解の`NearSingularMatrix`の3つだけ**: 2SLS残差での形はχ²に従わず、不均一分散で棄却率が名目からずれる。診断1つのために`fit()`を失敗させない（近共線な外生変数×クラスターで実際に退行した）。回帰ガード: `two_sls/overid.rs`の`equals_the_two_step_gmm_hansen_j_of_the_same_weight`、`tests/cross_method/test_near_collinear_exact.py`。詳細: `docs/spec/iv-spec.md`3.5節。
 
 ## 2SLSとGMMの共有範囲
 

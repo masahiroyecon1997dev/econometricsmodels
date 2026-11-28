@@ -346,6 +346,33 @@ KP・有効Fの診断は従来どおり`None`（診断統計量なので`fit()`�
 - バージョン固定: `pyo3=0.29.3` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定）。
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
+- **使う列だけ取り込む**: `fit_*`と`predict()`/`augment()`の`new_data`は、`PyDataFrame`への変換（全列をArrow経由で取り込む）を
+  直接行わず、`check_dataframe`（`polars.DataFrame`か。違えば`TypeError`）→`select_columns`で**推定に指名された列だけ**を取り込む
+  （`SelectedData.frame`と元のオブジェクト`SelectedData.source`）。未使用の`UInt128`列がpolars-coreのpanicを、`Extension`列が
+  `ComputeError`を起こすのを避けるため（`UNREADABLE_DTYPES`）。指名する列は`fit_*`が`y`・`x`等と各`*Options::data_columns()`
+  （`cluster`・`hac_time`・`time`・`dk_time`）から作るので、**列名を持つオプションを足したら`data_columns()`に足す**（足さないと
+  `COLUMN_NOT_FOUND`になる）。存在しない列は選ばず、取り込めないdtypeの列は`Null`型の目印の列に置き換え、どちらも列を引く側
+  （`extract_f64_column`・`missing_column_error`）が`COLUMN_NOT_FOUND`・`COLUMN_UNSUPPORTED_DTYPE`にする。検査の順序は列を引く位置で
+  決まる（`tests/cross_method/test_validation_order.py`）。`augment()`は取り込んだ`DataFrame`ではなく元のオブジェクトに予測値を
+  足すので、推定に使わない列も出力に残る（参照を持つだけでコピーしない）。
+- **役割の検査**: `engine_pybind/src/shared/validation.rs`の`validate_role_non_empty`・`validate_no_duplicate_x`・`validate_no_const_collision`・
+  `validate_no_duplicate_roles`を全手法が使い、同じ検査を独自実装しない。`y`/`x`は`validate_common_roles`（OLS・Logit・Probit・Tobit）か
+  `validate_weighted_roles`（WLS）でまとめて呼び、「空の`x`→`y`/`x`の重複→（WLSのみ）`weight`/`y`の重複→`x`内の重複→`"const"`」の順に
+  する（役割間の重複を先に報告し、`docs/guide/validation.md`の順序を全手法で揃える。`weight`を別に呼ぶと崩れる）。
+- **列どうしの行数の不一致は検査しない**: 同じDataFrameから抽出する限り到達不能（polarsのDataFrameは全列が同じ長さ）。
+- **`cov_type`の検査は3段**: `parse_cov_kind`（値。正規形は`CovKind::name()`）→`check_cov_options`（`cluster`・`hac_lags`・`hac_time`の
+  未使用→`hac`での`hac_time`の欠落）→`resolve_cov_type`（列を抽出して`CovType`にする）。`fit`の報告順はDataFrameを見ない検査→役割→
+  `y`/`x`（WLSは`weight`）の列→`cluster`/`hac_time`の列。関数は`&OLSOptions`ではなく個々のフィールド値を取り、`OLSOptions`・`WLSOptions`・
+  `IVOptions`の`fit`が展開して渡す。`cluster`・`hac_time`は該当する`cov_type`のときだけ抽出する。`WLSOptions`は`OLSOptions`と同じ
+  フィールドを独立に持つ（共通の構造体にしない理由は`nonlinear-common.md`10章と同じ）。
+- **事後診断の配線**: `OLSResult`の`#[pymethods]`は`ols/result.rs`に1ブロックだけ置き（`multiple-pymethods`を使わない）、本体は
+  `ols/diagnostics.rs`の自由関数（`run_white_test`等）で、メソッドが`guard`で包んで呼ぶ。`OLSResult`は推定量を持たないので、
+  `source_data`と`param_names`から`x`の列だけを取り込み直し、保持している残差と合わせてengineに渡す（`source_data`が無い
+  `first_stage()`由来の結果は`ValidationError`）。`has_intercept`は保持フィールドを使う（`include_intercept=false`で`x`に`"const"`列が
+  ありうるので`param_names[0]`から推定しない）。引数は`&Bound<PyAny>`で受けて`extract_strict_text`/`extract_strict_int`/
+  `extract_column_list`で型を厳密に検査する（`bool`・`float`は`TypeError`）。`nlags`は`i64`のままengineに渡す（範囲と飽和はengine）。
+  Breusch-Paganの`variables`はモデルの`x`・`y`との重複を検査しない（モデル外の列・`y`も`Z`にできる）。元のデータの有無の検査は
+  型の検査より後。
 
 ### 3.7 テスト
 

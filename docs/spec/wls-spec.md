@@ -22,7 +22,7 @@ WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本�
   与えずに拡張できるようにするため、`OLSOptions`を再利用せず独立型にしている。このフィールド重複自体は意図的に共通base
   構造体へ切り出さない（PyO3の`#[pyclass]`コンストラクタがフラットなkwargs surface前提の
   ため。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
-  一貫している。`engine_pybind/src/linear/CLAUDE.md`参照）。
+  一貫している。理由は`nonlinear-common.md`10章と同じ）。
 - 重みはanalytic weight（分散の逆数に比例、正規化不要）。frequency weight/probability weightは
   対象外。
 - **重みの検証**: 0以下（0を含む）・NaN・無限大は常にエラー（`ValidationError`）とし、該当観測を

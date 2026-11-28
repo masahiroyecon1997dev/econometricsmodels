@@ -1,101 +1,25 @@
 # engine_pybind/src/linear/ 実装ノート（OLS/WLS）
 
-このファイルは `engine_pybind/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。設計の背景は`docs/spec/ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」・`docs/spec/wls-spec.md`が正本。ここは差分の索引のみ。
+このファイルは `engine_pybind/src/linear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景は`docs/spec/ols-spec.md`3.6節（データ受け渡し・エラー変換・バインディング）・3.5節（`augment()`）・3.9〜3.11節（事後診断）・`docs/spec/wls-spec.md`が正本（このファイルはその要約ではなく差分の索引）。他の系統の`engine_pybind`も、ここの「バージョン固定」「polars・pyo3のAPI差異」「列の取り込みと検証」を共通の前提にする。
 
-## バージョン固定（変更時は要注意）
+**エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。実測値・調査の経緯・不採用案の詳細はspecに置き、ここには書かない。
 
-`pyo3`・`polars`・`pyo3-polars`はすべて`=`で完全固定している。固定値と、その組み合わせを選んだ理由（`pyo3-polars`が要求する`pyo3`のバージョン範囲等）は`engine_pybind/Cargo.toml`のコメントが正本で、ここには数字を複製しない。`pyo3`を上げる場合は対応する`pyo3-polars`の新版公開を待つ必要がある（`pyo3-polars`は2025年7月にpolars本体リポジトリへ統合されアーカイブ済み、`.claude/rules/rust-style.md`「既知のリスク」参照）。Rust側`polars`クレートとPython側`polars`パッケージ（PyPI）はバージョン体系が分離しているため、数字を合わせる必要はない（実際の互換性は`pyo3-polars`の`polars_ffi::version_0`が担保）。
+## バージョン固定とAPIの差異
 
-## polars・pyo3のAPI差異（踏んだ罠）
+- **`pyo3`・`polars`・`pyo3-polars`は`=`で完全固定。固定値と組み合わせの理由は`engine_pybind/Cargo.toml`のコメントが正本で、ここに数字を複製しない。`pyo3`を上げるときは対応する`pyo3-polars`の新版を待つ**: `pyo3-polars`は本体リポジトリへ統合されアーカイブ済み（`.claude/rules/rust-style.md`「既知のリスク」）。Rust側`polars`とPyPIの`polars`はバージョン体系が別で、数字を合わせる必要はない（互換性は`polars_ffi::version_0`が担保）。
+- **polars・pyo3のAPIの差異**: `ChunkedArray::rechunk()`は`Cow`を返すので`.into_iter()`ではなく`.iter()`。pyo3 0.28以降`PyObject`はpreludeに無いので`Py<PyAny>`を使う。`Clone`な`#[pyclass]`の`FromPyObject`自動導出はopt-inなので、引数で受け取るオプション型には`#[pyclass(from_py_object)]`を付ける。`DataFrame::new`は`(height, columns)`の2引数で、列の追加は`Column::new(name.into(), values)`と`.with_column(column)`。
 
-- `ChunkedArray::rechunk()`は`Cow<'_, ChunkedArray<T>>`を返す。`Cow`は`IntoIterator`非実装のため`.into_iter()`ではなく`.iter()`を使う（`Cow`はDerefで透過的に呼べる）。
-- pyo3 0.28以降、`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
-- pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
-- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`DataFrame::new`は`select_columns`が取り込んだ列の組み立てに使う）。
+## 列の取り込みと検証
 
-## `white_test()`（事後診断）の配線
+- **`fit_*`と`predict()`/`augment()`の`new_data`で`PyDataFrame`への全列の変換を直接行わず、`check_dataframe`→`select_columns`で指名された列だけを取り込む。列名を持つオプションを足したら`*Options::data_columns()`に足す**: 未使用の`UInt128`列がpolars-coreのpanicを、`Extension`列が`ComputeError`を起こす。`data_columns()`に足さないと列が取り込まれず`COLUMN_NOT_FOUND`になる。存在しない列・取り込めないdtypeの列は列を引く側が報告するので、検査の順序は列を引く位置で決まる（`tests/cross_method/test_validation_order.py`）。詳細: `docs/spec/ols-spec.md`3.6節。
+- **列名が要る検証（`x`が空、`y`/`x`の重複、`x`内の重複、`"const"`の衝突、単一列の役割どうしの重複）は`engine_pybind/src/shared/validation.rs`の関数を呼び、新しい手法でも独自実装しない。`y`/`x`は`validate_common_roles`（WLSは`validate_weighted_roles`）でまとめて呼び、`weight`を別に`validate_no_duplicate_roles`で呼ばない**: 「役割間の重複→`x`内の重複→`"const"`」の順を全手法で揃えている（別に呼ぶと崩れる）。`engine`は列名を知らない。詳細: `docs/spec/ols-spec.md`3.6節。
+- **`engine`が既に検知する項目（`confidence_level`の範囲、`cluster`の未指定等）を`engine_pybind`で重複して検査しない。同じDataFrameから抽出した列どうしの行数の不一致も検査しない**: 行数の不一致は到達不能（polarsのDataFrameは全列が同じ長さ）。詳細: 同上。
+- **`cov_type`の検査は`parse_cov_kind`（値）→`check_cov_options`（未使用のオプション→`hac`での`hac_time`の欠落）→`resolve_cov_type`（列）の3段で、関数は`&OLSOptions`ではなく個々のフィールド値を取る。`cluster`・`hac_time`は該当する`cov_type`のときだけ抽出する。`cov_type="hac"`では`hac_time`を必須にし（`require_hac_time`）、行順を時間順とみなす経路を足さない**: 無関係な列を要求してエラーにしない。行順の既定は、時系列順でないデータでも時系列順のHACに見える結果を黙って返す。IVの`gmm_weight_type="hac"`も同じ関数を使う。詳細: `docs/spec/ols-spec.md`3.2節「HAC」・3.6節。
+- **`WLSOptions`は`OLSOptions`と同じフィールドを独立に持ち、共通の構造体に切り出さない**: PyO3のコンストラクタはフラットなkwargsが前提。詳細: `docs/spec/nonlinear-common.md`10章、`docs/spec/wls-spec.md`1章。
 
-`OLSResult`の`#[pymethods]`は`ols/result.rs`に1ブロックだけ置く（`multiple-pymethods`を使わない）。診断3メソッドの本体は`ols/diagnostics.rs`の自由関数（`run_white_test`・`run_breusch_pagan_test`・`run_breusch_godfrey_test`）に置き、`result.rs`の各メソッドが`guard`で包んで呼ぶ（`guard`と`py.detach`の位置は変えない）。以下の「`white_test()`」等の記述は、この自由関数の中身のこと。
+## 結果と事後診断
 
-`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`common.rs`の`predict_out_of_sample`は両者を
-束ねた`extract_model_x_columns`を使うが、`white_test()`は列名自体も`engine`に渡すため
-分けて呼ぶ）で元のデータ（`source_data`）と`param_names`から`x`の列だけを`select_columns`で取り込み、保持している`residuals`と
-合わせて`engine::linear::diagnostics::white_test`に渡す。`source_data`が`None`（`IVResult.first_stage()`
-由来）なら`augment(new_data=None)`と同じく`ValidationError`。`has_intercept`は`param_names[0] == "const"`で
-推定せず保持フィールドを使う（`include_intercept=false`で`x`に`"const"`列がありうるため）。LM/Fの両方を
-engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字を区別しない）で`WhiteTestOutput`の
-フィールドを選ぶだけ（`select_statistic`はWhite・BPで共通）。計算ロジックは持たない。
-
-`breusch_godfrey_test(time, nlags, statistic)`も同じ配線（`x`は`extract_model_x_columns`で再抽出し、残差に加え、時間列を
-`extract_time_order_ranks`で順位にして`engine`へ渡す。`hac_time`と同じく同値・欠損値・NaNは
-`ValidationError`）。引数は型検査を厳密にするため`&Bound<PyAny>`で受け、`extract_strict_text`/
-`extract_strict_int`（`bool`・`float`は`TypeError`）を通す。`nlags`は`i64`のまま`engine`に渡し、
-`nlags < 1`の検査と巨大値の飽和は`engine`側（`InvalidNlags`・観測数不足）。
-`breusch_pagan_test(variables, statistic)`も同じ配線で、`variables`は`Option<&Bound<PyAny>>`として
-`extract_column_list`（`list`以外・`str`以外の要素は`TypeError`）で受け、`None`なら
-`x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_role_non_empty`/
-`validate_no_duplicate_within_role`（ロール名`variables`）で`ValidationError`。モデルの`x`や`y`との
-重複は検査しない（モデル外の列・`y`列も`Z`にできる仕様）。元のデータの有無は`variables`の
-型検査より後（型の誤りは学習データが無い結果でも`TypeError`）。
-
-## 使う列だけ取り込む（`select_columns`）
-
-`fit_*`と`predict()`/`augment()`の`new_data`は、`PyDataFrame`への変換（`pyo3-polars`が全列をArrow経由で取り込む）を直接行わない。
-`shared/column_extraction/`の`check_dataframe`で`polars.DataFrame`かを調べ（`TypeError`）、
-`select_columns`で**推定に指名された列だけ**を取り込んだ`DataFrame`（`SelectedData.frame`）と、元のPythonオブジェクト（`SelectedData.source`）を得る。
-指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こし、`Extension`列（登録した拡張型を含む）が`ComputeError`で失敗する（どちらも取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
-指名される列は`fit_*`（`lib.rs`）が`y`・`x`等と各`*Options::data_columns()`（`cluster`・`hac_time`・`time`・`dk_time`）から組み立てる。
-**オプションに列名を持つフィールドを足したら、`data_columns()`に足す**（足さないと、その列が取り込まれず`COLUMN_NOT_FOUND`になる）。
-存在しない列は選ばず、列を引く側（`extract_f64_column`等）が`COLUMN_NOT_FOUND`にする。取り込めないdtypeの列は、`Null`型の目印の列
-（名前に（dtype、元の列名）を符号化）に置き換え、列を引く側（`missing_column_error`）が`COLUMN_UNSUPPORTED_DTYPE`にする。
-こうして検査の順序は、列を引く位置で決まる（`tests/cross_method/test_validation_order.py`）。
-`OLSResult`/`WLSResult`の`predict()`/`augment()`の`new_data`は`common.rs`の`predict_out_of_sample`が、`LogitResult`等は`nonlinear/common.rs`の同名関数が、`new_data`から`x`列だけを`select_model_x_columns`で取り込む。`predict_out_of_sample`は予測値だけを返し、`SelectedData.source`は使わない（`augment()`が予測値を足す先は取り込み前の`new_data`自体で、呼び出し側が持つため）。
-
-## DataFrameを構築して返す（`augment()`）
-
-`predict()`までは全メソッドが`Vec<f64>`等のフラットな値を返すだけだったが、`augment()`は
-結果が`fit()`に渡された元の`polars.DataFrame`（Pythonオブジェクト）を非公開の`source_data`フィールド
-（`OLSResult`は`Option<Py<PyAny>>`、`IVResult.first_stage()`という別経路の構築元を持つため。
-他の結果型はこの経路がなく常に保持）として持ち、`new_data=None`時にそれへ予測値の列を足して返す。
-足すのは`shared/augment.rs`の`append_predicted_column`で、Python側の`DataFrame.with_columns`に`PySeries`を渡す。
-取り込んだ`DataFrame`ではなく元のオブジェクトに足すので、推定に使わない列（取り込めないdtypeの列を含む）が出力に残る。
-参照を持つだけでデータはコピーしない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
-（ソースデータに既に`"predicted"`列がある場合）は`append_predicted_column`が元の`columns`を調べて
-`ValidationError`にする（黙って上書きしない）。OLSの事後診断（White・Breusch-Pagan・Breusch-Godfrey）も、必要な列を
-`source_data`から都度`select_columns`で取り込む。詳細な設計判断は
-`docs/spec/ols-spec.md`「augment()」参照。
-
-## バリデーションの責務分担（`engine`と重複させない）
-
-`engine`は列名を知らないため検知できず、`engine_pybind`側で`ValidationError`として弾く項目（OLS/WLS/Logit共通）:
-
-- `y`と`x`に同じ列名が含まれる場合（WLSは`weight`と`y`の重複も。`weight`と`x`の重複は
-  許容、`docs/spec/wls-spec.md`「API引数」参照）／`x`内の重複列名
-- `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
-- `x`が空リストの場合
-
-これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/shared/validation.rs`（`shared/`配下、`column_extraction/`と同じ位置づけ）に集約した: `validate_role_non_empty`（複数列ロールの空リスト拒否。`x`のほかIVの`x_endog`/`instruments`でも使う）/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
-
-`y`/`x`の検査は`validate_common_roles`（OLS・Logit・Probit・Tobit）か、`weight`と`y`の重複も見る`validate_weighted_roles`（WLS）でまとめて呼ぶ。どちらも「空の`x` → `y`/`x`の重複 →（WLSのみ）`weight`/`y`の重複 → `x`内の重複 → `"const"`」の順で、ロール間の重複を`x`内の重複・`"const"`より先に報告する（`docs/guide/validation.md`の順序を全手法で揃えるため）。`weight`を別に`validate_no_duplicate_roles`で呼ぶと、この順序が崩れる。
-
-`confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」の対応表を参照）。
-
-行数不一致チェック（`y`/`x`/`weight`/`cluster`/`hac_time`の間で行数が食い違っていないかの検証）は、同一DataFrameから抽出する限り理論上到達不能（polarsのDataFrameは全列同じ長さであることを型の不変条件として強制するため）と判明し、全て削除した。**新しい手法でも同種のチェックを追加しないこと。**
-
-## エラー変換
-
-`engine::linear::common::LeastSquaresError`（OLS/WLS共通のエラー型。元々`OlsError`という名前だったがWLSも含む実態に合わせて改名・`linear/common.rs`に移動）→ `PyErr`は`impl From`ではなく`fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr`という関数として実装する（`LeastSquaresError`・`PyErr`ともにこのクレート外定義の型でorphan ruleに抵触するため）。呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。中身は`to_pyerr(&err)`を呼ぶだけで、バリアントごとの分岐は持たない（`code`・`params`と例外クラスの別は`engine`側の`ErrorInfo::report()`とカタログが決める）。WLSも同型のパターンを踏襲する。
-
-## `cov_type`固有の追加列
-
-`cluster`/`hac_time`の抽出は該当する`cov_type`のときのみ行う。無関係な列を誤って要求してエラーにしないこと。**`cov_type="hac"`では`hac_time`が必須**（`require_hac_time`、未指定は`ValidationError`）。行順を時間順とみなす暗黙の既定は置かない（データが時系列順でなくても時系列順のHACに見える結果が黙って返るため）。engineの`CovType::Hac.time_order`（IVの`WeightType::Hac`も）は`Option`ではなく必須の`Vec<f64>`で、`engine_pybind`が`hac_time`の順位を渡す（`None`＝行順の経路はengineにも無い）。IVの`gmm_weight_type="hac"`も同じ関数を使う。
-
-## `WLSOptions`（`OLSOptions`とは独立したpyclass）
-
-`WLS`は当初専用の`WLSOptions`を持たず`OLSOptions`をそのまま再利用していたが（`WLSResult`は元から独立型だったのと非対称だった）、ユーザビリティ向上のため`WLSOptions`を新設した。フィールド構成は`OLSOptions`と完全に同一（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、既定値・意味論とも同じ、`docs/spec/wls-spec.md`「API引数」参照）。このフィールド重複は意図的で共通base構造体には切り出さない（`engine_pybind/src/nonlinear/CLAUDE.md`「`LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的」節と同じ理由。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとの一貫性、PyO3のpyclassコンストラクタがフラットなkwargs surface前提であること）。
-
-`cov_type`の検査（`linear/common.rs`）は、`&OLSOptions`ではなく`cov_type: &str, cluster: Option<&str>, hac_lags: Option<i64>, hac_time: Option<&str>`という個々のフィールド値を引数に取る形にしている（`nonlinear::common`の`parse_cov_kind`等と同じ設計）。`OLSOptions`/`WLSOptions`/`IVOptions`のどの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。
-
-## `cov_type`の検査（値・組合せ・列）と報告順
-
-`linear/common.rs`の`CovKind`（文字列だけで決まる種類）を、`parse_cov_kind`（値。正規形は`CovKind::name()`）→ `check_cov_options`（`cluster`/`hac_lags`/`hac_time`の未使用 → `hac`での`hac_time`欠落）→ `resolve_cov_type`（`cluster`/`hac_time`の列を抽出して`engine`の`CovType`にする）の3段で使う。`fit`は、DataFrameを見ない検査（`cov_type`の値 → 組合せ）→ ロール構造（`validate_common_roles`等）→ `y`/`x`（WLSは`weight`も）の列 → `cluster`/`hac_time`の列の順に呼ぶ。`*Result.cov_type`は`CovKind::name()`から作り、呼び出し側で小文字化し直さない。IVは`cov_type`と`gmm_weight_type`が`cluster`/`hac_*`を共有するため、組合せの検査は`iv::common::check_iv_options`が行い、値と列の解決にはこの`parse_cov_kind`/`resolve_cov_type`を使う。この順序は`tests/cross_method/test_validation_order.py`が固定している。
+- **`augment()`は取り込んだ`DataFrame`ではなく、保持している元のオブジェクト（`source_data`）に`append_predicted_column`で予測値の列を足す。列名が既にあれば上書きせず`ValidationError`**: 推定に使わない列（取り込めないdtypeを含む）も出力に残し、データをコピーしない。`OLSResult`の`source_data`は`IVResult.first_stage()`由来の構築経路があるので`Option`（他の結果は常に保持）。詳細: `docs/spec/ols-spec.md`3.5節。
+- **`OLSResult`の`#[pymethods]`は`ols/result.rs`に1ブロックだけ置き（`multiple-pymethods`を使わない）、事後診断の本体は`ols/diagnostics.rs`の自由関数にして、メソッドが`guard`で包んで呼ぶ。`guard`と`py.detach`の位置を変えない**: 詳細: `docs/spec/ols-spec.md`3.6節。
+- **事後診断は`source_data`と`param_names`から`x`の列だけを取り込み直し、保持している残差と合わせてengineに渡す。`has_intercept`は保持フィールドを使い、`param_names[0] == "const"`から推定しない**: `OLSResult`は推定量を持たない。`include_intercept=false`で`x`に`"const"`列がありうる。`source_data`が無い結果は`ValidationError`。LM/Fはengineが両方計算し、バインディングは`statistic`で選ぶだけ。詳細: `docs/spec/ols-spec.md`3.6節・3.9節。
+- **事後診断の引数は`&Bound<PyAny>`で受けて`extract_strict_text`/`extract_strict_int`/`extract_column_list`で型を厳密に検査する（`bool`・`float`は`TypeError`）。`nlags`は`i64`のままengineに渡す。元のデータの有無の検査は型の検査より後。Breusch-Paganの`variables`はモデルの`x`・`y`との重複を検査しない**: 範囲と飽和はengine。モデル外の列や`y`も`Z`にできる仕様。詳細: `docs/spec/ols-spec.md`3.10節・3.11節。

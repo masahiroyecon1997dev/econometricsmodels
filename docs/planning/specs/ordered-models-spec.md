@@ -75,10 +75,10 @@
 | E1 | `params`等のキー名: 閾値の名前 | (a)`"1\|2"`（隣り合う2カテゴリの`y`のコード。`MASS::polr`と同じ）／(b)`"1/2"`（statsmodelsと同じ表記）／(c)`"cut1"`・`"cutpoint_1"`（連番）。`x`の列名との衝突（Tobitの`"sigma"`の前例）をどう扱うか | **推奨は(a)**。`polr`の`zeta`と値の意味が同じ（直接の`τ`）で、statsmodelsの`"1/2"`は`log`増分を指す名前なので表記だけ合わせると誤解を招く。衝突は`fit()`で専用の`code`により拒否する。7章 | **確定**: (a)`"1\|2"`、接頭辞なし。衝突は専用の`code`で拒否。構造は`categories`・`cutpoints`・`cutpoint_names`で公開（7章） |
 | E2 | 閾値・カテゴリの公開面 | `params`とは別に閾値のリストを公開するか、名前は`cutpoints`か`thresholds`か。キーの文字列の分解に頼らずに使えるか | `categories: list[int]`（`y`のコード・昇順）・`cutpoints: list[float]`（`K-1`個。`cutpoints[j]`は`categories[j]`と`categories[j+1]`の間）・`cutpoint_names: list[str]`（`params`のうち閾値のキー）を公開し、閾値は`params`にも含める | **確定**: 左の3つ（E1の議論で決定）。`params_table()`の行にキーは足さない |
 | E3 | 表の関数名 | Issueは`coef_table()`と書いているが、既存は**`params_table()`**（Logit/Probit/Tobit/IV） | `params_table()`に統一（Issueの記述は古い） | 未決 |
-| E4 | `predict()`の返り値 | カテゴリ別確率は`n×K`。(a)`list[list[float]]`／(b)polars `DataFrame`（列`prob_<code>`）／(c)`target="probabilities"`/`"class"`の切り替え（Tobitの`target`方式） | 既存の`predict()`は`list[float]`で、Series化の検討が別にある。`n×K`を`list[list[float]]`で返すか`DataFrame`かは要判断。クラス予測（最大確率）・期待カテゴリが要るか | 未決 |
-| E5 | `augment()` | カテゴリ別確率の列名（`predicted_probability_<code>`等）と元の列との衝突検査 | 列名規則はE4と合わせる。`new_data`のout-of-sample対応は既存手法と同じ（`y`は不要） | 未決 |
+| E4 | `predict()`の返り値 | カテゴリ別確率は`n×K`。(P1)`list[list[float]]`（行ごと）／(P2)`dict[str, list[float]]`（カテゴリのコード→確率の列）／(P3)polars `DataFrame`／(P4)Tobit式の`target`切り替え | **推奨はP2、`target`は付けない**（8章）。CLAUDE.md 2章の公開形（キーがデータで決まる結果は`dict`、値は`list[float]`）の範囲に収まる | **確定**: P2（`dict[str, list[float]]`）、`target`は付けない。CLAUDE.md 2章の公開形の拡張として承認済み（8章） |
+| E5 | `augment()` | カテゴリ別確率の列名と元の列との衝突検査 | **推奨**: 列は`predicted_probability_<コード>`（`K`列、昇順）。`K`列のどれかが元のデータにあれば既存の`AUGMENT_COLUMN_EXISTS`（最初に衝突した名前）。`new_data`は`predict()`と同じ意味（`y`は不要）。8章 | **確定**: 推奨どおり（8章） |
 | E6 | `marginal_effects()` | **Issueのスコープに無い**。順序モデルでは限界効果が中心的な解釈量（`∂P(y=j)/∂x_k=[f(τ_{j-1}-xβ)-f(τ_j-xβ)]β_k`、端のカテゴリは片側）。Logit/Probitは提供済み | v1に含めるか、別タスクにするか。含める場合は`(変数, カテゴリ)`ごとの行、`at`（`overall`/`mean`/`median`）、デルタ法（`β`と`τ`のヤコビアン）、離散変数の自動判定はしない（既存方針） | **確定**: 実装する。独立したタスクとして起票済み（v0.11.0の対象。詳細設計は本ノートで詰める） |
-| E7 | `pred_table()` | `K×K`の的中表（最大確率のカテゴリで分類）。Logit/Probitは提供 | 提供するか（E6より優先度は低い）。キーの命名は`actual`/`predicted_<code>`の前例に合わせる | 未決 |
+| E7 | `pred_table()` | `K×K`の的中表（最大確率のカテゴリで分類）。Logit/Probitは提供 | **推奨は提供する**。`threshold`引数は無し。statsmodelsの`OrderedResults.pred_table()`で照合できる（実測）。8章 | **確定**: v1に含める（8章） |
 | E8 | `*Options` | `cov_type`・`cluster`・`solver`・`max_iter`・`tol`・`raise_on_non_convergence`・`confidence_level`（`LogitOptions`から`include_intercept`を除いたもの）。全引数キーワード専用。`options`は末尾のキーワード専用引数。`start_params`・`weights`・`offset`は無し | 左のとおり。`api-conventions.md`の表に1行足し`test_call_signatures.py`が検査する | 未決 |
 | E9 | pickle・`copy` | `*Fitted`（`β`・`τ`・共分散・カテゴリのコード・`x`の列名）を持つ。`from_parts`で`τ`が狭義単調増加・次元の整合を検査する | 既存パターンに従う。`FORMAT_VERSION`・`SAMPLES`への追加 | 確定 |
 
@@ -230,3 +230,44 @@
 5. 文書化: statsmodelsとの違い（名前は同じ区切りでも値の意味が違う）を`docs/guide/inference-conventions.md`とAPIページに書く。ベンチマークのアダプタは名前ではなく位置で対応づけ、statsmodelsの`log`増分を直接の`τ`に直してから比べる（F2）。
 
 **未決として残す点**: `predict()`・`augment()`の列名（コードを使う。E4/E5）。
+
+## 8. E4・E5・E7の検討結果（`predict()`・`augment()`・`pred_table()`）
+
+**既存の形（前例）**:
+
+| | Logit/Probit | Tobit |
+|---|---|---|
+| `predict(*, new_data=None)` | `list[float]`（確率。観測順） | `+ target`（4種）。値は`list[float]` |
+| `augment(*, new_data=None)` | 元データ＋`"predicted_probability"`（polars） | 元データ＋`"predicted_{target}"` |
+| `pred_table(*, threshold=0.5)` | `[{"actual": 0, "predicted_0": n, "predicted_1": n}, …]` | 無し（`censoring_fit_check()`） |
+
+`new_data`は、`fit()`の`x`と同名の列を名前で対応づける（`y`は不要）。`augment()`は元データ（または`new_data`）に列を足す。既存列と衝突すると`AUGMENT_COLUMN_EXISTS`。`predict()`の`list[float]`はCLAUDE.md 2章の公開形で、Series化は別に検討中（`n=10⁶`でメモリが約4倍、優先度は低い）。
+
+**参照実装の実測**（statsmodels 0.15.0・R）:
+
+| 実装 | 返り値 |
+|---|---|
+| statsmodels `predict()` | `ndarray (n, K)`。行和は1。`which="linpred"`（`x'β`、1次元）・`"cumprob"`（`P(y≤k)`）もある |
+| R `polr` `predict(type="probs")` | `n×K`の行列（列名はレベル）。`type="class"`は因子 |
+| statsmodels `OrderedResults.pred_table()` | **動く**。最大確率で分類した`K×K`（手計算の`argmax`のクロス集計と一致。ただし予測されなかったカテゴリの列は出ない） |
+| statsmodels `get_margeff` | **無い**（順序モデルには未提供）。限界効果（E6）はRの`marginaleffects::avg_slopes(polr)`で出る（カテゴリごとの行）。statsmodelsが主リファレンスにならない |
+
+**E4の選択肢**:
+
+| 案 | 利点 | 欠点 |
+|---|---|---|
+| (P1)`list[list[float]]`（行ごと） | statsmodelsの配列に近い | `n`個のリスト。列の取り出しが面倒。大標本で重い |
+| **(P2)`dict[str, list[float]]`**（キーはコードの文字列、値は確率の列） | CLAUDE.md 2章の公開形のまま（データで決まるキーは`dict`、値は`list[float]`）。`pl.DataFrame(res)`で表にできる。JSON化しやすい。Series化（別検討）の対象に素直に入る | 行ごとの取り出しは`zip`が要る |
+| (P3)polars `DataFrame` | polarsのAPIと揃う。コピーが少ない | 2章の公開形から外れる（承認が要る）。他の手法の`predict()`と型が違う |
+| (P4)`target`切り替え | Tobitと同じ形 | 返り値の形が`target`で変わる（確率は`K`列、クラスは1列）。型が不安定 |
+
+**決定（確定）**:
+
+1. **`predict(*, new_data=None) -> dict[str, list[float]]`**。キーは`categories`の`str`（`"1"`〜`"K"`、昇順）、値は観測順の確率。各行の和は1。`new_data`の意味はLogit/Probitと同じ（カテゴリは学習時の`K`個に固定）。
+2. **`target`は付けない**。確率だけ（Logit/Probitと同じ範囲）。クラス・線形予測子・累積確率が要るときは、`target`で形を変えず、別メソッド（`predict_class()`等）として足す（足すのは非破壊）。確率からの導出は容易（`argmax`・累積和）で、線形予測子は`params`と`x`から計算できる。
+3. **`augment(*, new_data=None) -> pl.DataFrame`**。元データに`predicted_probability_<コード>`を`K`列（Float64、昇順）足す。名前の前置き`predicted_`はOLS/Logit/Probit/Tobitと揃える。`K`列のどれかが元のデータにあれば、既存の`AUGMENT_COLUMN_EXISTS`（`column`は最初に衝突した名前）。`predict()`の辞書のキーと`augment()`の列名の対応は`predicted_probability_`＋キー。
+4. **`pred_table() -> list[dict[str, float]]`**（引数なし）。`[{"actual": 1, "predicted_1": n, …, "predicted_K": n}, …]`（Logit/Probitの形に合わせ、`actual`はコード、`predicted_<コード>`は観測数）。分類は最大確率のカテゴリで、同点は小さいコード。全カテゴリに観測があるので`K`行`K`列が必ず揃う。学習データのみ（`new_data`は取らない）。注: 最大確率での分類は、中間のカテゴリや小さいカテゴリをほとんど予測しない（実測の例: 4カテゴリのうち1つが2000件中5件）。docstringに書く。
+5. **テスト**: `predict()`は行和が1、statsmodelsの`predict()`（`n×K`）と`RTOL=1e-8`、`new_data`で学習データと同じ結果。`pred_table()`はstatsmodelsの`pred_table()`を`K×K`にreindexして整数で一致。`augment()`は構造（列名・順序・衝突）。ベンチマークのアダプタは、statsmodelsの`predict()`の列をコードに対応づける。
+6. **pickle・`copy`**: `*Fitted`が`categories`と閾値・係数・共分散を持つ（列名が復元でも同じになる）。
+
+**限界・注意**: `n×K`の辞書は`K`本の`list[float]`なので、`n=10⁶`・`K=5`でメモリは`predict()`5回分（Series化の検討と同じ課題。`K`の上限30なら30本）。この形は、2章の公開形（`predict()`は`list[float]`）の「データで決まるキーは`dict`」を拡張して使うもので、ユーザーの承認を得た（返り値が`list[float]`ではなくなるため）。実装時にCLAUDE.md 2章・`docs/spec/inference-conventions.md`6章の記述を、順序モデルの`predict()`を含む形に更新する。

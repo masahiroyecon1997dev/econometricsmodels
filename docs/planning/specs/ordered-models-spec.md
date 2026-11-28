@@ -86,7 +86,7 @@
 
 | # | 論点 | 選択肢 | 推奨案 | 状態 |
 |---|---|---|---|---|
-| F1 | 主リファレンスと交差検証 | Issueは主=statsmodels`OrderedModel`。`nonlinear-common.md`8章は主=R`MASS::polr`。statsmodels（0.15.0）の`OrderedModel`は`params`が`log`増分で返る・既定の最適化器が`nm`・`cov_type`（HC/cluster）の対応が未確認 | 主=statsmodels、交差検証=R（`MASS::polr`。`polr`の`vcov`は観測情報で非正準リンク（probit）でも本実装と一致する見込み。ロバストSE（`sandwich`/`ordinal::clm`等）の対応は**要調査**）。`nonlinear-common.md`8章の記述を直す。**実測（statsmodels 0.15.0・R `MASS::polr`・`sandwich` 3.1.3、合成データn=2000・K=4）**: 点推定・対数尤度は`newton`（または`gtol`を締めた`bfgs`）で1e-9・12桁一致（既定の`nm`は約1e-5ずれる）。SEはstatsmodels・polrとも数値微分でお互いに約1e-7ずれ、`RTOL=1e-8`は届かない。`hc0`はstatsmodelsとRの`sandwich(polr)`が約1e-8で一致。`hc1`はstatsmodelsが`hc0`と同値（補正なし）、Rは`vcovHC`が`polr`に使えず`sandwich(adjust=TRUE)`で出せる見込み（未検証）。`opg`・`cluster`はRの`vcovOPG`・`vcovCL`が`polr`で動く。`cluster`の補正はstatsmodelsと異なり、Rの`cadjust=TRUE`が本実装（`G/(G-1)・(n-1)/(n-k)`）と同じ式。**方針（確認待ち）**: 許容誤差は参照実装間の実測の食い違いから決め、点推定・対数尤度は`1e-8`、SE・検定統計量だけ緩める。参照はstatsmodels（`newton`/締めた`bfgs`）を主、Rを交差検証とし、自前実装のオラクルは参照にせず、誤差の床の確認と、外部に参照が無い量の補助的な確認に限る | 未決 |
+| F1 | 主リファレンスと交差検証 | 主=statsmodels`OrderedModel`（Issue）か主=R`MASS::polr`（`nonlinear-common.md`8章）か。statsmodelsの限界（`params`が`log`増分・既定`nm`・`hc1`の補正なし・限界効果なし）と、両者のHessianが数値微分である点 | **9章**。主=statsmodels（`newton`）、交差検証=R（`polr`＋`sandwich`）。statsmodelsに無い・合わない量（`hc1`・`opg`・限界効果）はRが主。SE等は参照実装間の実測の差から許容誤差を決める。自前のオラクルは参照にしない | **確定**: 9章の表のとおり |
 | F2 | 比較する量 | `params`（`β`・`τ`）・`std_errors`・LR・対数尤度・AIC/BIC・カテゴリ別確率・（E6を含めるなら）限界効果。statsmodelsの`log`増分尺度の共分散はデルタ法で`τ`の尺度へ変換して比べる | 左のとおり | 未決 |
 | F3 | 許容誤差 | 既定`RTOL=1e-8`。最適化器の許容誤差の差で`polr`は`~1e-6`ずれうる（Probitの`glm`の前例）。再fitで消す手順を使うか | 実測してから`tests/support/_tolerances_nonlinear.py`に例外を足す | 未決 |
 | F4 | 合成データ | `generate_ordered_choice_dataset(scenario, link)`を`benchmark/nonlinear/datasets.py`に足す。シナリオ候補: `baseline`（`K=4`）・`k3`（最小）・`k30`（最大）・`near_separation`・`sparse_category`（少数セル）・相関の強い`x`・`no_x`相当（B7次第）・`cluster`・`large_means` | 候補を確認してから決める | 未決 |
@@ -271,3 +271,35 @@
 6. **pickle・`copy`**: `*Fitted`が`categories`と閾値・係数・共分散を持つ（列名が復元でも同じになる）。
 
 **限界・注意**: `n×K`の辞書は`K`本の`list[float]`なので、`n=10⁶`・`K=5`でメモリは`predict()`5回分（Series化の検討と同じ課題。`K`の上限30なら30本）。この形は、2章の公開形（`predict()`は`list[float]`）の「データで決まるキーは`dict`」を拡張して使うもので、ユーザーの承認を得た（返り値が`list[float]`ではなくなるため）。実装時にCLAUDE.md 2章・`docs/spec/inference-conventions.md`6章の記述を、順序モデルの`predict()`を含む形に更新する。
+
+## 9. F1の最終案（リファレンスと許容誤差）
+
+**実測**（合成データ`n=2000`・`K=4`・`k=3`・40クラスター、logitとprobit。本実装の式はPythonプロトタイプの解析スコア・解析Hessianで計算）:
+
+| `cov_type` | 本実装の式 | statsmodels（`newton`）との最大相対差 | R（`polr`＋`sandwich`）の対応する呼び出しと最大相対差 |
+|---|---|---|---|
+| `classical` | `H⁻¹` | 1.7e-7 | `vcov(polr)`: 1.6e-7 |
+| `hc0` | `H⁻¹(ΣsᵢsᵢT)H⁻¹` | 3.5e-7 | `sandwich()`: 3.4e-7 |
+| `hc1` | `hc0`×`n/(n-k)`（`k`は総パラメータ数） | **1.5e-3**（statsmodelsの`HC1`は`HC0`と同値で補正が無い） | `sandwich(adjust=TRUE)`: 3.4e-7 |
+| `opg` | `(ΣsᵢsᵢT)⁻¹` | 無し（`cov_type`に無い） | `vcovOPG()`: **5.9e-10** |
+| `cluster` | `G/(G-1)·(n-1)/(n-k)·H⁻¹(ΣS_gS_gT)H⁻¹` | 4.4e-7（**補正式も一致**） | `vcovCL(type="HC1", cadjust=TRUE)`: 4.1e-7（`type="HC0"`は`(n-1)/(n-k)`を含まず1.3e-3ずれる） |
+
+- 約1e-7の差は、statsmodels・`polr`ともにHessianが数値微分であることによる（statsmodelsと`polr`の`classical`の差も2.7e-7）。Hessianを使わない`opg`は1e-9以下で一致する。
+- **訂正**: 1章F1の調査時に「`cluster`の補正はstatsmodelsと異なり、Rの`cadjust=TRUE`が本実装と同じ」と書いたのは誤り。statsmodelsの`cluster`は本実装と同じ式で、Rは`type="HC1"`を指定したときに一致する。
+- 点推定・対数尤度は、statsmodels（`newton`）・`polr`（`reltol=1e-15`）とも約1e-9で一致（1章F1）。
+
+**決定（確定）**:
+
+| 比べる量 | 主リファレンス | 交差検証 | 許容誤差 |
+|---|---|---|---|
+| `params`（`β`・`τ`）・対数尤度・LR・AIC/BIC・擬似R² | statsmodels（`method="newton"`。既定の`nm`は使わない） | `polr`（`reltol`を締める） | `RTOL=1e-8`（既存の基本） |
+| カテゴリ別確率（`predict()`）・`pred_table()` | statsmodels（`predict()`・`pred_table()`） | `polr`の`predict(type="probs")` | 確率は`1e-8`、`pred_table()`は整数で完全一致 |
+| SE・`z`・p値・信頼区間（`classical`・`hc0`・`cluster`） | statsmodels | `polr`＋`sandwich`（`cluster`は`vcovCL(type="HC1", cadjust=TRUE)`） | 参照実装間の実測の差から決める（今回の1データで最大4.4e-7。全シナリオで測り、最大値に余裕を持たせた名前付きの値を`tests/support/_tolerances_nonlinear.py`に置く） |
+| SE等（`hc1`） | R`sandwich(adjust=TRUE)`（statsmodelsは補正が無いので使わない） | 無し（`hc0`×`n/(n-k)`の関係をstatsmodelsの`hc0`で確かめる） | 同上 |
+| SE等（`opg`） | R`vcovOPG()` | 無し | Hessianを使わないので`1e-8`級で比べられる見込み（全シナリオで確認） |
+| 限界効果（E6） | R`marginaleffects::avg_slopes(polr)`（statsmodelsに`get_margeff`が無い） | 無し（カテゴリ方向の和が0の不変条件を併用） | E6の設計で決める |
+
+- 閾値は名前ではなく位置で対応づける。statsmodelsの閾値（`τ₁`と`log`増分）と共分散は、ベンチマークのアダプタで直接の`τ`にデルタ法で直してから比べる。
+- **自前実装のオラクルは参照にしない**（ユーザーの方針: 実装者と同じ理解を共有するので客観性が弱い）。使うのは、参照実装同士が食い違ったときにどちらが真値に近いかを確かめる補助に限る。
+- Probitの前例（Rの`glm()`の既定`vcov`が非正準リンクで期待情報行列になるため、R側で観測情報行列を解析式で組んだ）は、順序モデルでは不要。`polr`の`vcov`は最適化の数値Hessian（観測情報行列）なので種類は一致し、差は数値微分の誤差だけ。
+- `nonlinear-common.md`8章（順序モデルの主リファレンスを`MASS::polr`としている）は、`docs/spec/`への集約時にこの表に合わせて直す。

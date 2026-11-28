@@ -157,6 +157,24 @@ UNREACHABLE_CODES: dict[str, str] = {
         "分離の判定の線形計画が数値的に完了しないときだけ。病的なデータでないと"
         "起きず、再現できる入力が作れない"
     ),
+    # 順序モデル（OrderedLogit/OrderedProbit）の検査。engineには実装済みだが、
+    # Pythonの推定量クラスが無いので、まだ送出する経路が無い。推定量クラスを
+    # 足したら`MIGRATED_CODES`へ移す。
+    ErrorCode.OUTCOME_NOT_INTEGER: (
+        "順序モデルの推定量クラスが無く、Pythonから送出する経路がまだ無い"
+    ),
+    ErrorCode.OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE: (
+        "順序モデルの推定量クラスが無く、Pythonから送出する経路がまだ無い"
+    ),
+    ErrorCode.OUTCOME_CATEGORIES_NOT_CONSECUTIVE: (
+        "順序モデルの推定量クラスが無く、Pythonから送出する経路がまだ無い"
+    ),
+    ErrorCode.CUTPOINT_NAME_COLLISION: (
+        "順序モデルの推定量クラスが無く、Pythonから送出する経路がまだ無い"
+    ),
+    ErrorCode.REGRESSOR_CONSTANT_WITH_CUTPOINTS: (
+        "順序モデルの推定量クラスが無く、Pythonから送出する経路がまだ無い"
+    ),
 }
 
 

@@ -188,6 +188,53 @@ pub enum MleError {
     /// `detail`は原因（開発者向け。利用者に見せるメッセージには含めない）。
     #[error("{}", self.catalog_message())]
     SeparationCheckFailed { detail: String },
+
+    /// カテゴリの`y`（順序モデル）: 値が整数でない行がある（最初の1行）。`f64`で正確に表せる
+    /// 整数（絶対値`2^53`以下）だけを整数とみなし、それを超える値も同じエラーにする
+    /// （隣り合う整数を区別できず、カテゴリの数も連続性も判定できないため）。
+    #[error("{}", self.catalog_message())]
+    OutcomeNotInteger {
+        /// 被説明変数の列名。
+        column: String,
+        row: usize,
+        value: f64,
+    },
+
+    /// カテゴリの`y`: 異なる値の数が手法の範囲（`min_categories..=max_categories`）の外。
+    /// 値が1種類（定数の`y`）は対象外で、手法横断の`OutcomeConstant`に任せる。
+    #[error("{}", self.catalog_message())]
+    OutcomeCategoryCountOutOfRange {
+        /// 被説明変数の列名。
+        column: String,
+        n_categories: usize,
+        min_categories: usize,
+        max_categories: usize,
+    },
+
+    /// 順序モデルの`y`: カテゴリのコードが連続していない（欠番がある）。欠番を自動で詰めないのは、
+    /// 空のカテゴリ（データの誤りの可能性）を隠し、閾値の名前が利用者のコードとずれるため。
+    #[error("{}", self.catalog_message())]
+    OutcomeCategoriesNotConsecutive {
+        /// 被説明変数の列名。
+        column: String,
+        /// 欠けている最小のコード。
+        missing: i64,
+        lowest: i64,
+        highest: i64,
+    },
+
+    /// 順序モデル: `x`の列名が閾値の名前（隣り合う2つのコードを`|`でつないだもの）と同じ。
+    /// 閾値の名前は`y`のコードで決まるので、衝突した`x`の列名（`x`の並びで最初のもの）を返す。
+    #[error("{}", self.catalog_message())]
+    CutpointNameCollision {
+        /// 衝突した`x`の列名。
+        column: String,
+    },
+
+    /// 順序モデル: `x`に（丸め誤差の範囲で）定数の列がある。閾値が常に切片の役割をするので、
+    /// 定数列は常に推定できない（FEの`RegressorConstant`と同じ構造）。該当する列を全て、`x`の並び順で持つ。
+    #[error("{}", self.catalog_message())]
+    RegressorConstantWithCutpoints { columns: Vec<String> },
 }
 
 impl ErrorInfo for MleError {
@@ -266,6 +313,50 @@ impl ErrorInfo for MleError {
                 ErrorReport::new(ErrorCode::NoUncensoredObservations)
                     .param("lower", *lower)
                     .param("upper", *upper)
+            }
+            Self::OutcomeNotInteger { column, row, value } => {
+                ErrorReport::new(ErrorCode::OutcomeNotInteger)
+                    .param("column", column.as_str())
+                    .param("argument", "y")
+                    .param("data_argument", "data")
+                    .param("row", *row)
+                    .param("value", *value)
+            }
+            Self::OutcomeCategoryCountOutOfRange {
+                column,
+                n_categories,
+                min_categories,
+                max_categories,
+            } => ErrorReport::new(ErrorCode::OutcomeCategoryCountOutOfRange)
+                .param("column", column.as_str())
+                .param("argument", "y")
+                .param("data_argument", "data")
+                .param("n_categories", *n_categories)
+                .param("min_categories", *min_categories)
+                .param("max_categories", *max_categories),
+            Self::OutcomeCategoriesNotConsecutive {
+                column,
+                missing,
+                lowest,
+                highest,
+            } => ErrorReport::new(ErrorCode::OutcomeCategoriesNotConsecutive)
+                .param("column", column.as_str())
+                .param("argument", "y")
+                .param("data_argument", "data")
+                .param("missing", *missing)
+                .param("lowest", *lowest)
+                .param("highest", *highest),
+            Self::CutpointNameCollision { column } => {
+                ErrorReport::new(ErrorCode::CutpointNameCollision)
+                    .param("column", column.as_str())
+                    .param("argument", "x")
+                    .param("data_argument", "data")
+            }
+            Self::RegressorConstantWithCutpoints { columns } => {
+                ErrorReport::new(ErrorCode::RegressorConstantWithCutpoints)
+                    .param("argument", "x")
+                    .param("data_argument", "data")
+                    .param("columns", columns.clone())
             }
         }
     }
@@ -439,6 +530,49 @@ mod tests {
                 },
                 ErrorCode::NoUncensoredObservations,
                 "No observation lies strictly between the censoring bounds (lower=0.0, upper=1.0), so the model cannot be identified.",
+            ),
+            (
+                MleError::OutcomeNotInteger {
+                    column: "y".to_string(),
+                    row: 2,
+                    value: 1.5,
+                },
+                ErrorCode::OutcomeNotInteger,
+                "The outcome at row 2 (0-based) of column 'y' (given as y) in data must be a whole number that codes a category, got 1.5.",
+            ),
+            (
+                MleError::OutcomeCategoryCountOutOfRange {
+                    column: "y".to_string(),
+                    n_categories: 2,
+                    min_categories: 3,
+                    max_categories: 30,
+                },
+                ErrorCode::OutcomeCategoryCountOutOfRange,
+                "Column 'y' (given as y) in data has 2 distinct values, but this model needs from 3 to 30 categories.",
+            ),
+            (
+                MleError::OutcomeCategoriesNotConsecutive {
+                    column: "y".to_string(),
+                    missing: -1,
+                    lowest: -2,
+                    highest: 1,
+                },
+                ErrorCode::OutcomeCategoriesNotConsecutive,
+                "The categories in column 'y' (given as y) in data must be consecutive integers from -2 to 1, but -1 does not occur.",
+            ),
+            (
+                MleError::CutpointNameCollision {
+                    column: "1|2".to_string(),
+                },
+                ErrorCode::CutpointNameCollision,
+                "Column '1|2' (given as x) in data has the same name as a cutpoint, which the result names after the 2 categories it separates.",
+            ),
+            (
+                MleError::RegressorConstantWithCutpoints {
+                    columns: vec!["c".to_string(), "d".to_string()],
+                },
+                ErrorCode::RegressorConstantWithCutpoints,
+                "These columns of x in data have the same value in every row up to rounding, so they are collinear with the cutpoints, which take the place of an intercept: 'c', 'd'.",
             ),
         ];
         for (err, code, message) in cases {

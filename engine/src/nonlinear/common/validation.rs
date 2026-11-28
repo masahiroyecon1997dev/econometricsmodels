@@ -1,4 +1,7 @@
-//! `fit()`冒頭の入力検証（`y`の値・`max_iter`・`tol`・`confidence_level`・観測数・クラスター数）。
+//! `fit()`冒頭の入力検証（`y`の値・`max_iter`・`tol`・`confidence_level`・観測数・クラスター数、
+//! 順序モデルのカテゴリ・閾値の名前・定数列）。
+
+use std::collections::BTreeSet;
 
 use faer::Mat;
 
@@ -57,6 +60,187 @@ pub(crate) fn validate_outcome_not_constant(
         .into());
     }
     Ok(())
+}
+
+/// `f64`で隣り合う整数を区別できる絶対値の上限（`2^53`）。これを超える値は整数とみなさない。
+const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
+
+/// コードの範囲（最大−最小）がこれ未満なら、異なる値をフラグの配列で数える（通常の経路。
+/// 順序モデルの上限30カテゴリを十分に含む）。超えるときは集合で数える（カテゴリの数が範囲外か
+/// 欠番があるので、エラーの経路でだけ通る）。
+const DENSE_RANGE_LIMIT: u64 = 1024;
+
+/// カテゴリの`y`（順序モデル・多項モデル）を検査し、異なるコードを昇順で返す。
+///
+/// 1. 値が整数か（`f64`で正確に表せる、絶対値`2^53`以下）。最初に違反した行を
+///    `MleError::OutcomeNotInteger`で返す。非有限値は`engine_pybind`が先に弾くが、ここでも同じエラーになる。
+/// 2. 異なる値の数が`min_categories..=max_categories`か（`MleError::OutcomeCategoryCountOutOfRange`）。
+///    値が1種類以下のときは数の検査をしない: 定数の`y`は手法横断の`OutcomeConstant`
+///    （観測数・クラスター数の検査の後）、空の`y`は観測数の検査に任せる。定数かは返り値の長さが1かで
+///    判定する（`validate_outcome_not_constant`の相対閾値は`n·ε·max|y|`なので、コードの絶対値が大きいと
+///    3カテゴリ以上ある整数の`y`も定数とみなしうる）。
+///
+/// 欠番の検査は[`validate_consecutive_categories`]に分けてある（順序モデルは続けて呼ぶ。多項モデルで
+/// 欠番を許すかは、そのモデルで決める）。行ごとのカテゴリの番号は返さない: コードが連続なら
+/// `y - lowest`で求まり、`n`の長さの配列を増やさずに済む。
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "順序モデルのfitが呼ぶまで未使用")
+)]
+pub(crate) fn validate_categorical_y(
+    y: &Mat<f64>,
+    dep_var_name: &str,
+    min_categories: usize,
+    max_categories: usize,
+) -> Result<Vec<i64>, MleError> {
+    for i in 0..y.nrows() {
+        let value = *y.get(i, 0);
+        // NaN・無限大は`fract()`がNaNになり、ここで弾かれる。
+        if value.fract() != 0.0 || value.abs() > MAX_EXACT_INTEGER {
+            return Err(MleError::OutcomeNotInteger {
+                column: dep_var_name.to_string(),
+                row: i,
+                value,
+            });
+        }
+    }
+    // 絶対値`2^53`以下の整数なので`i64`へ正確に変換できる。
+    let categories = distinct_sorted((0..y.nrows()).map(|i| *y.get(i, 0) as i64));
+    let n_categories = categories.len();
+    if n_categories > 1 && !(min_categories..=max_categories).contains(&n_categories) {
+        return Err(MleError::OutcomeCategoryCountOutOfRange {
+            column: dep_var_name.to_string(),
+            n_categories,
+            min_categories,
+            max_categories,
+        });
+    }
+    Ok(categories)
+}
+
+/// 異なる値を昇順で返す（`codes`を2回走査し、値を配列に集めない）。
+fn distinct_sorted<I>(codes: I) -> Vec<i64>
+where
+    I: Iterator<Item = i64> + Clone,
+{
+    let Some((lowest, highest)) =
+        codes
+            .clone()
+            .fold(None, |acc: Option<(i64, i64)>, code| match acc {
+                None => Some((code, code)),
+                Some((lo, hi)) => Some((lo.min(code), hi.max(code))),
+            })
+    else {
+        return Vec::new();
+    };
+    // 両端とも絶対値`2^53`以下なので、差は`2^54`以下で`u64`に収まる。
+    let range = highest.abs_diff(lowest);
+    if range < DENSE_RANGE_LIMIT {
+        let mut seen = vec![false; (range + 1) as usize];
+        for code in codes {
+            seen[code.abs_diff(lowest) as usize] = true;
+        }
+        seen.iter()
+            .zip(lowest..)
+            .filter_map(|(&present, code)| present.then_some(code))
+            .collect()
+    } else {
+        codes.collect::<BTreeSet<i64>>().into_iter().collect()
+    }
+}
+
+/// 昇順のカテゴリのコード（[`validate_categorical_y`]の返り値）が連続した整数でなければ、
+/// 欠けている最小のコードを`MleError::OutcomeCategoriesNotConsecutive`で返す（順序モデル）。
+/// 欠番を自動で詰めないのは、空のカテゴリ（データの誤りの可能性）を隠し、閾値の名前が利用者の
+/// コードとずれるため。
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "順序モデルのfitが呼ぶまで未使用")
+)]
+pub(crate) fn validate_consecutive_categories(
+    categories: &[i64],
+    dep_var_name: &str,
+) -> Result<(), MleError> {
+    let gap = categories.windows(2).find(|pair| pair[1] - pair[0] != 1);
+    match (gap, categories.first(), categories.last()) {
+        (Some(pair), Some(&lowest), Some(&highest)) => {
+            Err(MleError::OutcomeCategoriesNotConsecutive {
+                column: dep_var_name.to_string(),
+                missing: pair[0] + 1,
+                lowest,
+                highest,
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
+/// 順序モデルの閾値の名前。隣り合う2つのコードを`|`でつなぐ（`"1|2"`。`MASS::polr`と同じ形）。
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "順序モデルのfitが呼ぶまで未使用")
+)]
+pub(crate) fn cutpoint_names(categories: &[i64]) -> Vec<String> {
+    categories
+        .windows(2)
+        .map(|pair| format!("{}|{}", pair[0], pair[1]))
+        .collect()
+}
+
+/// `x`の列名が閾値の名前（[`cutpoint_names`]）と同じなら、`x`の並びで最初の列を
+/// `MleError::CutpointNameCollision`で返す（結果の`params`のキーが衝突するため）。
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "順序モデルのfitが呼ぶまで未使用")
+)]
+pub(crate) fn validate_no_cutpoint_name_collision(
+    x_names: &[String],
+    cutpoint_names: &[String],
+) -> Result<(), MleError> {
+    match x_names.iter().find(|name| cutpoint_names.contains(name)) {
+        Some(name) => Err(MleError::CutpointNameCollision {
+            column: name.clone(),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// `x`に（丸め誤差の範囲で）定数の列があれば、該当する列を全て`x`の並び順で
+/// `MleError::RegressorConstantWithCutpoints`で返す（順序モデル。閾値が常に切片の役割をするので、
+/// 定数列は推定できない）。判定は定数の`y`・FEの定数列と同じ[`has_no_variation`]。
+///
+/// ランクチェック（中心化した`x`の列ピボットQR）の前に呼ぶ。中心化すると定数列はゼロ列になり、
+/// `DESIGN_MATRIX_SINGULAR`の報告では原因（閾値と共線）が分からないため。
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "順序モデルのfitが呼ぶまで未使用")
+)]
+pub(crate) fn validate_no_constant_regressors(
+    x: &Mat<f64>,
+    x_names: &[String],
+) -> Result<(), MleError> {
+    assert_eq!(
+        x_names.len(),
+        x.ncols(),
+        "x_names must have one entry per column of x"
+    );
+    let columns: Vec<String> = x_names
+        .iter()
+        .enumerate()
+        .filter(|&(j, _)| match x.col(j).try_as_col_major() {
+            Some(column) => has_no_variation(column.as_slice()),
+            None => {
+                let column: Vec<f64> = (0..x.nrows()).map(|i| *x.get(i, j)).collect();
+                has_no_variation(&column)
+            }
+        })
+        .map(|(_, name)| name.clone())
+        .collect();
+    if columns.is_empty() {
+        Ok(())
+    } else {
+        Err(MleError::RegressorConstantWithCutpoints { columns })
+    }
 }
 
 /// `max_iter`が`MAX_ITER_MIN..=MAX_ITER_LIMIT`の範囲外の場合にエラーを返す。
@@ -455,5 +639,150 @@ mod tests {
         );
         let varying = Mat::from_fn(3, 1, |i, _| [0.0, 1.0, 0.0][i]);
         assert_eq!(validate_outcome_not_constant(&varying, "y", true), Ok(()));
+    }
+
+    fn column(values: &[f64]) -> Mat<f64> {
+        Mat::from_fn(values.len(), 1, |i, _| values[i])
+    }
+
+    fn names(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| v.to_string()).collect()
+    }
+
+    #[test]
+    fn validate_categorical_y_returns_the_sorted_codes_including_negative_ones() {
+        let y = column(&[1.0, -2.0, 0.0, -1.0, 1.0, -0.0]);
+        assert_eq!(
+            validate_categorical_y(&y, "y", 3, 30),
+            Ok(vec![-2, -1, 0, 1])
+        );
+        // 範囲が広いコードも同じ結果（集合で数える経路）。
+        let y = column(&[5000.0, -5000.0, 0.0]);
+        assert_eq!(
+            validate_categorical_y(&y, "y", 3, 30),
+            Ok(vec![-5000, 0, 5000])
+        );
+    }
+
+    #[test]
+    fn validate_categorical_y_reports_the_first_non_integer_row() {
+        for bad in [1.5, f64::NAN, f64::INFINITY, 2.0 * MAX_EXACT_INTEGER] {
+            let y = column(&[1.0, 2.0, bad, 0.5]);
+            let err = validate_categorical_y(&y, "rating", 3, 30).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    MleError::OutcomeNotInteger { ref column, row: 2, value }
+                        if column == "rating" && (value == bad || (value.is_nan() && bad.is_nan()))
+                ),
+                "{bad}: {err:?}"
+            );
+        }
+        // 絶対値`2^53`ちょうどは整数として受け付ける。
+        let y = column(&[
+            MAX_EXACT_INTEGER,
+            MAX_EXACT_INTEGER - 1.0,
+            MAX_EXACT_INTEGER - 2.0,
+        ]);
+        assert!(validate_categorical_y(&y, "y", 3, 30).is_ok());
+    }
+
+    #[test]
+    fn validate_categorical_y_checks_the_number_of_distinct_values() {
+        let out_of_range = |values: &[f64], n_categories: usize| {
+            assert_eq!(
+                validate_categorical_y(&column(values), "y", 3, 4),
+                Err(MleError::OutcomeCategoryCountOutOfRange {
+                    column: "y".to_string(),
+                    n_categories,
+                    min_categories: 3,
+                    max_categories: 4,
+                })
+            );
+        };
+        // `{1, 3}`は欠番より先にカテゴリ数（2）で報告する。
+        out_of_range(&[1.0, 3.0, 1.0], 2);
+        out_of_range(&[0.0, 1.0, 2.0, 3.0, 4.0], 5);
+        assert_eq!(
+            validate_categorical_y(&column(&[0.0, 1.0, 2.0, 3.0]), "y", 3, 4),
+            Ok(vec![0, 1, 2, 3])
+        );
+        // 値が1種類（定数の`y`）・空の`y`は数の検査をしない（`OutcomeConstant`・観測数の検査に任せる）。
+        assert_eq!(
+            validate_categorical_y(&column(&[2.0; 4]), "y", 3, 4),
+            Ok(vec![2])
+        );
+        assert_eq!(validate_categorical_y(&column(&[]), "y", 3, 4), Ok(vec![]));
+    }
+
+    #[test]
+    fn validate_consecutive_categories_reports_the_smallest_missing_code() {
+        assert_eq!(validate_consecutive_categories(&[-1, 0, 1, 2], "y"), Ok(()));
+        assert_eq!(validate_consecutive_categories(&[7], "y"), Ok(()));
+        assert_eq!(
+            validate_consecutive_categories(&[-3, -1, 2], "y"),
+            Err(MleError::OutcomeCategoriesNotConsecutive {
+                column: "y".to_string(),
+                missing: -2,
+                lowest: -3,
+                highest: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn cutpoint_names_join_adjacent_codes_and_collisions_report_the_first_x_column() {
+        let cutpoints = cutpoint_names(&[-1, 0, 1]);
+        assert_eq!(cutpoints, names(&["-1|0", "0|1"]));
+        assert_eq!(
+            validate_no_cutpoint_name_collision(&names(&["x1", "1|2"]), &cutpoints),
+            Ok(())
+        );
+        assert_eq!(
+            validate_no_cutpoint_name_collision(&names(&["x1", "0|1", "-1|0"]), &cutpoints),
+            Err(MleError::CutpointNameCollision {
+                column: "0|1".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn validate_no_constant_regressors_reports_every_constant_column_in_order() {
+        // 0.1+0.2と0.3（1 ulp違い）は定数とみなす（定数の`y`と同じ相対閾値）。
+        let values = [
+            [1.0, 5.0, 0.1 + 0.2, 0.0],
+            [2.0, 5.0, 0.3, 1e-12],
+            [3.0, 5.0, 0.3, 2e-12],
+        ];
+        let x = Mat::from_fn(3, 4, |i, j| values[i][j]);
+        assert_eq!(
+            validate_no_constant_regressors(&x, &names(&["a", "b", "c", "d"])),
+            Err(MleError::RegressorConstantWithCutpoints {
+                columns: names(&["b", "c"])
+            })
+        );
+        let x = Mat::from_fn(3, 2, |i, j| values[i][[0, 3][j]]);
+        assert_eq!(
+            validate_no_constant_regressors(&x, &names(&["a", "d"])),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn distinct_sorted_agrees_on_both_sides_of_the_dense_range_limit() {
+        // 範囲（最大−最小）が`DENSE_RANGE_LIMIT`未満なら配列、以上なら集合で数える。
+        let limit = DENSE_RANGE_LIMIT as i64;
+        for highest in [limit - 1, limit, limit + 1] {
+            let codes = [highest, 0, 7, highest, 0];
+            assert_eq!(distinct_sorted(codes.into_iter()), vec![0, 7, highest]);
+        }
+        assert_eq!(distinct_sorted(std::iter::empty()), Vec::<i64>::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "x_names must have one entry per column of x")]
+    fn validate_no_constant_regressors_panics_when_names_and_columns_disagree() {
+        let x = Mat::from_fn(3, 2, |i, j| (i + j) as f64);
+        let _ = validate_no_constant_regressors(&x, &names(&["a"]));
     }
 }

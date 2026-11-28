@@ -4,7 +4,7 @@ use faer::Mat;
 use std::collections::HashSet;
 
 use super::SeparationVerdict;
-use super::rows::SignedRows;
+use super::rows::{SeparationRows, SignedRows};
 use crate::nonlinear::common::{ColumnScale, MleError};
 use crate::shared::linear_program::{BoxBoundedLp, LinearProgramSolver};
 
@@ -36,8 +36,15 @@ pub(super) fn detect_separation<S: LinearProgramSolver>(
     y: &Mat<f64>,
     solver: &S,
 ) -> Result<SeparationVerdict, MleError> {
-    let rows = SignedRows::new(x, scale, y);
-    if lp_finds_separation(&rows, solver)? {
+    detect_separation_in_rows(&SignedRows::new(x, scale, y), solver)
+}
+
+/// 制約の行（2値・順序モデル）から分離の有無を判定する。
+pub(super) fn detect_separation_in_rows<R: SeparationRows, S: LinearProgramSolver>(
+    rows: &R,
+    solver: &S,
+) -> Result<SeparationVerdict, MleError> {
+    if lp_finds_separation(rows, solver)? {
         Ok(SeparationVerdict::Separated)
     } else {
         Ok(SeparationVerdict::NotSeparated)
@@ -51,8 +58,8 @@ fn numerical_failure(detail: &str) -> MleError {
 }
 
 /// 制約生成でLPを解き、分離がある（解の最大マージンが閾値超）かを返す。
-fn lp_finds_separation<S: LinearProgramSolver>(
-    rows: &SignedRows<'_>,
+fn lp_finds_separation<R: SeparationRows, S: LinearProgramSolver>(
+    rows: &R,
     solver: &S,
 ) -> Result<bool, MleError> {
     let c = rows.objective();
@@ -149,19 +156,6 @@ mod tests {
 
     fn is_separated(x: &Mat<f64>, y: &Mat<f64>) -> bool {
         verdict(x, y, true) == SeparationVerdict::Separated
-    }
-
-    /// 簡易な線形合同法（テストの再現性のため外部の乱数に依存しない）。
-    struct Lcg(u64);
-
-    impl Lcg {
-        fn next_unit(&mut self) -> f64 {
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            ((self.0 >> 11) as f64) / ((1u64 << 53) as f64) * 2.0 - 1.0
-        }
     }
 
     /// `k`変数の連続変数（切片込みで`k+1`列）で、`y = 1[Σxⱼ > 0]`の完全分離データ。
@@ -306,8 +300,9 @@ mod tests {
 
     #[test]
     fn handles_many_regressors_without_numerical_failure() {
-        // 変数が多いと単体法が退化して失敗した（Bland規則のみの旧実装でk>=10）。
-        for k in [10, 20, 30] {
+        // 変数が多いと単体法が退化して失敗した（Bland規則のみの旧実装でk>=10）。順序モデルの
+        // 変数（傾き＋閾値、カテゴリ数の上限30で約50）まで確かめる。
+        for k in [10, 20, 30, 40, 50] {
             for seed in 1..=3 {
                 let (x, y) = complete_separation_data(2000, k, seed);
                 assert!(
@@ -364,8 +359,9 @@ mod tests {
     /// ピボット上限に達していた（`shared/linear_program.rs`の`RATIO_TIE_TOLERANCE`）。
     #[test]
     fn does_not_fail_on_mixed_scale_data_without_separation() {
-        // `k=10`は列の組み合わせで通ることがあり判別力が弱いので、`k>=14`だけを見る。
-        for k in [14, 20, 24] {
+        // `k=10`は列の組み合わせで通ることがあり判別力が弱いので、`k>=14`だけを見る。変数が
+        // 約50になる順序モデルに備えて`k=48`まで見る。
+        for k in [14, 20, 24, 36, 48] {
             for seed in 1..=4 {
                 let (x, y) = mixed_scale_overlapping_data(3000, k, seed);
                 let (_, scale) = standardize_columns(&x, true);

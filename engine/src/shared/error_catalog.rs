@@ -79,6 +79,11 @@ pub enum ErrorCode {
     CensoringBoundNotFinite,
     OutcomeOutsideCensoringBounds,
     NoUncensoredObservations,
+    OutcomeNotInteger,
+    OutcomeCategoryCountOutOfRange,
+    OutcomeCategoriesNotConsecutive,
+    CutpointNameCollision,
+    RegressorConstantWithCutpoints,
     InsufficientInstruments,
     InsufficientObservationsForFirstStage,
     GmmWeightClusterCountTooSmall,
@@ -167,6 +172,11 @@ impl ErrorCode {
         Self::CensoringBoundNotFinite,
         Self::OutcomeOutsideCensoringBounds,
         Self::NoUncensoredObservations,
+        Self::OutcomeNotInteger,
+        Self::OutcomeCategoryCountOutOfRange,
+        Self::OutcomeCategoriesNotConsecutive,
+        Self::CutpointNameCollision,
+        Self::RegressorConstantWithCutpoints,
         Self::InsufficientInstruments,
         Self::InsufficientObservationsForFirstStage,
         Self::GmmWeightClusterCountTooSmall,
@@ -258,6 +268,11 @@ impl ErrorCode {
             Self::CensoringBoundNotFinite => "CENSORING_BOUND_NOT_FINITE",
             Self::OutcomeOutsideCensoringBounds => "OUTCOME_OUTSIDE_CENSORING_BOUNDS",
             Self::NoUncensoredObservations => "NO_UNCENSORED_OBSERVATIONS",
+            Self::OutcomeNotInteger => "OUTCOME_NOT_INTEGER",
+            Self::OutcomeCategoryCountOutOfRange => "OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE",
+            Self::OutcomeCategoriesNotConsecutive => "OUTCOME_CATEGORIES_NOT_CONSECUTIVE",
+            Self::CutpointNameCollision => "CUTPOINT_NAME_COLLISION",
+            Self::RegressorConstantWithCutpoints => "REGRESSOR_CONSTANT_WITH_CUTPOINTS",
             Self::InsufficientInstruments => "INSUFFICIENT_INSTRUMENTS",
             Self::InsufficientObservationsForFirstStage => {
                 "INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE"
@@ -2120,6 +2135,168 @@ pub static CATALOG: &[ErrorSpec] = &[
         ],
         message: r#"No observation lies strictly between the censoring bounds (lower={lower}, upper={upper}), so the model cannot be identified."#,
         hint: Some(r#"Check the bounds: at least one y must be strictly between them."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::OutcomeNotInteger,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "row",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "value",
+                ty: ParamType::Float,
+                in_text: true,
+            },
+        ],
+        message: r#"The outcome at row {row} (0-based) of column '{column}' (given as {argument}) in {data_argument} must be a whole number that codes a category, got {value}."#,
+        hint: Some(r#"Code the categories as integers."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::OutcomeCategoryCountOutOfRange,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "n_categories",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "min_categories",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "max_categories",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+        ],
+        message: r#"Column '{column}' (given as {argument}) in {data_argument} has {n_categories} distinct values, but this model needs from {min_categories} to {max_categories} categories."#,
+        hint: Some(
+            r#"Use Logit or Probit for an outcome with 2 categories, or combine categories so that at most {max_categories} remain."#,
+        ),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::OutcomeCategoriesNotConsecutive,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "missing",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "lowest",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "highest",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+        ],
+        message: r#"The categories in column '{column}' (given as {argument}) in {data_argument} must be consecutive integers from {lowest} to {highest}, but {missing} does not occur."#,
+        hint: Some(r#"Code the outcome as consecutive integers."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::CutpointNameCollision,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"Column '{column}' (given as {argument}) in {data_argument} has the same name as a cutpoint, which the result names after the 2 categories it separates."#,
+        hint: Some(r#"Rename the column."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::RegressorConstantWithCutpoints,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "columns",
+                ty: ParamType::ColumnList,
+                in_text: true,
+            },
+        ],
+        message: r#"These columns of {argument} in {data_argument} have the same value in every row up to rounding, so they are collinear with the cutpoints, which take the place of an intercept: {columns}."#,
+        hint: Some(r#"Remove these columns from {argument}."#),
         stage_allowed: false,
     },
     ErrorSpec {

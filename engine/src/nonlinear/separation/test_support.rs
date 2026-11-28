@@ -37,3 +37,17 @@ impl LinearProgramSolver for FailingSolver {
         Err(LpError::IterationLimit { pivots: 1 })
     }
 }
+
+/// 簡易な線形合同法（テストの再現性のため外部の乱数に依存しない）。
+pub(super) struct Lcg(pub(super) u64);
+
+impl Lcg {
+    /// `[-1, 1)`の一様乱数。
+    pub(super) fn next_unit(&mut self) -> f64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((self.0 >> 11) as f64) / ((1u64 << 53) as f64) * 2.0 - 1.0
+    }
+}

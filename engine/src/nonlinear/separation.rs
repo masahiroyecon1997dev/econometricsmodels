@@ -1,4 +1,4 @@
-//! Logit/Probitの完全分離・準完全分離（(quasi-)complete separation）の検出。
+//! Logit/Probitと順序モデル（OrderedLogit/OrderedProbit）の完全分離・準完全分離（(quasi-)complete separation）の検出。
 //!
 //! ある`θ`について全観測で`zᵢ'θ ≥ 0`（`zᵢ = (2yᵢ-1)xᵢ`）かつどれかが厳密に正になるなら、
 //! `θ`の方向へ係数を大きくするほど対数尤度が増え続けるため、有限の最尤推定量は存在しない
@@ -27,11 +27,13 @@
 //!
 //! # ファイル構成
 //!
-//! このファイルは分離チェックの入口（`SeparationVerdict`・`verify_no_separation`とそのソルバー注入版）だけを持つ。
+//! このファイルは分離チェックの入口（`SeparationVerdict`・`verify_no_separation`とそのソルバー注入版・
+//! `verify_no_ordered_separation`・両者が共有する`raise_on_non_convergence`の扱い）だけを持つ。
 //! LPの判定と行の生成は子モジュールに置き、テストは各ロジックと同じファイルの`mod tests`に置く。
 //!
-//! - `lp.rs`: 制約生成によるLPの判定（`detect_separation`・閾値）
-//! - `rows.rs`: LPに渡す符号付きの行（`SignedRows`）
+//! - `lp.rs`: 制約生成によるLPの判定（`detect_separation`・行から判定する`detect_separation_in_rows`・閾値）
+//! - `rows.rs`: LPが行に求める操作（`SeparationRows`）と、2値モデルの符号付きの行（`SignedRows`）
+//! - `ordered.rs`: 順序モデルの行（`OrderedRows`）。条件の導出はそのモジュールdoc
 //! - `test_support.rs`: 複数ファイルのテストが共有するフィクスチャ（`#[cfg(test)]`）
 
 use faer::Mat;
@@ -40,11 +42,13 @@ use crate::nonlinear::common::{ColumnScale, MleError};
 use crate::shared::linear_program::{DenseSimplex, LinearProgramSolver};
 
 mod lp;
+mod ordered;
 mod rows;
 #[cfg(test)]
 mod test_support;
 
-use lp::detect_separation;
+use lp::{detect_separation, detect_separation_in_rows};
+use ordered::OrderedRows;
 
 /// 分離の有無。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +100,46 @@ fn verify_with_solver<S: LinearProgramSolver>(
     if !converged {
         return Ok(false);
     }
-    match detect_separation(x, scale, y, solver) {
+    apply_raise_policy(
+        detect_separation(x, scale, y, solver),
+        raise_on_non_convergence,
+    )
+}
+
+/// 順序モデルの収束後の分離チェック（[`verify_no_separation`]と同じ契約）。`x`は標準化前の
+/// 説明変数（切片の列は無い）、`means`・`stds`は`x`の列の平均・標準偏差（正）、`categories`は`y`の
+/// カテゴリのコード（連続、昇順）。行は中心化・標準化した`x`から都度計算する。**`fit()`が最適化で
+/// 平均を引くかどうかによらず、`means`には列の平均を渡す**（LPの閾値の較正と、平均の大きい列での
+/// 条件の良さのため。`ordered.rs`のモジュールdoc。前提もそこに書いてある）。
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "順序モデルのfitが呼ぶまで未使用")
+)]
+pub(crate) fn verify_no_ordered_separation(
+    x: &Mat<f64>,
+    means: &[f64],
+    stds: &[f64],
+    y: &Mat<f64>,
+    categories: &[i64],
+    converged: bool,
+    raise_on_non_convergence: bool,
+) -> Result<bool, MleError> {
+    if !converged {
+        return Ok(false);
+    }
+    let rows = OrderedRows::new(x, means, stds, y, categories);
+    apply_raise_policy(
+        detect_separation_in_rows(&rows, &DenseSimplex),
+        raise_on_non_convergence,
+    )
+}
+
+/// 分離の判定結果を、`raise_on_non_convergence`に従ってチェック後の`converged`かエラーにする。
+fn apply_raise_policy(
+    verdict: Result<SeparationVerdict, MleError>,
+    raise_on_non_convergence: bool,
+) -> Result<bool, MleError> {
+    match verdict {
         Ok(SeparationVerdict::NotSeparated) => Ok(true),
         Ok(SeparationVerdict::Separated) if raise_on_non_convergence => {
             Err(MleError::SeparationDetected)
@@ -142,6 +185,25 @@ mod tests {
         let err = verify_no_separation(&x, &scale, &y, true, true).unwrap_err();
         assert_eq!(err, MleError::SeparationDetected);
         assert!(!verify_no_separation(&x, &scale, &y, true, false).unwrap());
+    }
+
+    #[test]
+    fn verify_no_ordered_separation_follows_the_same_contract() {
+        // カテゴリが`x`の順に並ぶ（分離）・カテゴリが重なる（分離なし）。
+        let x = Mat::from_fn(6, 1, |i, _| [-2.0, -1.0, 0.0, 0.5, 1.0, 2.0][i]);
+        let (means, stds) = ([0.0], [1.0]);
+        let separated = response(&[1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+        let overlapping = response(&[1.0, 2.0, 3.0, 1.0, 3.0, 2.0]);
+        let check = |y: &Mat<f64>, converged: bool, raise: bool| {
+            verify_no_ordered_separation(&x, &means, &stds, y, &[1, 2, 3], converged, raise)
+        };
+        assert_eq!(
+            check(&separated, true, true),
+            Err(MleError::SeparationDetected)
+        );
+        assert_eq!(check(&separated, true, false), Ok(false));
+        assert_eq!(check(&separated, false, true), Ok(false));
+        assert_eq!(check(&overlapping, true, true), Ok(true));
     }
 
     #[test]

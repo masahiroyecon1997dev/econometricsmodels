@@ -198,6 +198,9 @@
 **リスク・限界**:
 
 - **自前の`DenseSimplex`の次元**: 変数は`k+K-1`個で、`K`が上限30・`k`が20なら約50。既存のテストは`k=30`まで。右辺0の錐は原点で強く退化し、`k≥10`・混合スケールで過去に破綻した（`engine/src/nonlinear/CLAUDE.md`）ので、**最初の実装タスクで`lp.rs`の回帰テストを変数50個まで広げて確かめる**。足りなければ、既存のフォールバック（`SeparationCheckFailed`）で止まる。
+  **確認済み（2026-11-28）**: 2値の回帰テストを`k=40・50`（切片込みで変数51個）、混合スケールを`k=36・48`まで広げて通った。順序モデルの行でも
+  `k=20`・`K=30`（変数49個、ダミーを足して50個）で、分離なし・最上位だけのダミー・線形結合の順に30等分した`y`（最悪の形）を正しく判定する。
+  最悪の形は作業集合が約800行・12〜13ラウンド（上限2000行の範囲内、releaseで1件約0.7秒）。分離なしのデータは約190行・3ラウンド。
 - 実験のLPはHiGHSで、`DenseSimplex`ではない。マージンの閾値`1e-6`・摂動`1e-11`との相互作用は未検証。
 - 大標本でのコストは未計測（行は端のカテゴリで1行、中間で2行になるので2値の最大2倍の走査）。2値の実測は`n=10⁶`で約68ms。
 - 「分離なしで有限のMLEが存在する」ことは、中心化後の`x`が列フルランクのときに限る（C3）。
@@ -363,7 +366,11 @@
 
 ### 11.2 新しい`code`（案）
 
-文面は実装時に`docs/spec/error-style-guide.md`のチェックリストで仕上げる。下の英文は方向を示す下書き。
+**確定（2026-11-28、実装済み）**: 名前は表のとおり。文面はカタログ（`error_catalog.rs`）が正本で、下の下書きから次を変えた。
+`OUTCOME_NOT_INTEGER`・`OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE`は多項ロジットが同じ`code`を使えるよう「ordered」と書かない
+（「codes a category」「this model needs from {min_categories} to {max_categories} categories」）。`hint`は1文・先頭の動詞の規則に
+合わせた（`Code the categories as integers.`・`Use Logit or Probit for an outcome with 2 categories, or combine categories so that at most
+{max_categories} remain.`・`Code the outcome as consecutive integers.`）。範囲（`2^53`）は文面に書かない。
 
 | `code` | クラス | `params` | 文面（下書き） | `hint`（下書き） |
 |---|---|---|---|---|
@@ -371,7 +378,7 @@
 | `OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE` | Validation | 三つ組・`n_categories`・`min_categories`・`max_categories` | Column '{column}' (given as {argument}) in {data_argument} has {n_categories} distinct values, but an ordered model needs between {min_categories} and {max_categories} categories. | With two categories, use Logit or Probit; with more than the maximum, merge adjacent categories. |
 | `OUTCOME_CATEGORIES_NOT_CONSECUTIVE` | Validation | 三つ組・`missing`・`lowest`・`highest` | The categories in column '{column}' (given as {argument}) in {data_argument} must be consecutive integers from {lowest} to {highest}, but {missing} does not occur. | Recode the outcome so that the observed values are consecutive integers. |
 | `CUTPOINT_NAME_COLLISION` | Validation | 三つ組（`column`は衝突した`x`の列） | Column '{column}' of {argument} in {data_argument} has the same name as a cutpoint, which the result names after the two adjacent categories. | Rename the column. |
-| `REGRESSOR_CONSTANT_WITH_CUTPOINTS`（名前は要検討） | Validation | `argument`・`data_argument`・`columns`（該当列を全て、5.3章） | These columns of {argument} in {data_argument} have the same value in every row up to rounding, so they are collinear with the cutpoints, which take the place of an intercept: {columns}. | Remove these columns from {argument}. |
+| `REGRESSOR_CONSTANT_WITH_CUTPOINTS` | Validation | `argument`・`data_argument`・`columns`（該当列を全て、5.3章） | These columns of {argument} in {data_argument} have the same value in every row up to rounding, so they are collinear with the cutpoints, which take the place of an intercept: {columns}. | Remove these columns from {argument}. |
 
 - `OUTCOME_NOT_INTEGER`の「整数」は、`f64`で正確に表せる範囲（絶対値`2^53`以下）に限る。それを超える値は連続性も判定できないので同じ`code`にする（文面に範囲を書くかは実装時に決める）。
 - 欠番を自動で詰めない理由: `{1, 2, 4}`を黙って`1..3`に直すと、空のカテゴリ（データの誤りの可能性）を隠し、閾値の名前・`categories`も利用者のコードとずれる。
@@ -433,7 +440,10 @@
 1. **作業場所**: `/workspaces/econometricsmodels`の`release/v0.11.0`。並行する別作業の未コミットの変更がありうるので、コミットは自分のファイルだけをステージする。署名のたびにホスト端末で確認が出る（`.claude/rules/commit-signing.md`）。
 2. **読むもの**: 本ノートの1〜11章（特に1章の表、6章、11章）。`engine/src/nonlinear/CLAUDE.md`（自動で読まれる）。`docs/spec/error-handling.md`の3.1・4・5.2〜5.4章と`docs/spec/error-style-guide.md`。
 3. **既存実装の調査**（CLAUDE.md 4章。Exploreエージェントに委ねる）: `nonlinear/common/validation.rs`（`validate_binary_y`・`validate_fit_preconditions`・`validate_outcome_not_constant`）、`nonlinear/separation.rs`・`separation/lp.rs`・`separation/rows.rs`、`shared/linear_program.rs`（`BoxBoundedLp`・`DenseSimplex`）、FEの定数列の検査（`panel/common/validation.rs`の`RegressorConstant`）、`shared/error_catalog.rs`へのエラーの足し方（`.claude/rules/rust-style.md`のエラーハンドリング節の手順1〜5）。
-4. **計画**: `/implement-rust`で計画を立て、着手前に次の未決事項をユーザーに確認する（CLAUDE.md 14章）。
+4. **計画**: `/implement-rust`で計画を立て、着手前に次の未決事項をユーザーに確認する（CLAUDE.md 14章）。**確定（2026-11-28）**:
+   名前は`REGRESSOR_CONSTANT_WITH_CUTPOINTS`、文面は11.2のとおり（中立の文面）。新しい`code`は`UNREACHABLE_CODES`に一時登録。
+   `validate_categorical_y(y, dep_var_name, min, max) -> Vec<i64>`（整数・カテゴリ数。値が1種類以下は数の検査をしない）と
+   `validate_consecutive_categories`（欠番）の2関数に分け、行ごとのカテゴリ番号は返さない（`fit`が`y - lowest`で求める）。
    - 新しい`code`の最終的な名前（特に`REGRESSOR_CONSTANT_WITH_CUTPOINTS`は仮）と文面（`error-style-guide.md`のチェックリスト）。
    - 新しい`code`をPythonから送出できるのはOrderedLogitのバインディングの後なので、それまで`tests/support/_errors.py`の`UNREACHABLE_CODES`に理由つきで登録する（`tests/cross_method/test_error_catalog.py`がカタログの全`code`の登録を検査する）。この進め方でよいか。
    - `validate_categorical_y`の返り値（コードの一覧・最小値等）と、多項ロジットが後で再利用できる引数の形。
@@ -442,6 +452,19 @@
    - 分離のLPの単体テスト: 最上位カテゴリだけに現れるダミー（分離）・最下位だけ（分離）・1観測を隣のカテゴリに足したもの（分離なし）。ランダムな小標本でLPとMLEの存在の一致を見る試験は、`fit`ができる段階（OrderedLogit）で足す。
    - 新しい`code`を足したら、`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`、`maturin develop`の後に`python tools/render_error_catalog.py`（`docs/guide/error-codes.md`と`error_codes.py`を生成し直す）。
 6. **確認**: `cargo test -p engine`・`cargo clippy --all-targets -- -D warnings`・`cargo fmt --check`、`pytest tests/cross_method`（カタログ・検査順の検査）。コミット前に`/review-rust`。
+
+### 12.2.1 共通基盤の実装後、OrderedLogitで配線するときの注意
+
+- 共通基盤の関数（`validate_categorical_y`・`validate_consecutive_categories`・`cutpoint_names`・
+  `validate_no_cutpoint_name_collision`・`validate_no_constant_regressors`・`verify_no_ordered_separation`）は
+  `#[cfg_attr(not(test), expect(dead_code, ...))]`付き。`fit`から呼んだらビルドが失敗するので、属性を外し`common.rs`で再エクスポートする。
+- 定数の`y`は`categories.len() == 1`で判定し、`CommonError::OutcomeConstant`を返す（11.4の位置）。`validate_outcome_not_constant`の
+  相対閾値（`n·ε·max|y|`）は、コードの絶対値が大きいと（例: `n=10^6`で`{1e10, 1e10+1, 1e10+2}`）3カテゴリ以上の`y`も定数とみなす。
+  `error-handling.md`5.4章の「判定は`has_no_variation`の1か所」に順序モデルの例外として書き足す。
+- 空の`y`では`categories`が空。`y`の検査は観測数より先なので、`K-1`を先に計算すると`usize`の下位あふれになる（`k + K - 1`の順か`saturating_sub`）。
+- `verify_no_ordered_separation`の`means`には、`fit`が最適化で平均を引くか（C2）によらず列の平均を渡す。
+- 分離のLPは1ラウンドに長さ`3n`の一時領域を確保する（2値は`n`）。`n=10^6`のコストを性能比較（F6）で計る。
+- `OUTCOME_*`等の新しい`code`を`UNREACHABLE_CODES`から`MIGRATED_CODES`へ移す（バインディングの後）。
 
 ### 12.3 プロトタイプについて
 

@@ -652,6 +652,33 @@ error.rs`）:
   `momentfit`の設定は`run_momentfit.R`と同じ（HACの`bw`はラグ数+1・`adjust=FALSE`、クラスターは`cadjust=FALSE`、HAC/クラスターの重みは`vcov()`から作って明示的に渡す、classicalの`S`は非中心化の`σ̂²`を自前で組む）。
   実測の最大相対差はlinearmodels等との照合で合成データ約1e-12以下・`card`で8.2e-12（許容は1e-10）、Rとの照合で合成データ1e-12以下・`card`で1.0e-11（許容は1e-10）。2SLSは対応する重みの`IVGMM`で照合する。
 
+### 3.10 engine_pybind: 構成・報告順・結果の組み立て
+
+- **構成**: `IVOptions`/`IVResult`/`build_iv_input`/`fit`は`engine_pybind/src/iv/common/`に責務ごとのファイル（`options`・`option_values`・
+  `gmm_setup`・`input`・`result`・`fit`・`error`・`diagnostics`）で置き、2SLS/GMMの手法ごとには分けない（`fit_iv`が`estimator`で
+  振り分けるので、系統内で共有するロジックとして`common`に置く）。`cov_type`の値は`linear::common::parse_cov_kind`、列は
+  `resolve_cov_type`でOLS/WLSと型・文面を揃える。組合せの検査はGMMのオプションを持つので自前の`check_iv_options`。
+- **報告順**: DataFrameを見ない検査（`parse_iv_option_values`: `estimator`→`cov_type`→`gmm_type`→`gmm_weight_type`の値。
+  `check_iv_options`: 使われないオプション→必須の`hac_time`の欠落（`cov_type`が先、`gmm_weight_type`が後））→役割（`x_endog`・
+  `instruments`が空でない→役割間の重複→役割内の重複→`"const"`の衝突）→`y`/`x_exog`/`x_endog`/`instruments`の列→オプションの列
+  （`cov_type`は`resolve_cov_type`、GMMの重みは`resolve_gmm_setup`）。重みの列も`build_iv_input`で抽出し、`BuiltIvInput`の
+  `plan`（`IvPlan`）で`fit`に渡す。`gmm_type`・`gmm_weight_type`の未知の値は、使われるかによらず値の検査で報告する。
+  `gmm_max_iter`は`i64`のままengineに渡し、負値も含めた範囲と`gmm_tol`はengineが`confidence_level`の次に検査する。
+  `tests/cross_method/test_validation_order.py`が固定する。`fit_frame`は、構造方程式の検査（`validate_iv_fit_inputs`）を
+  `compute_first_stage`より前に呼ぶ（1.1節）。
+- **GMMの重みの列**: `gmm_weight_type="hac"`も`hac_time`が必須（`require_hac_time`。文面は要求している設定名を示す）。
+  `cluster`・`hac_lags`・`hac_time`は`cov_type`と共用し、`IVOptions`に別フィールドを足さない（`cov_type`と重みで別の
+  クラスター列が要るニーズが出たら別フィールドを検討する）。`resolve_weight_type`は`WeightType`を組み立てるので
+  `resolve_cov_type`とは独立の実装。
+- **結果の組み立て**: `fit.rs`の`build_result`が一度だけ行う。2SLSとGMMで同じ値は`IvEstimate`から、推定量ごとに違う値
+  （収束・反復、GMMの設定、Waldの分布、過剰識別検定、Wu-Hausman）は`EstimatorSpecific`（`Default`なしで全フィールド必須）
+  から詰める。`IVResult`にフィールドを足すときはどちらに足すかを選び、両分岐の書き漏れはコンパイラが検出する。正規形の
+  文字列（`cov_type`・`estimator`・`gmm_type`・`gmm_weight_type`）は`name()`から作り、小文字化し直さない。
+- **`first_stage()`**: 第一段階の`OlsEstimator`は`compute_first_stage_with`で`ols_estimator_to_result`により`OLSResult`へ変えて
+  すぐ手放し、`first_stage()`は`clone_ref`で複製して返す（推定量そのものは保持しない）。2SLSの第一段階の二重計算（3.7節）を
+  なくすなら`TwoSlsEstimator`に第一段階の結果を外から渡す`fit`の変種を足す案があるが、着手前に確認する。GMMの
+  Wu-Hausmanには、この第一段階の`OLSResult`の残差を借用で渡す（3.6節）。
+
 ## 4. テスト
 
 - **Python主リファレンス**: `linearmodels`（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。

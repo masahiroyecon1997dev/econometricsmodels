@@ -812,7 +812,7 @@ def test_weight_type_is_case_insensitive(
     すること（`engine_pybind`側の`parse_iv_option_values`と対になる、Python API
     境界での確認。数値照合は`test_iv_gmm_reference.py`）。`cluster`/`hac`は
     `cov_type`と同じ`cluster`フィールドと`hac_lags`フィールドを共用する仕様
-    （`engine_pybind/src/iv/CLAUDE.md`参照）。
+    （`docs/spec/iv-spec.md`3.10節参照）。
     """
     df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (

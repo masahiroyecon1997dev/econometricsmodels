@@ -33,16 +33,16 @@
 
 | # | 論点 | 選択肢 | 推奨案 | 状態 |
 |---|---|---|---|---|
-| B1 | `y`で受け付けるdtypeと順序の与え方 | (a) 数値（整数・浮動小数点・`Boolean`は不可）で、値が整数のもの。順序は整数コードの大小／(b) さらに`Enum`・`Categorical`の順序をそのまま使う | (a)。`accepted-data.md`の「数値の役割」の表と整合し、Issueの「連続整数コード」とも一致。`Enum`対応は将来拡張。`Boolean`は2値なので`K<3`で弾かれる | 未決 |
-| B2 | コードの開始値 | 任意の開始値を許す（`1..K`も`0..K-1`も可）／`0`始まり固定 | 任意。連続（欠番なし）だけを要求する。結果にコードの一覧を持つ | 未決 |
-| B3 | カテゴリ数`K`の範囲 | 3以上30以下（Issue）。`K=2`は`Logit`/`Probit`へ誘導するエラー | Issueどおり。上限30の根拠（閾値が増えると計算量・識別の悪化）を仕様に書く。`K<3`・`K>30`は別の`code`にするか1つの`code`（`params`に`min`/`max`）か | 未決 |
-| B4 | 値が整数でない`y`（`1.5`等）・欠番の扱いとエラー | 新しい`code`を足す。既存の`OUTCOME_NOT_BINARY`は流用しない（文面・`hint`が異なる）。候補: `OUTCOME_NOT_INTEGER_CODES`・`OUTCOME_CODES_NOT_CONSECUTIVE`・`OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE`。`column`・`row`・`value`の三つ組（直近の`OUTCOME_CONSTANT`の変更と同じ規則）を付ける | `docs/spec/error-style-guide.md`に沿って`code`の名前と`params`を決める | 未決 |
-| B5 | 観測が少ないカテゴリの扱い | 観測0（欠番）はエラー。観測1件のカテゴリ等を警告・エラーにするか | 欠番のみエラー。少数セルは弾かない（分離・非収束の問題として扱う。C5参照） | 未決 |
-| B6 | `x`の定数列 | 閾値と識別できないので、定数列を含む`x`は明示的にエラーにする（statsmodelsも拒否する）。`"const"`列衝突検証は不要 | 専用の`code`を足すか既存の定数列/共線性の`code`で足りるか確認。ランクチェックは中心化後の設計行列で行うため、定数列は「ゼロ列」として見えることに注意 | 未決 |
+| B1 | `y`で受け付けるdtypeと順序の与え方 | (a)数値で値が整数のもの。順序は整数コードの大小／(b)`Enum`・`Categorical`の順序も使う | (a)。`accepted-data.md`の数値の役割のdtype（整数・浮動小数点・`Boolean`・`Decimal`）をそのまま使い、値が整数かはengineが検査する。`Boolean`は2カテゴリなのでカテゴリ数の検査で弾かれる。`Enum`対応は将来拡張。11章 | **確定**: 11章 |
+| B2 | コードの開始値 | 任意の開始値を許す／`0`始まり固定 | 任意（負の値も可）。連続であることだけを要求し、結果に`categories`を持つ。11章 | **確定**: 11章 |
+| B3 | カテゴリ数`K`の範囲 | 3以上30以下（Issue）。`K=2`は`Logit`/`Probit`へ誘導 | 3以上30以下。新しい`code`は1つ（下限・上限を分けない規約）で、`hint`で`K=2`の誘導と30超の統合を両方示す。値が1種類（定数の`y`）は手法横断の`OUTCOME_CONSTANT`に任せる。11章 | **確定**: 11章 |
+| B4 | 値が整数でない`y`・欠番の扱いとエラー | 新しい`code`を足す | `OUTCOME_NOT_INTEGER`（最初の行の三つ組＋`row`・`value`）と`OUTCOME_CATEGORIES_NOT_CONSECUTIVE`（三つ組＋欠けた最小のコード・最小・最大）。欠番を自動で詰めない（空のカテゴリを隠すため）。11章 | **確定**: 11章 |
+| B5 | 観測が少ないカテゴリの扱い | 欠番（観測0）はエラー。観測1件のカテゴリ等を弾くか | 欠番だけをエラーにし、少数セルは弾かない（分離・非収束としてC5の検出に任せる）。`sparse_category`・`beauty`で検証（F4） | **確定**: 11章 |
+| B6 | `x`の定数列 | (a)ランクチェックに任せる（`DESIGN_MATRIX_SINGULAR`、`ComputationError`）／(b)専用の`code`（`ValidationError`）で先に弾く／(c)FEの`REGRESSOR_CONSTANT`の文面を一般化して再利用 | **(b)**。入力だけで分かる（3.1章の分類）、statsmodelsのように定数列を足す利用者の誤りが多い、FEの前例（固定効果が吸収する定数列を専用の`code`で先に弾く）と同じ構造。既存の`REGRESSOR_CONSTANT`は文面がFE専用（固定効果と共線）で、`params`に英語の句を入れられないので流用できない。ダミー変数の罠などの残りの共線性は`DESIGN_MATRIX_SINGULAR`（暗黙の定数を除いた列を報告）。11章 | **確定**: 11章 |
 | B7 | `x`が空（`x=[]`）のモデル（閾値のみ） | 許す／`NoRegressors`で弾く（Logit/Probitの`k==0`と同じ） | 許す案: 帰無モデルそのもので、閉形式（周辺累積比率）で解ける。ただし`df_model=0`でLR検定・擬似R²が定義できず、結果の組み立て・限界効果が特殊になる。**弾く**案が実装は単純 | **確定**: 弾く。Logit/Probit/OLSは既に`x=[]`を`ValidationError`で弾いており（`x must contain at least one column name`）、それに揃える。帰無モデルの対数尤度は内部で閉形式で使う |
-| B8 | 検証の順序 | `fit()`冒頭の検証順（y型→カテゴリ→観測数→クラスター等）。`tests/cross_method/test_validation_order.py`に足す | 既存の順序（`validate_fit_preconditions`）に合わせて決める | 未決 |
-| B9 | 観測数の下限 | `n <= k_x + (K-1)`（総パラメータ数）で`InsufficientObservations` | 総パラメータ数。`k`の意味をdocコメントに明記 | 未決 |
-| B10 | `y`の定数 | `K<3`の検査が先に効くため`OUTCOME_CONSTANT`の対象外になる | 確認のみ（検査順の回帰テストを足す） | 未決 |
+| B8 | 検証の順序 | `fit()`冒頭の検証順 | 11章の順序（設定値 → `y`の形 → 観測数・クラスター数 → 定数の`y` → 定数列 → 特異行列 → 最適化 → 分離）。`test_validation_order.py`の`FAULTS`に足す | **確定**: 11章 |
+| B9 | 観測数の下限 | `n <= k + (K-1)`（総パラメータ数）で`InsufficientObservations` | 既存の`INSUFFICIENT_OBSERVATIONS`を再利用（`n_params=k+K-1`、`min_obs=n_params+1`）。11章 | **確定**: 11章 |
+| B10 | `y`の定数 | `OUTCOME_CONSTANT`かカテゴリ数のエラーか | `OUTCOME_CONSTANT`（`error-handling.md`5.4章の手法横断の表に揃える。閾値が切片の役割をするので「切片あり」の扱い）。カテゴリ数の検査は値が1種類のときは対象外にする。11章 | **確定**: 11章 |
 
 ### C. 推定（尤度・パラメータ化・最適化）
 
@@ -351,3 +351,68 @@
 - その他の候補（不採用）: `loanapp.action`（承認・条件変更・却下。順序の解釈に議論の余地がある）、`alcohol.status`・`injury.injtype`・`discrim.chain`（名義尺度）、`apple.hhsize`等（個数）。
 
 **決定（確定）**: 実データは`happiness`（全`cov_type`、`cluster`は`region`）と`beauty`（`cluster`以外の全`cov_type`、`belavg`入りは分離のエラーパス）。`affairs`は予備（中くらいの`n`と小さいカテゴリの組み合わせが必要になったら足す）。Wooldridgeのデータは固定化の対象外なので、既存と同じく`load_wooldridge.py`経由で読み、`happy`の数値化と欠損行の除外はローダー側で行う。
+
+## 11. B節の検討結果（入力の検証とエラー）
+
+### 11.1 既存の規約から決まること
+
+- `y`の値の問題（`OUTCOME_*`）は、`y`の列を三つ組（`column`・`argument`・`data_argument`）で特定する（`error_catalog.rs`のテストが`OUTCOME_`で始まる`code`に要求する）。行を持つものは`row`（0始まり）・`value`も持つ。
+- 範囲違反は対象ごとに1つの`code`で、下限・上限の側は分けない。しきい値は計算済みの値で`params`に渡す。`params`に英語の句は入れない。
+- 入力を見るだけで分かる問題は`ValidationError`、数値ルーチンが要る問題は`ComputationError`（`error-handling.md`3.1章）。
+- 定数の`y`は手法横断で`OUTCOME_CONSTANT`（5.4章）。
+
+### 11.2 新しい`code`（案）
+
+文面は実装時に`docs/spec/error-style-guide.md`のチェックリストで仕上げる。下の英文は方向を示す下書き。
+
+| `code` | クラス | `params` | 文面（下書き） | `hint`（下書き） |
+|---|---|---|---|---|
+| `OUTCOME_NOT_INTEGER` | Validation | `column`・`argument`・`data_argument`・`row`・`value` | The outcome at row {row} (0-based) of column '{column}' (given as {argument}) in {data_argument} must be a whole number that codes an ordered category, got {value}. | Code the categories as integers, from the lowest category to the highest. |
+| `OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE` | Validation | 三つ組・`n_categories`・`min_categories`・`max_categories` | Column '{column}' (given as {argument}) in {data_argument} has {n_categories} distinct values, but an ordered model needs between {min_categories} and {max_categories} categories. | With two categories, use Logit or Probit; with more than the maximum, merge adjacent categories. |
+| `OUTCOME_CATEGORIES_NOT_CONSECUTIVE` | Validation | 三つ組・`missing`・`lowest`・`highest` | The categories in column '{column}' (given as {argument}) in {data_argument} must be consecutive integers from {lowest} to {highest}, but {missing} does not occur. | Recode the outcome so that the observed values are consecutive integers. |
+| `CUTPOINT_NAME_COLLISION` | Validation | 三つ組（`column`は衝突した`x`の列） | Column '{column}' of {argument} in {data_argument} has the same name as a cutpoint, which the result names after the two adjacent categories. | Rename the column. |
+| `REGRESSOR_CONSTANT_WITH_CUTPOINTS`（名前は要検討） | Validation | `argument`・`data_argument`・`columns`（該当列を全て、5.3章） | These columns of {argument} in {data_argument} have the same value in every row up to rounding, so they are collinear with the cutpoints, which take the place of an intercept: {columns}. | Remove these columns from {argument}. |
+
+- `OUTCOME_NOT_INTEGER`の「整数」は、`f64`で正確に表せる範囲（絶対値`2^53`以下）に限る。それを超える値は連続性も判定できないので同じ`code`にする（文面に範囲を書くかは実装時に決める）。
+- 欠番を自動で詰めない理由: `{1, 2, 4}`を黙って`1..3`に直すと、空のカテゴリ（データの誤りの可能性）を隠し、閾値の名前・`categories`も利用者のコードとずれる。
+- `CUTPOINT_NAME_COLLISION`: 閾値の名前は`y`のコードから決まるので、静的に検査できるTobitの`"sigma"`（`TOBIT_SIGMA_NAME_COLLISION`、`params`なし）と違い、衝突した列名を`column`で返す。`column`を持つので三つ組にする。
+- 定数列の`code`: FEの`REGRESSOR_CONSTANT`と同じ形（`columns`で全列）だが、文面が「固定効果と共線」でFE専用のため別の`code`にする。名前は`REGRESSOR_CONSTANT`系で「閾値と共線」を表すもの（`REGRESSOR_CONSTANT_WITH_CUTPOINTS`は仮）。判定は`has_no_variation`（定数の`y`・FEと同じ相対閾値）。
+- **既存の手法での定数列の扱い（実測）と、順序モデルが専用の`code`を持つ理由**:
+
+  | 手法 | `x`に定数列`c` | 結果 |
+  |---|---|---|
+  | OLS・Logit（`include_intercept=True`） | 明示の切片`const`と共線 | `DESIGN_MATRIX_SINGULAR`（`ComputationError`）、`columns=['const', 'c']` |
+  | OLS・Logit（`include_intercept=False`） | `c`が切片の役割をする | 通常どおり推定（エラーではない） |
+  | IV・RE（切片あり） | 同上 | `DESIGN_MATRIX_SINGULAR`（`stage`つき）、`columns=['const', 'c']` |
+  | FE | 固定効果が吸収する | `REGRESSOR_CONSTANT`（`ValidationError`）、`columns=['c']` |
+
+  線形モデル（とLogit等）では、定数列そのものは不正な入力ではない（切片なしなら正当な定数項）。切片との**組み合わせ**で共線になり、ランクチェックが相手の`const`を名指しして報告する。順序モデルは、閾値が常に切片の役割をして外せない（`include_intercept`が無い）ので、定数列は**常に**推定できない。共線の相手は列ではなく閾値なので、ランクチェックでは`columns=['c']`だけになり原因が分からない。これはFEと同じ状況（相手が列ではない・常に推定できない）なので、FEに揃えて専用の`ValidationError`にする。クラスがOLS（`ComputationError`）とFE（`ValidationError`）で違うのは既存の分け方で、「入力だけで常に不正と分かるか」の違いによる（OLSの定数列は切片の有無次第で正当）。
+- 再利用する既存の`code`: `INSUFFICIENT_OBSERVATIONS`（`n_params=k+K-1`）、`INSUFFICIENT_CLUSTERS_FOR_INFERENCE`（`q=k`。閾値は傾きではない）、`OUTCOME_CONSTANT`、`DESIGN_MATRIX_SINGULAR`、`SEPARATION_DETECTED`・`SEPARATION_CHECK_FAILED`、`AUGMENT_COLUMN_EXISTS`、`ROLE_EMPTY`（`x=[]`、B7）。
+
+### 11.3 `DESIGN_MATRIX_SINGULAR`の列の報告
+
+順序モデルの設計行列に切片の列は無いが、閾値が切片の役割をする。ランクチェックは中心化した`x`で行い（C3）、報告する列は「暗黙の切片を加えた`[1|x]`で共線な列を探し、暗黙の切片を除いたもの」にする。ダミー変数の罠（`d1+d2=1`）は、OLS等で`[const, d1, d2]`と報告されるところ`[d1, d2]`になる。定数列は11.2の専用の`code`が先に弾くので、ここには来ない。`hint`の「切片と定数列」は順序モデルでは「閾値と定数列」と読み替えることになるので、`docs/guide/validation.md`に注記する。
+
+### 11.4 検査の順序
+
+`docs/guide/validation.md`のstep 1〜7（型・オプション・ロール・列の存在とdtype・欠損値）は既存の手法と同じ。step 8（engine）は次の順にする。
+
+1. `confidence_level` → `max_iter` → `tol`（MLE共通）
+2. `y`の形: `OUTCOME_NOT_INTEGER` → `OUTCOME_CATEGORY_COUNT_OUT_OF_RANGE`（異なる値の数で判定。1種類のときは対象外） → `OUTCOME_CATEGORIES_NOT_CONSECUTIVE` → `CUTPOINT_NAME_COLLISION`（コードが分かった後）
+3. `INSUFFICIENT_OBSERVATIONS`（`n ≤ k+K-1`） → `INSUFFICIENT_CLUSTERS_FOR_INFERENCE`（`G ≤ k`）
+4. `OUTCOME_CONSTANT`（値が1種類）
+5. 定数列（11.2）
+6. `DESIGN_MATRIX_SINGULAR`（中心化した`x`のランクチェック）
+7. 最適化（`NOT_CONVERGED`等） → 分離（`SEPARATION_DETECTED`・`SEPARATION_CHECK_FAILED`）
+
+- **カテゴリ数を欠番より先に調べる理由**: 異なる値の数はコードの付け方によらない。`{1, 3}`は欠番より「2カテゴリなのでLogit/Probitを使う」が役に立つ。欠番は付け直せば直る問題で、付け直しても数は変わらない。
+- **値が1種類のときにカテゴリ数の検査を外す理由**: 定数の`y`を手法横断で`OUTCOME_CONSTANT`にそろえる（`error-handling.md`5.4章。Logit/Probitも「`y`が許される形か → 観測数 → 定数の`y`」の順）。
+- **定数列を特異行列の前に置く理由**: 中心化すると定数列はゼロ列になり、`DESIGN_MATRIX_SINGULAR`の報告では原因（閾値と共線）が分からない。FEが固定効果の除去の前に`REGRESSOR_CONSTANT`を調べるのと同じ。
+
+### 11.5 更新する文書・テスト（実装時）
+
+- `docs/spec/error-handling.md`: 5.2章（step 8の`y`の形の項目に順序モデルを足す）、5.4章の表に順序モデルの行（「切片あり」の扱い）。
+- `docs/guide/validation.md`: Outcomeの節（整数・カテゴリ数・連続性・名前の衝突）、定数列、`DESIGN_MATRIX_SINGULAR`の注記、step 8の順序。
+- `docs/guide/accepted-data.md`: 順序モデルの`y`（整数コード、任意の開始値）。
+- `docs/guide/error-codes.md`: 生成物（`tools/render_error_catalog.py`）。
+- テスト: `tests/cross_method/test_validation_order.py`の`FAULTS`（新しい`code`の段階と順位）、`test_perfect_fit.py`（定数の`y`）、`tests/support/_errors.py`の`MIGRATED_CODES`。

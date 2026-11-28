@@ -13,7 +13,8 @@
 
 次のファイルは、そのディレクトリ配下のファイルを読み書きするときに、このファイルと一緒に自動ロードされる。ファサード（`two_sls.rs`・`gmm.rs`・`common.rs`）や、核を置いた`engine/src/shared/`のファイル（`gmm*.rs`・`weak_instruments.rs`・`kleibergen_paap.rs`・`effective_f.rs`等）を読むだけではロードされないので、それらを変えるときや、トピックをまたぐ変更では該当ファイルを明示的に読む。
 
-- `gmm/CLAUDE.md`: GMMの方式・収束判定・重み行列`S`・白色化した座標・サンドイッチ・`cov_type`の中心化と小標本補正、Hansen J・C統計量・GMMのWu-Hausmanの順序。
+- `gmm/CLAUDE.md`: Hansen J（`n`で割らない・`OneStep`と`Classical`の`S`）とGMMのWu-Hausmanの順序。
+- `.claude/rules/engine-gmm-core.md`（`gmm/`・`gmm.rs`と`engine/src/shared/gmm*.rs`・FE-GMMを読むとロードされる）: GMMの方式・収束判定・重み行列`S`・白色化した座標・サンドイッチ・`cov_type`の中心化と小標本補正・C統計量。
 - `common/CLAUDE.md`: 第一段階の`OlsInput`、弱操作変数の診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）、Wu-Hausman。
 
 ## 新しいIV系手法の`fit()`に入れるもの

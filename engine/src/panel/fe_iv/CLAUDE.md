@@ -1,6 +1,6 @@
 # engine/src/panel/fe_iv/ 実装ノート（FEIV。2SLSとGMM）
 
-このファイルは `engine/src/panel/fe_iv/` 配下のファイルを読み書きするときだけ自動ロードされる（親の`engine/src/panel/CLAUDE.md`も一緒にロードされる）。ファサードの`fe_iv.rs`を読むだけではロードされない（`fe_iv/two_sls.rs`・`fe_iv/gmm.rs`はこのディレクトリにあるのでロードされる）。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・実測は`docs/spec/fe-iv-spec.md`、定義式は`docs/methods/fe_iv.md`が正本。
+このファイルは `engine/src/panel/fe_iv/` 配下のファイルを読み書きするときだけ自動ロードされる（親の`engine/src/panel/CLAUDE.md`も一緒にロードされる）。ファサードの`fe_iv.rs`を読むだけではロードされない（`fe_iv/two_sls.rs`・`fe_iv/gmm.rs`はこのディレクトリにあるのでロードされる）。FE-GMMの`gmm.rs`・`gmm/`を読むと、IVのGMMと共有する核の罠（`.claude/rules/engine-gmm-core.md`）も一緒にロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・実測は`docs/spec/fe-iv-spec.md`、定義式は`docs/methods/fe_iv.md`が正本。
 
 **エントリの書式**: `**ルール（してはいけないこと）**: 理由を1〜2行。回帰ガード: テスト名。詳細: specの節`。実測値・調査の経緯・不採用案の詳細はspecに置き、ここには書かない。
 
